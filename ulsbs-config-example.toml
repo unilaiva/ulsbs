@@ -33,7 +33,7 @@
 # - shell: run only an interactive shell and do nothing else.
 # - deploy-last: perform only the "deploy last" step and do nothing else.
 # - deploy-common: perform only the "deploy common" step and do nothing else.
-# - pull: run "git pull --rebase" in the project root before doing anything else.
+# - pull: run "git pull --rebase ; git submodule update --init --recursive" in the project root before doing anything else.
 #   See cli.py for more information on CLI behaviors.
 #
 # Environment overrides (optional):
@@ -58,7 +58,7 @@
 
 # Execution
 shell = false                # SPECIAL MODE: only run shell, do nothing else
-pull = false                 # SPECIAL: run 'git pull --rebase' before anything else
+pull = false                 # SPECIAL: run 'git pull --rebase ; git submodule update --init --recursive' before anything else
 
 sequential = false           # if true, behaves like max-parallel = 1
 clean-temp = true            # remove temp data after run (alias: keep-temp = true -> clean-temp = false)
