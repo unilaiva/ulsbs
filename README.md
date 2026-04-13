@@ -13,8 +13,52 @@ It provides:
 ULSBS is intended to be used not only by the Unilaiva Songbook repository, but
 also by other songbook repositories or local songbook directories.
 
-If you are looking for the Unilaiva-specific project documentation, see
-[../README.md](../README.md).
+For a real-world example of a repository using ULSBS, see:
+
+- <https://github.com/unilaiva/unilaiva-songbook>
+
+...and for a songbook produced from that repository:
+
+- <https://unilaiva.aavalla.net>
+
+- [ULSBS](#ulsbs)
+  - [Status and compatibility](#status-and-compatibility)
+  - [Quick start](#quick-start)
+    - [Recommended setup: use ULSBS as a git submodule](#recommended-setup-use-ulsbs-as-a-git-submodule)
+    - [Use ULSBS with an arbitrary local songbook directory](#use-ulsbs-with-an-arbitrary-local-songbook-directory)
+    - [Use a pip-installed engine](#use-a-pip-installed-engine)
+  - [Minimal songbook project](#minimal-songbook-project)
+    - [Minimal main document](#minimal-main-document)
+    - [Minimal `ulsbs-config.toml`](#minimal-ulsbs-configtoml)
+  - [Compiling songbooks](#compiling-songbooks)
+    - [Main document filename conventions](#main-document-filename-conventions)
+    - [Output locations](#output-locations)
+  - [Requirements](#requirements)
+    - [Recommended: container build](#recommended-container-build)
+    - [Host build (`--no-container`)](#host-build---no-container)
+  - [Configuration](#configuration)
+  - [Writing songbooks](#writing-songbooks)
+    - [General structure](#general-structure)
+    - [`ulsbs-songbook` document class options](#ulsbs-songbook-document-class-options)
+    - [Preamble configuration after loading the class](#preamble-configuration-after-loading-the-class)
+    - [Page and line breaks](#page-and-line-breaks)
+    - [Repeats](#repeats)
+    - [Measure bars](#measure-bars)
+    - [Chords, melody hints, and beat marks inside `\[ ... ]`](#chords-melody-hints-and-beat-marks-inside---)
+    - [Full melodies with Lilypond](#full-melodies-with-lilypond)
+    - [Converting lyrics from Lilypond to songbook format](#converting-lyrics-from-lilypond-to-songbook-format)
+    - [Melody hints on the chord line](#melody-hints-on-the-chord-line)
+    - [Beat marks](#beat-marks)
+    - [Tags](#tags)
+    - [Extra variants](#extra-variants)
+    - [Creating song selections](#creating-song-selections)
+  - [Utilities](#utilities)
+    - [`ulsbs-book2json`](#ulsbs-book2json)
+    - [`ulsbs-midi2audio`](#ulsbs-midi2audio)
+    - [`ulsbs-ly2tex`](#ulsbs-ly2tex)
+  - [Editor support](#editor-support)
+  - [More information](#more-information)
+
 
 ## Status and compatibility
 
@@ -328,12 +372,14 @@ Some useful environment variables:
 
 ## Writing songbooks
 
-ULSBS is based on LaTeX, Lilypond, and the `songs` LaTeX package. ULSBS adds a
-songbook-oriented document class, styling, metadata handling, variants, helper
-macros, and build automation.
+ULSBS is based on LaTeX, Lilypond, and especially the `songs` LaTeX package by
+Kevin W. Hamlen. The `songs` package is a key part of ULSBS, not just a minor
+helper dependency: ULSBS builds on top of it extensively, extends it, and
+redefines parts of its behavior for songbook-oriented output, metadata,
+indexing, variants, and workflow automation.
 
-If you are new to the underlying `songs` package, it is worth reading its
-documentation too:
+If you are new to the underlying `songs` package, it is very much worth reading
+its documentation too:
 
 - bundled PDF: `misc/ext_package_songs_distribution/songs.pdf`
 - online: <https://songs.sourceforge.net/songsdoc/songs.html>
@@ -418,58 +464,36 @@ used like this:
 - `\showtagstrue`
 - `\showtagsfalse`
 
-Available toggle pairs are:
+Available toggle pairs are below. The default state from `ulsbs.sty` is shown
+for each one.
 
-- `\showextrue` / `\showexfalse`
-  - show extra song prelude info (`ex=`)
-- `\showofftrue` / `\showofffalse`
-  - show offered-to info (`off=`)
-- `\showkeytrue` / `\showkeyfalse`
-  - show the main musical key in song preludes
-- `\showgoodkeystrue` / `\showgoodkeysfalse`
-  - show good singing keys in song preludes
-- `\showphtrue` / `\showphfalse`
-  - show song phases in preludes
-- `\showphintoctrue` / `\showphintocfalse`
-  - show phases also in the TOC
-- `\showtagstrue` / `\showtagsfalse`
-  - show tags in preludes / tag index usage
-- `\shownotestrue` / `\shownotesfalse`
-  - show melody note hints
-- `\showbeatstrue` / `\showbeatsfalse`
-  - show beat marks
-- `\showauthtrue` / `\showauthfalse`
-  - show song authors in preludes
-- `\showlilypondtrue` / `\showlilypondfalse`
-  - show Lilypond notation blocks
-- `\showpassagetrue` / `\showpassagefalse`
-  - show `passage` environments
-- `\showexplanationtrue` / `\showexplanationfalse`
-  - show `explanation` environments
-- `\showtranslationtrue` / `\showtranslationfalse`
-  - show `translation` environments
-- `\showfeelertrue` / `\showfeelerfalse`
-  - show `feeler` environments
-- `\showaltchordstrue` / `\showaltchordsfalse`
-  - show alternate chord sets
-- `\showimageinchapternametrue` / `\showimageinchapternamefalse`
-  - include chapter symbol/image in TOC and headers
-- `\showimageonchapterfrontpagetrue` / `\showimageonchapterfrontpagefalse`
-  - show chapter image/symbol on chapter front pages
-- `\upcaselongchaptertitletrue` / `\upcaselongchaptertitlefalse`
-  - uppercase long chapter titles on chapter front pages
-- `\upcaseshortchaptertitletrue` / `\upcaseshortchaptertitlefalse`
-  - uppercase short chapter titles in TOC and headers
-- `\upcasesectiontitleinheadertrue` / `\upcasesectiontitleinheaderfalse`
-  - uppercase section titles in headers
-- `\upcasebooktitleinheadertrue` / `\upcasebooktitleinheaderfalse`
-  - uppercase the book title in headers
-- `\usechaptercolorstrue` / `\usechaptercolorsfalse`
-  - enable colored chapter corner marks
-- `\usealtmnstyletrue` / `\usealtmnstylefalse`
-  - swap normal and alternate melody-note styling
-- `\adjustchordcharstrue` / `\adjustchordcharsfalse`
-  - apply chord-character adjustments such as smaller raised parentheses
+| Toggle pair | Default | Meaning |
+|---|---:|---|
+| `\showextrue` / `\showexfalse` | `true` | show extra song prelude info (`ex=`) |
+| `\showofftrue` / `\showofffalse` | `true` | show offered-to info (`off=`) |
+| `\showkeytrue` / `\showkeyfalse` | `true` | show the main musical key in song preludes |
+| `\showgoodkeystrue` / `\showgoodkeysfalse` | `true` | show good singing keys in song preludes |
+| `\showphtrue` / `\showphfalse` | `true` | show song phases in preludes |
+| `\showphintoctrue` / `\showphintocfalse` | `true` | show phases also in the TOC |
+| `\showtagstrue` / `\showtagsfalse` | `true` | show tags in preludes / tag index usage |
+| `\shownotestrue` / `\shownotesfalse` | `true` | show melody note hints |
+| `\showbeatstrue` / `\showbeatsfalse` | `true` | show beat marks |
+| `\showauthtrue` / `\showauthfalse` | `true` | show song authors in preludes |
+| `\showlilypondtrue` / `\showlilypondfalse` | `true` | show Lilypond music-score blocks |
+| `\showpassagetrue` / `\showpassagefalse` | `true` | show `passage` environments |
+| `\showexplanationtrue` / `\showexplanationfalse` | `true` | show `explanation` environments |
+| `\showtranslationtrue` / `\showtranslationfalse` | `true` | show `translation` environments |
+| `\showfeelertrue` / `\showfeelerfalse` | `true` | show `feeler` environments |
+| `\showaltchordstrue` / `\showaltchordsfalse` | `true` | show alternate chord sets |
+| `\showimageinchapternametrue` / `\showimageinchapternamefalse` | `true` | include chapter symbol/image in TOC and headers |
+| `\showimageonchapterfrontpagetrue` / `\showimageonchapterfrontpagefalse` | `true` | show chapter image/symbol on chapter front pages |
+| `\upcaselongchaptertitletrue` / `\upcaselongchaptertitlefalse` | `false` | uppercase long chapter titles on chapter front pages |
+| `\upcaseshortchaptertitletrue` / `\upcaseshortchaptertitlefalse` | `true` | uppercase short chapter titles in TOC and headers |
+| `\upcasesectiontitleinheadertrue` / `\upcasesectiontitleinheaderfalse` | `false` | uppercase section titles in headers |
+| `\upcasebooktitleinheadertrue` / `\upcasebooktitleinheaderfalse` | `true` | uppercase the book title in headers |
+| `\usechaptercolorstrue` / `\usechaptercolorsfalse` | `true` | enable colored chapter corner marks |
+| `\usealtmnstyletrue` / `\usealtmnstylefalse` | `false` | swap normal and alternate melody-note styling |
+| `\adjustchordcharstrue` / `\adjustchordcharsfalse` | `true` | apply chord-character adjustments such as smaller raised parentheses |
 
 Other useful preamble settings include:
 
