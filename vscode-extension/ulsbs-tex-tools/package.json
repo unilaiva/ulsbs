@@ -2,7 +2,7 @@
   "name": "ulsbs-tex-tools",
   "displayName": "ULSBS TeX Tools",
   "description": "Custom LaTeX support for ULSBS song macros",
-  "version": "0.0.11",
+  "version": "0.1.1",
   "publisher": "ulsbs",
   "license": "GPL-3.0-or-later",
   "author": {
@@ -12,8 +12,8 @@
   "icon": "images/ulsbs-vscode-extension-icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/unilaiva/unilaiva-songbook",
-    "directory": "ulsbs/vscode-extension/ulsbs-tex-tools"
+    "url": "https://github.com/unilaiva/ulsbs",
+    "directory": "vscode-extension/ulsbs-tex-tools"
   },
   "keywords": [
     "latex",

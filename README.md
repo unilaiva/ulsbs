@@ -38,6 +38,11 @@ For a real-world example of a repository using ULSBS, see:
   - [Requirements](#requirements)
     - [Recommended: container build](#recommended-container-build)
     - [Host build (`--no-container`)](#host-build---no-container)
+    - [Platform-specific setup examples](#platform-specific-setup-examples)
+      - [Ubuntu or Debian with Docker](#ubuntu-or-debian-with-docker)
+      - [macOS with Docker Desktop](#macos-with-docker-desktop)
+      - [Windows with WSL2 and Docker Desktop](#windows-with-wsl2-and-docker-desktop)
+      - [Ubuntu 24.04 host build (`--no-container`)](#ubuntu-2404-host-build---no-container)
   - [Configuration](#configuration)
   - [Writing songbooks](#writing-songbooks)
     - [General structure](#general-structure)
@@ -331,6 +336,109 @@ Optional but useful dependencies:
 
 Most LaTeX package dependencies are pulled in by the style files themselves.
 ULSBS also vendors a specific compatible copy of the `songs` LaTeX package.
+
+### Platform-specific setup examples
+
+The examples below create a minimal reusable songbook project using the bundled
+A5 template. They assume the recommended submodule-based setup.
+
+#### Ubuntu or Debian with Docker
+
+```sh
+sudo apt update
+sudo apt install docker.io git python3
+sudo usermod -aG docker "$USER"
+newgrp docker
+
+mkdir -p ~/src/my-songbook
+cd ~/src/my-songbook
+git init
+git submodule add https://github.com/unilaiva/ulsbs.git ulsbs
+printf 'songbooks = ["my-songbook_A5.tex"]\n' > ulsbs-config.toml
+cp ulsbs/vscode-extension/ulsbs-tex-tools/assets/songbook-template_A5.tex my-songbook_A5.tex
+./ulsbs/ulsbs-compile .
+```
+
+If you prefer Podman, install `podman` instead of `docker.io`.
+
+#### macOS with Docker Desktop
+
+Install first:
+
+1. Docker Desktop: <https://docs.docker.com/desktop/setup/install/mac-install/>
+2. Python 3.11+: <https://www.python.org/downloads/macos/>
+3. If `git` is missing, Xcode Command Line Tools:
+
+```sh
+xcode-select --install
+```
+
+Then create and build a minimal project:
+
+```sh
+mkdir -p ~/src/my-songbook
+cd ~/src/my-songbook
+git init
+git submodule add https://github.com/unilaiva/ulsbs.git ulsbs
+printf 'songbooks = ["my-songbook_A5.tex"]\n' > ulsbs-config.toml
+cp ulsbs/vscode-extension/ulsbs-tex-tools/assets/songbook-template_A5.tex my-songbook_A5.tex
+./ulsbs/ulsbs-compile .
+```
+
+Start Docker Desktop once before the first build.
+
+#### Windows with WSL2 and Docker Desktop
+
+Use Ubuntu inside WSL2, and keep the project inside the Linux home directory.
+
+1. In PowerShell:
+
+```sh
+wsl --install -d Ubuntu
+```
+
+2. Install Docker Desktop for Windows and enable WSL integration for Ubuntu:
+   <https://docs.docker.com/desktop/setup/install/windows-install/>
+3. In the Ubuntu shell:
+
+```sh
+sudo apt update
+sudo apt install git python3
+
+mkdir -p ~/src/my-songbook
+cd ~/src/my-songbook
+git init
+git submodule add https://github.com/unilaiva/ulsbs.git ulsbs
+printf 'songbooks = ["my-songbook_A5.tex"]\n' > ulsbs-config.toml
+cp ulsbs/vscode-extension/ulsbs-tex-tools/assets/songbook-template_A5.tex my-songbook_A5.tex
+./ulsbs/ulsbs-compile .
+```
+
+If the `docker` command is not available inside WSL, start Docker Desktop and
+verify that WSL integration is enabled for your Ubuntu distro.
+
+#### Ubuntu 24.04 host build (`--no-container`)
+
+If you specifically want host mode, Ubuntu 24.04 is a known-good reference
+setup:
+
+```sh
+sudo apt update
+sudo apt install bash locales git python3 context context-modules ffmpeg fluidsynth fluid-soundfont-gm fonts-noto-core fonts-noto-extra fonts-noto-mono imagemagick lilypond poppler-utils texlive texlive-font-utils texlive-lang-arabic texlive-lang-english texlive-lang-european texlive-lang-portuguese texlive-lang-spanish texlive-latex-base texlive-latex-extra texlive-luatex texlive-music texlive-plain-generic
+sudo locale-gen fi_FI.utf8
+sudo mtxrun --generate
+
+mkdir -p ~/src/my-songbook
+cd ~/src/my-songbook
+git init
+git submodule add https://github.com/unilaiva/ulsbs.git ulsbs
+printf 'songbooks = ["my-songbook_A5.tex"]\n' > ulsbs-config.toml
+cp ulsbs/vscode-extension/ulsbs-tex-tools/assets/songbook-template_A5.tex my-songbook_A5.tex
+./ulsbs/ulsbs-compile --no-container .
+```
+
+Most LaTeX package dependencies are standard TeX Live packages, and some of the
+Ubuntu packages above may already be installed on your system.
 
 ## Configuration
 
