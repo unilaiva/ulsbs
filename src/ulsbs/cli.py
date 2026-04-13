@@ -70,7 +70,7 @@ def build_arg_parser(ui: UI) -> argparse.ArgumentParser:
     )
     p.add_argument("--container-rebuild", action="store_true", help="Force rebuilding of container image")
     p.add_argument("--no-container", dest="no_container", action="store_true", help="Compile on host instead of using a container (not recommended)")
-    p.add_argument("--pull", action="store_true", help="Run 'git pull --rebase' before compiling")
+    p.add_argument("--pull", action="store_true", help="Run 'git pull --rebase' and update ulsbs submodule before compiling")
     p.add_argument("--sequential", action="store_true", help="Do not compile in parallel (to conserve memory)")
     p.add_argument("--max-parallel", type=int, metavar="N", default=0, help="Maximum number of parallel jobs (0 = auto)")
     p.add_argument("--keep-temp", action="store_true", help="Do not clean temp directory even after successful compilation")
@@ -307,11 +307,21 @@ def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
         return 0
 
     # Host-only git pull
-    if cfg.pull and not cfg.in_container:
+    if cfg.pull and not cfg.runtime.in_container:
         if which("git") is None:
             raise SystemExit("'git' binary not found in PATH, but pull requested!")
         ui.git_line("Pulling remote changes (with rebase)...")
-        run_cmd(["git", "pull", "--rebase"], cwd=cfg.runtime.project_paths.project_root, check=True)
+        run_cmd(
+            ["git", "pull", "--rebase"],
+            cwd=cfg.runtime.project_paths.project_root,
+            check=True
+        )
+        ui.git_line("Updating git submodules (init + recursive)...")
+        run_cmd(
+            ["git", "submodule", "update", "--init", "--recursive"],
+            cwd=cfg.runtime.project_paths.project_root,
+            check=True,
+        )
 
     # Host-only temp dir setup
     if not cfg.runtime.in_container:
