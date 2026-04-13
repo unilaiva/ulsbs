@@ -371,8 +371,19 @@ Some useful environment variables:
 - `ULSBS_CONTAINER_ENGINE`
   - `auto`, `docker`, or `podman`
 - `ULSBS_MAX_PARALLEL`
+  - Sets the maximum number of parallel compile jobs, overriding ULSBS's
+    automatic job-count heuristics. If you raise this, also make sure
+    `ULSBS_MAX_CONTAINER_MEM_GB` is high enough for the extra jobs. A good
+    rule of thumb is roughly 1–2 GiB of memory per job.
 - `ULSBS_MAX_CONTAINER_MEM_GB`
+  - Sets the container's memory limit in GiB, overriding ULSBS's automatic
+    memory-limit heuristics. Set this high enough for your chosen parallelism.
+    If set to `0`, no memory limit is applied.
 - `ULSBS_USE_SYSTEM_TMP_FOR_TEMP`
+  - If set to `true`, ULSBS uses a temporary directory under the system `/tmp`
+    for intermediate build files. This can help if `/tmp` is backed by `tmpfs`
+    and you have enough RAM, because it may reduce disk I/O during builds.
+    On low-memory systems, however, this may make memory pressure worse.
 
 ## Writing songbooks
 
