@@ -1,0 +1,45 @@
+## Core latex/pdflatex auxiliary files:
+*.aux
+*.lof
+*.log
+*.lot
+*.fls
+*.out
+*.toc
+*.fmt
+
+## Context auxiliary files:
+*.tuc
+
+## songs indexes
+*.sxd
+*.sbx
+*.sxc
+
+# temporary directory used when compiling (also symlink)
+temp/
+temp
+
+# deployment directory (also symlink)
+deploy/
+deploy
+
+# result directory (also symlink)
+result/
+result
+
+# result documents
+*.pdf
+!misc/ext_package_songs_distribution/songs.pdf
+!misc/*.pdf
+
+# Python
+__pycache__
+
+# other
+old
+*~
+*.backup
+*.kate-swp
+.~lock.*
+.directory
