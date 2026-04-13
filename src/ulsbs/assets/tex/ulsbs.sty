@@ -3367,6 +3367,80 @@
 
 % END BEAT MARKS
 
+% BEGIN SONGID
+
+% Machine-readable output file: <jobname>.ulsbs.psv
+\newwrite\UL@idtopagefile
+
+% Open the output file when the document begins, and write a comment line(s)
+% describing content.
+\AtBeginDocument{%
+  \immediate\openout\UL@idtopagefile=\jobname.ulsbs.psv
+  \write\UL@idtopagefile{%
+    \string# ID-NR-PAGE|<id>|<songnumber>|<page>
+  }%
+}
+
+% Close the output file when the document ends.
+\AtEndDocument{%
+  \immediate\closeout\UL@idtopagefile
+}
+
+% Write one line to the psv file: ID-NR-PAGE|<id>|<songnumber>|<page>
+\newcommand\UL@writeidtopage{%
+  \ifx\songid\@empty
+    % no id for this song -> write nothing
+  \else
+    \begingroup
+      % Freeze id and songnum *now*; delay \thepage to shipout
+      \edef\UL@tmp{%
+        \write\UL@idtopagefile{%
+          ID-NR-PAGE|\songid|\thesongnum|\noexpand\thepage
+        }%
+      }%
+      % Asynchronous write: expands \thepage at shipout
+      \UL@tmp
+    \endgroup
+  \fi
+}
+
+% Invisible anchor for each song, based on \songid
+% Put a link to it for example like this:
+%   \hyperlink{songid:forca-da-cura-a4fe5a}{Força da Cura}
+%
+% This is available as named destination in the PDF, and viewers ought to be
+% able to jump to it: file.pdf#nameddest=songid:forca-da-cura-a4fe5a
+\newcommand\UL@anchorbyid{%
+  \ifx\songid\@empty
+    % no id for this song -> no anchor
+  \else
+    % Only if hyperref's hypertarget is available
+    \ifx\hypertarget\undefined\else
+      \ifx\hypertarget\relax\else
+        % "songid:" prefix to avoid clashing with other names
+        \hypertarget{songid:\songid}{}%
+      \fi
+    \fi
+  \fi
+}
+
+% Append file writing and PDF anchor creation to \songmark to get the
+% correct page.
+\apptocmd{\songmark}{\UL@anchorbyid\UL@writeidtopage}{}{}
+
+% To set this for a song, use the optional id={} parameter for \beginsong.
+% NOTE: Id's are to consist only of lowercase letters, numbers and a dash.
+% Recommended format: song's main title sluggified, spaces converted to dashes,
+%                     followed by 6-char random string.
+% Example:
+%   \beginsong{Força da Cura}[id={forca-da-cura-a4fe5a}]
+%
+\newcommand{\songid}{}
+\newsongkey{id}{\def\songid{}}
+               {\def\songid{#1}}
+
+% END SONGID
+
 % BEGIN PRELUDE
 
 % Setup the style for the taglist in the prelude, empty by default. Set before
