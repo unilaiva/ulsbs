@@ -21,6 +21,8 @@ For a real-world example of a repository using ULSBS, see:
 
 - <https://unilaiva.aavalla.net>
 
+---
+
 - [ULSBS](#ulsbs)
   - [Status and compatibility](#status-and-compatibility)
   - [Quick start](#quick-start)
@@ -58,6 +60,8 @@ For a real-world example of a repository using ULSBS, see:
     - [`ulsbs-ly2tex`](#ulsbs-ly2tex)
   - [Editor support](#editor-support)
   - [More information](#more-information)
+
+---
 
 
 ## Status and compatibility
