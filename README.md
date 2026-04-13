@@ -1,13 +1,870 @@
 # ULSBS
 
-This package provides the ULSBS compiler CLI (`ulsbs-compile`) used to build
-LuaLaTeX + lilypond-book based songbooks.
+ULSBS (**Unilaiva Songbook System**) is a reusable engine for building songbooks
+from LaTeX and Lilypond sources.
 
-- Runs in a container by default using Docker (builds/updates image as needed)
-- Can alternatively use Podman as the container engine
-- `--no-container` runs on the host (not recommended unless your host toolchain
-  matches)
+It provides:
 
-This repository is intended to be used as a standalone engine that multiple
-songbook collections can depend on. This is a work in progress. See
-[../README.md](../README.md) for more information.
+- the `ulsbs-compile` CLI for compiling songbooks
+- the base LaTeX classes and styles used by songbook documents
+- helper tools such as `ulsbs-book2json`, `ulsbs-midi2audio`, and `ulsbs-ly2tex`
+- a VS Code extension for editing ULSBS song files
+
+ULSBS is intended to be used not only by the Unilaiva Songbook repository, but
+also by other songbook repositories or local songbook directories.
+
+If you are looking for the Unilaiva-specific project documentation, see
+[../README.md](../README.md).
+
+## Status and compatibility
+
+ULSBS is under active development and its schemas, APIs, and processing rules
+may still change between releases. If you use ULSBS outside the main
+Unilaiva Songbook repository, you are responsible for reviewing and updating
+your songbook sources when upgrading ULSBS.
+
+A stable 1.0 release is planned, after which backward-compatibility guarantees
+will follow semantic versioning.
+
+## Quick start
+
+### Recommended setup: use ULSBS as a git submodule
+
+For a reusable songbook repository, the recommended layout is to vendor ULSBS as
+`ulsbs/`.
+
+1. Add the submodule:
+
+```sh
+git submodule add https://github.com/unilaiva/ulsbs.git ulsbs
+git submodule update --init --recursive
+```
+
+2. Copy the example config into your songbook project root:
+
+```sh
+cp ulsbs/ulsbs-config-example.toml ulsbs-config.toml
+```
+
+3. Create at least one main `.tex` file for your book.
+
+4. Compile from the project root with either of these:
+
+```sh
+./ulsbs/ulsbs-compile .
+```
+
+or, if you place a copy or symlink of `ulsbs/ulsbs-compile` in the project
+root as `ulsbs-compile`:
+
+```sh
+./ulsbs-compile
+```
+
+The root-level wrapper auto-detects a vendored engine in `./ulsbs`.
+
+### Use ULSBS with an arbitrary local songbook directory
+
+If the engine is checked out somewhere else, you can point it at a separate
+project directory:
+
+```sh
+/path/to/ulsbs/ulsbs-compile /path/to/my-songbook
+```
+
+Alternatively, if your project has a wrapper script in its root, set
+`ULSBS_ENGINE`:
+
+```sh
+export ULSBS_ENGINE=/path/to/ulsbs
+./ulsbs-compile
+```
+
+### Use a pip-installed engine
+
+ULSBS can also be installed as a Python package:
+
+```sh
+python3 -m pip install /path/to/ulsbs
+ulsbs-compile /path/to/my-songbook
+```
+
+## Minimal songbook project
+
+A minimal project can look like this:
+
+```text
+my-songbook/
+├── my-songbook_A5.tex
+├── ulsbs-config.toml
+├── content/
+│   └── songs_main.tex
+└── ulsbs/              # optional if using submodule/vendor setup
+```
+
+Typical conventions:
+
+- put main songbook documents in the project root
+- put song collections in `content/`
+- put shared include files or project-specific child classes in `include/`
+- keep images under `content/img/` or `include/img/`
+
+These are conventions, not strict technical requirements, except that the main
+songbook documents must use a ULSBS songbook class or one derived from it.
+
+### Minimal main document
+
+```tex
+\documentclass[
+  paper={a5paper},
+  maintitle={My Songbook},
+  author={Songbook Author},
+  subject={Songbook}
+]{ulsbs-songbook}
+
+\begin{document}
+
+\ulCoverPage{}
+\ulImprintPage
+\ulTOC
+
+\ulMainChapter{Main Chapter}{blue}
+
+\begin{songs}{titleidx,authidx,tagidx}
+\input{content/songs_main.tex}
+\end{songs}
+
+\end{document}
+```
+
+And the included song file:
+
+```tex
+\beginsong{Example Song}[by={Example Author}, key={C}]
+  \beginverse
+    |\[C]This is an example |song line.
+    Another |\[G7]line of |\[C]lyrics.
+  \endverse
+\endsong
+```
+
+A ready-made template is also available at:
+
+- `vscode-extension/ulsbs-tex-tools/assets/songbook-template_A5.tex`
+
+### Minimal `ulsbs-config.toml`
+
+```toml
+songbooks = ["my-songbook_A5.tex"]
+```
+
+For a full documented example, copy and edit:
+
+- `ulsbs-config-example.toml`
+
+## Compiling songbooks
+
+From the songbook project root:
+
+- compile everything configured in `ulsbs-config.toml`
+  - `./ulsbs-compile`
+- compile one document only
+  - `./ulsbs-compile my-songbook_A5.tex`
+- compile using a profile
+  - `./ulsbs-compile --profile dev`
+- quick local dev build
+  - `./ulsbs-compile --quick my-songbook_A5.tex`
+- compile on the host instead of in a container
+  - `./ulsbs-compile --no-container`
+- open a shell in the build container
+  - `./ulsbs-compile --shell`
+
+You can also give a single project directory or a single `ulsbs-config.toml`
+path instead of individual `.tex` files.
+
+Run `ulsbs-compile --help` for the full CLI help.
+
+### Main document filename conventions
+
+ULSBS also uses some filename conventions for main songbook documents:
+
+- `_NODEPLOY`
+  - if the main document filename contains `_NODEPLOY`, its outputs are never
+    deployed, meaning they are not copied to the deploy directory even if
+    deployment is otherwise enabled
+- `_A5`
+  - if the main document filename contains `_A5`, ULSBS will by default create
+    extra home-printing printouts for fitting two A5 pages on A4 paper, when
+    printouts are enabled and the required tools are available
+
+For `_A5` books, the two main printout styles are:
+
+- `EASY`
+  - an A4 layout that places one A5 spread side by side in a simple format
+- `BOOKLET`
+  - an A4 layout intended for booklet-style home printing and cutting
+
+For these `_A5` printouts to behave as expected, the document itself should use:
+
+- `paper={a5paper}`
+
+Example:
+
+```tex
+\documentclass[
+  paper={a5paper},
+  maintitle={My Songbook}
+]{ulsbs-songbook}
+```
+
+### Output locations
+
+By default, compilation writes generated files under:
+
+- `result/`
+
+Depending on configuration and available tools, ULSBS can also produce:
+
+- lyrics-only variants
+- extra instrument variants
+- printout PDFs
+- JSON exports
+- MIDI files
+- MP3 audio files
+- cover PNGs
+
+If deployment is enabled, files are also copied under `deploy/`.
+
+## Requirements
+
+### Recommended: container build
+
+By default ULSBS compiles inside a container.
+
+Supported container engines:
+
+- Docker
+- Podman
+
+General requirements for container mode:
+
+- `bash` 3.0+
+- `python3` 3.11+
+- Docker or Podman
+- enough disk space for the image (roughly 2.5 GiB)
+
+Container mode is recommended because it avoids host toolchain mismatches.
+
+Notes:
+
+- the first build is much slower because the image must be built
+- by default ULSBS may run several compilations in parallel
+- on low-memory systems, use `--sequential`
+
+### Host build (`--no-container`)
+
+Host mode is available, but your system toolchain must match what ULSBS
+expects.
+
+Important host dependencies include:
+
+- a recent LaTeX distribution with `lualatex` and `texlua`
+- Lilypond with `lilypond-book`
+- `bash`
+- `python3` 3.11+
+- Noto fonts (`Noto Sans`, `Noto Serif`, with needed weights)
+- locale `fi_FI.utf8`
+
+Optional but useful dependencies:
+
+- `context` or `contextjit` for printout PDFs
+- `ffmpeg` and `fluidsynth` for MP3 generation
+- `pdftoppm` and ImageMagick `magick` for cover PNG extraction
+
+Most LaTeX package dependencies are pulled in by the style files themselves.
+ULSBS also vendors a specific compatible copy of the `songs` LaTeX package.
+
+## Configuration
+
+ULSBS reads configuration from `ulsbs-config.toml` in the songbook project
+root.
+
+Recommended workflow:
+
+1. copy `ulsbs-config-example.toml` into your project root
+2. set `songbooks = [...]`
+3. optionally add profiles under `[profiles.<name>]`
+
+Useful configuration features:
+
+- `songbooks`
+  - main documents to compile
+- `deploy`, `deploy-dir`
+  - deployment behavior
+- `create-printouts`, `coverimage`, `json`, `midifiles`, `audiofiles`
+  - enable or disable extra outputs
+- `common-deploy-icons`, `common-deploy-metadata`, `common-deploy-other`
+  - extra files to copy during deploy
+- profile inheritance with `inherit-from`
+- array merging with `merge-keys`
+
+Precedence is, from lowest to highest:
+
+- built-ins
+- flat config
+- profile config
+- environment variables
+- CLI flags
+
+Some useful environment variables:
+
+- `ULSBS_ENGINE`
+  - explicit path to the engine checkout
+- `ULSBS_CONTAINER_ENGINE`
+  - `auto`, `docker`, or `podman`
+- `ULSBS_MAX_PARALLEL`
+- `ULSBS_MAX_CONTAINER_MEM_GB`
+- `ULSBS_USE_SYSTEM_TMP_FOR_TEMP`
+
+## Writing songbooks
+
+ULSBS is based on LaTeX, Lilypond, and the `songs` LaTeX package. ULSBS adds a
+songbook-oriented document class, styling, metadata handling, variants, helper
+macros, and build automation.
+
+If you are new to the underlying `songs` package, it is worth reading its
+documentation too:
+
+- bundled PDF: `misc/ext_package_songs_distribution/songs.pdf`
+- online: <https://songs.sourceforge.net/songsdoc/songs.html>
+
+### General structure
+
+The main document must use `\documentclass{ulsbs-songbook}` or a project-
+specific child class derived from it.
+
+For automatic detection by the compiler, the class name should start with
+`ulsbs-songbook`.
+
+Within `\begin{document}` ... `\end{document}`, books are typically structured
+with `\ulMainChapter`, and songs live inside a `songs` environment.
+
+Each song starts with `\beginsong` and ends with `\endsong`.
+
+Files named `songs_*.tex` under `content/` are a good convention for song
+collections, but not a requirement.
+
+### `ulsbs-songbook` document class options
+
+The base ULSBS class is:
+
+- `ulsbs-songbook`
+
+Its key=value options are:
+
+- `paper={...}`
+  - paper size passed on to the ULSBS layout machinery, for example
+    `paper={a5paper}` or `paper={a4paper}`
+- `maintitle={...}`
+  - main book title
+- `subtitle={...}`
+  - subtitle / sub-book title
+- `subsubtitle={...}`
+  - secondary subtitle
+- `motto={...}`
+  - imprint-page motto text
+- `wwwlink={...}`
+  - website link shown on the imprint page
+- `wwwqr={...}`
+  - QR image filename for the website
+- `imprintnote={...}`
+  - imprint-page footnote text
+- `author={...}`
+  - PDF metadata author and default compiled-by text source
+- `subject={...}`
+  - PDF metadata subject
+- `keywords={...}`
+  - PDF metadata keywords
+- `language={...}`
+  - preliminary main language, default `english`
+- `bindingoffset={...}`
+  - binding offset passed to page geometry, default `8mm`
+
+Supported standard class options forwarded to the underlying `book` class are:
+
+- `10pt`, `11pt`, `12pt`
+- `openright`, `openany`
+- `oneside`, `twoside`
+- `draft`, `final`
+- `titlepage`, `notitlepage`
+- `onecolumn`, `twocolumn`
+- `fleqn`, `leqno`
+
+Important note about paper size options:
+
+- use `paper={a5paper}` or similar
+- do **not** rely on bare class options like `a5paper` or `a4paper` with
+  `ulsbs-songbook`; those are intentionally swallowed by the class, and the ULSBS
+  `paper={...}` option is the one that controls the layout
+
+### Preamble configuration after loading the class
+
+After `\documentclass{ulsbs-songbook}` has loaded ULSBS, many document-wide
+features can be configured in the preamble.
+
+The most important switches are boolean toggles created with `\newif`. They are
+used like this:
+
+- `\showtagstrue`
+- `\showtagsfalse`
+
+Available toggle pairs are:
+
+- `\showextrue` / `\showexfalse`
+  - show extra song prelude info (`ex=`)
+- `\showofftrue` / `\showofffalse`
+  - show offered-to info (`off=`)
+- `\showkeytrue` / `\showkeyfalse`
+  - show the main musical key in song preludes
+- `\showgoodkeystrue` / `\showgoodkeysfalse`
+  - show good singing keys in song preludes
+- `\showphtrue` / `\showphfalse`
+  - show song phases in preludes
+- `\showphintoctrue` / `\showphintocfalse`
+  - show phases also in the TOC
+- `\showtagstrue` / `\showtagsfalse`
+  - show tags in preludes / tag index usage
+- `\shownotestrue` / `\shownotesfalse`
+  - show melody note hints
+- `\showbeatstrue` / `\showbeatsfalse`
+  - show beat marks
+- `\showauthtrue` / `\showauthfalse`
+  - show song authors in preludes
+- `\showlilypondtrue` / `\showlilypondfalse`
+  - show Lilypond notation blocks
+- `\showpassagetrue` / `\showpassagefalse`
+  - show `passage` environments
+- `\showexplanationtrue` / `\showexplanationfalse`
+  - show `explanation` environments
+- `\showtranslationtrue` / `\showtranslationfalse`
+  - show `translation` environments
+- `\showfeelertrue` / `\showfeelerfalse`
+  - show `feeler` environments
+- `\showaltchordstrue` / `\showaltchordsfalse`
+  - show alternate chord sets
+- `\showimageinchapternametrue` / `\showimageinchapternamefalse`
+  - include chapter symbol/image in TOC and headers
+- `\showimageonchapterfrontpagetrue` / `\showimageonchapterfrontpagefalse`
+  - show chapter image/symbol on chapter front pages
+- `\upcaselongchaptertitletrue` / `\upcaselongchaptertitlefalse`
+  - uppercase long chapter titles on chapter front pages
+- `\upcaseshortchaptertitletrue` / `\upcaseshortchaptertitlefalse`
+  - uppercase short chapter titles in TOC and headers
+- `\upcasesectiontitleinheadertrue` / `\upcasesectiontitleinheaderfalse`
+  - uppercase section titles in headers
+- `\upcasebooktitleinheadertrue` / `\upcasebooktitleinheaderfalse`
+  - uppercase the book title in headers
+- `\usechaptercolorstrue` / `\usechaptercolorsfalse`
+  - enable colored chapter corner marks
+- `\usealtmnstyletrue` / `\usealtmnstylefalse`
+  - swap normal and alternate melody-note styling
+- `\adjustchordcharstrue` / `\adjustchordcharsfalse`
+  - apply chord-character adjustments such as smaller raised parentheses
+
+Other useful preamble settings include:
+
+- `\verseindentwidthbase`
+  - base width used by `\beginverse[<n>]` indentation
+- `\renewcommand{\ulSongEndMark}{...}`
+  - mark shown at the right end of the song-ending line
+- `\renewcommand{\ulLyricFont}{...}`
+  - default lyric font
+- `\renewcommand{\ulChordFont}{...}`
+  - default chord font
+- `\renewcommand{\translationfont}{...}`
+  - translation block font
+- `\renewcommand{\explanationfont}{...}`
+  - explanation block font
+- `\renewcommand{\passagefont}{...}` / `\renewcommand{\altpassagefont}{...}`
+  - passage fonts
+- `\renewcommand{\mnsymbolstyle}{...}`
+  - melody-note symbol style
+- `\renewcommand{\mntagtext}{...}` / `\renewcommand{\mnalttagtext}{...}`
+  - melody-note tag text
+- `\renewcommand{\headertitlestyle}{...}`
+  - header title style
+- `\renewcommand{\pagenumberstyle}{...}`
+  - page-number style in headers
+
+There are many more rewritable settings in `src/ulsbs/assets/tex/ulsbs.sty`,
+but the toggle list above is the most important document-level configuration
+surface.
+
+### Page and line breaks
+
+The `songs` package already does most line and page breaking well, but sometimes
+it needs help.
+
+Use `\brk` in a lyric line to suggest a line break point.
+
+`\brk` can also be used between verses and songs to suggest a page or column
+break.
+
+To force breaks between songs:
+
+- `\sclearpage`
+  - jump to the next page
+- `\scleardpage`
+  - jump to the next spread / even page
+
+In some situations `\brk`, `\hardbrk`, or `\forcebrk` are needed right before
+long songs so the previous song ends cleanly.
+
+### Repeats
+
+ULSBS supports two main repeat styles.
+
+Inline repeat marks:
+
+- `\lrep`
+- `\rrep`
+- `\rep{<n>}` (meant to put after \rrep to signify the repeat count)
+
+Block repeat bars on the left side of lyric lines:
+
+```tex
+\beginsong{My Song}
+  \beginverse
+    \beginrep
+      Here are lyrics for the verse
+      That is completely repeated.
+    \endrep
+  \endverse
+  \beginverse
+    This lyric line has no repeats
+    \beginrep
+      These two lines have
+      one repeat bar sign
+      \beginrep
+        This line has two levels of repeats
+      \endrep
+    \endrep
+  \endverse
+\endsong
+```
+
+Useful related macros:
+
+- `\prep{<n>}`
+  - put the repeat count on its own line after `\beginrep`
+- `\goto{Beginning words of the verse}`
+  - mark a jump target by text
+
+`\beginchorus` / `\endchorus` from the original `songs` package are not used in
+ULSBS for repeat markup.
+
+### Measure bars
+
+Use the pipe character `|` to mark the **beginning** of each measure, never the
+end.
+
+If a line ends on a measure with no lyrics at that spot, use `\e` to mark that
+there really is a measure there.
+
+So the rule of thumb is:
+
+- one bar line per bar
+
+To hide measure bars in the final document, use `\measuresoff`.
+
+### Chords, melody hints, and beat marks inside `\[ ... ]`
+
+Chords are written inside `\[ ... ]` markup inline with lyrics:
+
+- `\[C]`
+- `\[Am]`
+- `\[G7]`
+
+The chord is placed above the first lyric text immediately following it.
+
+The same `\[ ... ]` block is also where melody-note hints and beat marks are
+supposed to go. So one `\[ ... ]` block can contain any combination of:
+
+- a chord
+- a melody-note macro
+- a beat-mark macro
+
+Example:
+
+```tex
+\[\bmc\mnc{A}C]lyric
+```
+
+This puts, at the same horizontal spot above the word `lyric`:
+
+- a beat mark
+- melody note `A`
+- chord `C`
+
+The important rule is this:
+
+- macros whose name contains `c` are the **zero-width / stacking** variants
+- macros without that `c` usually take horizontal space and therefore appear
+  beside the following material instead of exactly on top of it
+
+So, for example:
+
+- `\mnc{A}`
+  - zero-width melody note, meant to stack with a chord in the same `\[ ... ]`
+- `\mn{A}`
+  - normal-width melody note, meant to stand on its own
+- `\bmc`
+  - zero-width beat mark, meant to stack with a chord and/or melody note
+- `\bm`
+  - normal-width beat mark, meant to stand on its own
+
+A good way to think about it:
+
+- use the `c` variants when you want items to share one anchor position inside a
+  single chord annotation
+- use the non-`c` variants when you want the item to consume its own horizontal
+  space
+
+When stacking several things in one `\[ ... ]`, the recommended order is:
+
+1. beat mark
+2. melody note
+3. chord
+
+So this is the normal stacked pattern:
+
+```tex
+\[\bmc\mnc{A}C]lyric
+```
+
+while this is a non-stacked pattern where the melody note takes its own width:
+
+```tex
+\[\mn{A}C]lyric
+```
+
+### Full melodies with Lilypond
+
+Full melodies are written in Lilypond syntax and wrapped inside `lilywrap`
+environments inside a song, but outside verses.
+
+This allows ULSBS to generate sheet music and MIDI output.
+
+If you use ULSBS-specific Lilypond lyric helpers such as `theLyricsOne`, the
+`ulsbs-ly2tex` helper can help convert lyrics into the songbook text format.
+
+### Converting lyrics from Lilypond to songbook format
+
+When converting Lilypond lyrics manually, these replacements are often useful,
+in this order:
+
+1. ` -- | ` -> `|`
+2. ` -- _ ` -> ``
+3. ` -- ` -> ``
+4. ` | ` -> ` |`
+5. ` __` -> ``
+6. ` _` -> ``
+7. `__ ` -> ``
+8. `|_` -> `|`
+9. `\skip 1 ` -> ``
+10. `"" ` -> ``
+11. `~` -> `\jw `
+12. `\altcol ` -> ``
+
+Be careful with whitespace.
+
+### Melody hints on the chord line
+
+The `\mn*` macros place encircled melody note hints above the chord line, and
+they are meant to be used **inside** `\[ ... ]` chord annotations.
+
+Common variants:
+
+- `\mn{<note>}`
+  - normal-width note hint, typically for the first line of a verse when not
+    stacked on top of a chord
+- `\mnc{<note>}`
+  - zero-width note hint, meant to be stacked with a chord in the same
+    `\[ ... ]`
+- `\mncadj{<dim>}{<note>}`
+  - like `\mnc`, but with horizontal adjustment
+- `\mncii{<note>}{<note>}`
+  - two zero-width note hints stacked at one chord position
+- `\mnciii{<note>}{<note>}{<note>}`
+  - three zero-width note hints stacked at one chord position
+- `\mnciv{...}`, `\mncv{...}`, `\mncvi{...}`
+  - larger stacked groups at one chord position
+- `\mnd{<note>}`
+  - lower-position note hint, useful on later lines where first-line note height
+    would be too high
+
+Notes must be written in uppercase for transposition logic.
+
+Important spacing rule:
+
+- `c` variants such as `\mnc` do **not** take horizontal space
+- non-`c` variants such as `\mn` do take horizontal space
+
+So:
+
+```tex
+\[\mnc{A}C]lyric
+```
+
+stacks note `A` and chord `C` at the same spot, while:
+
+```tex
+\[\mn{A}C]lyric
+```
+
+lets the note take its own width before the chord.
+
+Useful controls:
+
+- `\shownotesfalse`
+  - disable notes for the whole document
+- `\notesoff`
+  - disable notes for later verses in the current song
+- `\noteson`
+  - re-enable them later in the current song
+- `\mnbeginverse`
+  - start a verse with spacing suitable for melody-note hints throughout the
+    verse
+
+There are also alternate-color `\ma*` variants such as `\ma`, `\mac`,
+`\mau`, `\mauc`, `\mad`, `\madii`, `\mauii`, and `\mauiic`.
+
+### Beat marks
+
+Beat marks also belong inside `\[ ... ]` chord markup.
+
+Useful variants:
+
+- `\bm`
+  - standalone beat mark, takes horizontal space
+- `\bmc`
+  - zero-width beat mark, meant to stack with melody note and/or chord
+- `\bmadj{<dim>}`
+  - standalone beat mark with horizontal adjustment
+- `\bmcadj{<dim>}`
+  - zero-width stacked beat mark with horizontal adjustment
+
+Again, the important distinction is:
+
+- `\bmc` and `\bmcadj` are stacking variants with no horizontal advance
+- `\bm` and `\bmadj` consume horizontal space
+
+Example of stacked use:
+
+```tex
+\[\bmc\mnc{A}C]lyric
+```
+
+Example of a standalone beat mark:
+
+```tex
+\[\bm]lyric
+```
+
+Useful controls:
+
+- `\showbeatsfalse`
+  - disable beat marks for the whole document
+- `\beatsoff`
+  - disable beat marks for later verses in the current song
+- `\beatson`
+  - re-enable them for later verses
+
+### Tags
+
+Tags are attached with the `tags=` key in `\beginsong`:
+
+```tex
+\beginsong{Song name}[tags={love, smile}]
+```
+
+In the Unilaiva repository, allowed tags are listed in `include/tags.can`.
+In your own repository, you can use your own tag list and indexing setup.
+
+To disable tag display entirely, set `\showtagsfalse` in the main document.
+
+### Extra variants
+
+ULSBS can build optional extra instrument variants for a main document.
+
+Those are enabled by a special comment in the main `.tex` file, for example:
+
+```tex
+%% ULSBS-EXTRA-VARIANTS: bassclef, charango
+```
+
+The exact post-setup files for such variants live under:
+
+- `src/ulsbs/assets/tex/`
+
+### Creating song selections
+
+A selection booklet can be made by creating another main document that includes
+only chosen songs with `\includeonlysongs{...}` before the main inputs.
+
+In the Unilaiva repository, a concrete example exists at:
+
+- `../include/ul-selection_example.tex`
+
+## Utilities
+
+ULSBS ships with a few helper tools in addition to the main compiler.
+
+### `ulsbs-book2json`
+
+Extract songbook data as JSON.
+
+Typical use:
+
+```sh
+./ulsbs-book2json my-songbook_A5.tex > songbook.json
+```
+
+### `ulsbs-midi2audio`
+
+Convert MIDI files to audio using `ffmpeg` and `fluidsynth`.
+
+### `ulsbs-ly2tex`
+
+Helper for converting ULSBS-style Lilypond lyric output into songbook text.
+
+## Editor support
+
+The bundled VS Code extension lives in:
+
+- `vscode-extension/ulsbs-tex-tools/`
+
+It adds ULSBS-aware snippets, folding, navigation, structural outline support,
+and syntax help for songbook files.
+
+Installation instructions are in:
+
+- `vscode-extension/ulsbs-tex-tools/README.md`
+
+## More information
+
+The most important source files to inspect when extending or debugging ULSBS
+are:
+
+- `src/ulsbs/assets/tex/ulsbs-songbook.cls`
+- `src/ulsbs/assets/tex/ulsbs.sty`
+- `src/ulsbs/cli.py`
+- `src/ulsbs/pipeline.py`
+- `ulsbs-config-example.toml`
+
+The main wrapper scripts are:
+
+- `ulsbs-compile`
+- `ulsbs-book2json`
+- `ulsbs-midi2audio`
+- `ulsbs-ly2tex`
