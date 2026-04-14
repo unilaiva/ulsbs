@@ -65,6 +65,7 @@ For a real-world example of a repository using ULSBS, see:
     - [`ulsbs-ly2tex`](#ulsbs-ly2tex)
   - [Editor support](#editor-support)
   - [More information](#more-information)
+  - [License](#license)
 
 ---
 
@@ -1015,3 +1016,11 @@ The main wrapper scripts are:
 - `ulsbs-bookmeta`
 - `ulsbs-midi2audio`
 - `ulsbs-ly2tex`
+
+
+## License
+
+GNU General Public License version 3 or later (GPL 3.0+)
+
+Documents generated using ULSBS are not considered derivative works of the
+ULSBS code.

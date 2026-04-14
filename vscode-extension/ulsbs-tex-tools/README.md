@@ -146,4 +146,4 @@ In addition to the desktop version, the extension includes a web build for:
 
 ## License
 
-GPL 3.0 or later
+GNU General Public License version 3 or later (GPL 3.0+)
