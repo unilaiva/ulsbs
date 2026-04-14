@@ -1,0 +1,47 @@
+{
+  "files.insertFinalNewline": true,
+  "files.trimFinalNewlines": true,
+  "files.trimTrailingWhitespace": true,
+  "breadcrumbs.enabled": true,
+  "outline.problems.enabled": true,
+  "editor.stickyScroll.enabled": true,
+  "editor.minimap.showRegionSectionHeaders": false,
+
+  "[latex]": {
+    "editor.wordWrap": "off",
+    "editor.inlineSuggest.enabled": true,
+    "editor.autoClosingBrackets": "never",
+    "editor.tabCompletion": "on",
+    "editor.unicodeHighlight.ambiguousCharacters": false,
+  },
+
+  "[lilypond]": {
+    "editor.inlineSuggest.enabled": false,
+    "editor.unicodeHighlight.ambiguousCharacters": false,
+  },
+
+  "[markdown]": {
+    "editor.wordWrap": "on"
+  },
+
+  // Language server: use JediLSP instead of Pylance
+  "python.languageServer": "Jedi",
+  // Jedi: find source
+  "python.autoComplete.extraPaths": [
+    "${workspaceFolder}/src"
+  ],
+  // Pylance: find sources
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/src"
+  ],
+  // Use ruff as the python linter
+  "python.linting.pylintEnabled": false,
+  "python.linting.enabled": false,
+  "ruff.enable": true,
+  "texlab.chktex.onOpenAndSave": false,
+  "texlab.chktex.onEdit": false,
+  "texlab.build.onSave": false,
+    "texlab.symbols.ignoredPatterns": [
+    "^Equation$",
+  ]
+}

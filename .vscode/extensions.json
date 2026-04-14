@@ -1,0 +1,15 @@
+{
+  "unwantedRecommendations": [
+    "james-yu.latex-workshop"
+  ],
+  "recommendations": [
+    "jeandeaual.lilypond-syntax",
+    "charliermarsh.ruff",
+    "tamasfe.even-better-toml",
+    "efoerster.texlab",
+    "yzhang.markdown-all-in-one",
+    "gruntfuggly.todo-tree",
+    "usernamehw.errorlens",
+    "christian-kohler.path-intellisense"
+  ]
+}
