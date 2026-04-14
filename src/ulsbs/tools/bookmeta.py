@@ -263,10 +263,18 @@ def _parse_optional_bracket_argument(src: str, start: int) -> tuple[str | None, 
     raise ValueError("Unterminated '['")
 
 
-def _parse_keyval_options_ordered(raw: str) -> list[tuple[str, str]]:
-    """Parse a beginsong key=val option string, preserving order."""
+def _parse_keyval_options_ordered(raw: str) -> list[tuple[str, str | None]]:
+    """Parse a beginsong key=val option string, preserving order.
 
-    items: list[tuple[str, str]] = []
+    Important: distinguish between
+
+    - `key` (no explicit value)  -> (key, None)
+    - `key={}` (explicit empty) -> (key, "")
+
+    so that rewriting does not accidentally drop `{}`.
+    """
+
+    items: list[tuple[str, str | None]] = []
     i = 0
     n = len(raw)
     while i < n:
@@ -287,8 +295,9 @@ def _parse_keyval_options_ordered(raw: str) -> list[tuple[str, str]]:
         while i < n and raw[i].isspace():
             i += 1
 
+        # No '=' means a bare key, e.g. "ititle"
         if i >= n or raw[i] != "=":
-            items.append((key, ""))
+            items.append((key, None))
             continue
         i += 1
 
@@ -303,15 +312,16 @@ def _parse_keyval_options_ordered(raw: str) -> list[tuple[str, str]]:
                 i += 1
             val = raw[val_start:i].strip()
 
+        # Note: val may be "" (from key={} or key=,). Preserve that.
         items.append((key, val))
 
     return items
 
 
-def _format_keyval_options(items: list[tuple[str, str]]) -> str:
+def _format_keyval_options(items: list[tuple[str, str | None]]) -> str:
     parts: list[str] = []
     for key, val in items:
-        if val == "":
+        if val is None:
             parts.append(key)
         else:
             parts.append(f"{key}={{{val}}}")
@@ -348,7 +358,7 @@ def _rewrite_beginsong_header(old_header: str, *, new_id: str) -> str:
     between = old_header[i_after_title:opts_start]
     after = old_header[opts_end:]
 
-    opts_items: list[tuple[str, str]] = []
+    opts_items: list[tuple[str, str | None]] = []
     if opts_raw is not None:
         opts_items = _parse_keyval_options_ordered(opts_raw)
         opts_items = [(k, v) for (k, v) in opts_items if k != "id"]
