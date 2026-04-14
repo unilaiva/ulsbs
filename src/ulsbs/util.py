@@ -17,6 +17,7 @@ import shlex
 import shutil
 import subprocess
 import time
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Iterable
@@ -154,6 +155,45 @@ def create_unique_id(include_time: bool = True) -> str:
 def current_time_human_readable() -> str:
     """Return current time as 'YYYY-MM-DD HH:MM:SS ±TZ'."""
     return time.strftime("%Y-%m-%d %H:%M:%S %z")
+
+
+def strip_tex_commands(text: str) -> str:
+    """Remove simple TeX commands from a short piece of text.
+
+    This is *not* a general TeX cleaner; it is just enough to derive
+    filename-friendly slugs from chapter and song titles.
+    """
+
+    # Line breaks like \\ -> space
+    text = text.replace("\\\\", " ")
+
+    # Remove common LaTeX commands and their optional args, keep inner text
+    # e.g. \textbf{Foo} -> "Foo".
+    text = re.sub(r"\\[a-zA-Z]+\*?(?:\[[^\]]*\])?\{([^}]*)\}", r"\1", text)
+
+    # Drop any remaining backslash-starting control words
+    text = re.sub(r"\\[a-zA-Z]+\*?", "", text)
+
+    return text
+
+
+def slugify(text: str, *, default: str) -> str:
+    """Return an ASCII slug suitable for filenames/dirnames.
+
+    - Removes TeX commands and their optional args, but keeps the inner text
+    - Lowercases
+    - Converts accented characters to their base forms
+    - Replaces whitespace and punctuation with '-'
+    - Collapses multiple dashes and strips leading/trailing dashes
+    """
+
+    cleaned = strip_tex_commands(text)
+    cleaned = unicodedata.normalize("NFKD", cleaned)
+    cleaned = cleaned.encode("ascii", "ignore").decode("ascii")
+    cleaned = cleaned.lower()
+    cleaned = re.sub(r"[^a-z0-9]+", "-", cleaned)
+    cleaned = cleaned.strip("-")
+    return cleaned or default
 
 
 def which(cmd: str) -> str | None:

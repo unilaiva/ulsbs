@@ -874,12 +874,27 @@ def step_build_song_db(
 
     ui.exec_line(f"{txt_doc} {ui.fmt_step(step)} internal: build metadata")
 
+    psv_path = job.compile_dir / f"{processed_tex.stem}.ulsbs.psv"
+    ulsbs_psv_file: Path | None = None
+    if psv_path.is_file():
+        ulsbs_psv_file = psv_path
+    else:
+        ui.warning_line(f"{txt_doc} PSV file not found: {psv_path.name}")
+
     try:
         db = build_song_database(
             processed_tex=processed_tex,
             include_search_paths=include_paths,
             variant=job.variant,
             plain_lowercase_lyrics=JSON_INCLUDE_PLAIN_LOWERCASE_LYRICS,
+            ulsbs_psv_file=ulsbs_psv_file,
+        )
+
+        all_songs = list(db.songs_without_chapter)
+        for chap in db.chapters:
+            all_songs.extend(chap.songs)
+        bad_id_count = sum(
+            1 for s in all_songs if s.id is not None and re.fullmatch(r"[a-z0-9-]+", s.id) is None
         )
 
         write_text(
@@ -888,11 +903,29 @@ def step_build_song_db(
             f"  - Book title: {'<none>' if db.book_info.maintitle is None else db.book_info.maintitle}\n"
             f"  - Book subtitle: {'<none>' if db.book_info.subtitle is None else db.book_info.subtitle}\n"
             f"  - Book variant: {'<none>' if db.book_info.variant is None else db.book_info.variant}\n"
-            f"  - Total songs found: {str(db.total_songs)}\n\n",
+            f"  - Total songs found: {str(db.total_songs)}\n"
+            f"  - Songs with id: {str(db.songs_with_id)}\n"
+            f"  - Songs with malformed id: {str(bad_id_count)}\n\n"
         )
+
+        # Warn if missing ids
+        if db.songs_with_id < db.total_songs:
+            ui.warning_line(
+                f"{txt_doc} Warning: only {db.songs_with_id}/{db.total_songs} songs have an id"
+            )
+
+        # Also warn about malformed ids (not matching [a-z0-9-]+)
+        if bad_id_count > 0:
+            ui.warning_line(
+                f"{txt_doc} Warning: there were {bad_id_count} malformed song ids. "
+                "Run ulsbs-bookmeta --check-song-ids for more info."
+            )
     except Exception as e:
+        # Do not abort the job: metadata is an optional post-processing step.
         write_text(log_path, f"Song database build failed: {e!r}\n")
-        raise CompileError("Failed to build song/chapter data from TeX", log_path) from None
+        ui.warning_line(f"{txt_doc} Warning: failed to build internal song database: {e}")
+        step += 1
+        return None, step
 
     step += 1
     return db, step

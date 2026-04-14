@@ -27,6 +27,7 @@ following JSON Schema (draft-07):
         "songs_without_chapter",
         "source_file_relative",
         "total_songs",
+        "songs_with_id",
         "creation_time"
       ],
       "properties": {
@@ -46,6 +47,11 @@ following JSON Schema (draft-07):
         "total_songs": {
           "type": "integer",
           "minimum": 0
+        },
+        "songs_with_id": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Count of songs that have a non-null SongInfo.id"
         },
         "creation_time": {
           "type": "string",
@@ -174,7 +180,15 @@ following JSON Schema (draft-07):
           "properties": {
             "title": {"type": "string"},
             "title_slug": {"type": "string"},
+            "id": {
+              "type": ["string", "null"],
+              "description": "Optional stable song identifier taken from beginsong option 'id'."
+            },
             "number": {"type": ["integer", "null"]},
+            "page": {
+              "type": ["integer", "null"],
+              "description": "Optional page number."
+            },
             "options": {
               "type": "object",
               "additionalProperties": {"type": "string"}
@@ -241,10 +255,10 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 import re
-import unicodedata
 from typing import Any, Dict, List, Sequence, Tuple
 
 from .constants import TEX_SUFFIXES
+from .util import slugify
 
 
 # Data structures
@@ -352,6 +366,15 @@ class SongInfo:
     order_index: int
     chapter_title: str | None
     chapter_slug: str | None
+    id: str | None = None
+    page: int | None = None
+
+    # Internal fields (not included in any JSON output)
+    source_file_absolute: Path | None = None
+    beginsong_line: int | None = None
+    beginsong_start: int | None = None
+    beginsong_header_end: int | None = None
+
     midi_result_file_relative: Path | None = None
     audio_result_file_relative: Path | None = None
     alt_titles: List[str] = field(default_factory=list)
@@ -500,6 +523,8 @@ class SongbookData:
     - total_songs:
         Total number of songs discovered across the entire document tree.
         This matches the highest order_index assigned to any song.
+    - songs_with_id:
+        Number of songs that have an explicit SongInfo.id.
     - creation_time:
         ISO 8601 timestamp when this database instance was created.
     """
@@ -509,6 +534,7 @@ class SongbookData:
     songs_without_chapter: List[SongInfo]
     source_file_relative: Path
     total_songs: int
+    songs_with_id: int
     creation_time: str
 
     def to_json(self, *, indent: int = 2) -> str:
@@ -531,6 +557,15 @@ class SongbookData:
             "midi_compile_file_relative",
             "midi_result_file_relative",
             "audio_result_file_relative",
+            "id",
+            "page",
+        }
+
+        ALWAYS_STRIP_FIELDS = {
+            "source_file_absolute",
+            "beginsong_line",
+            "beginsong_start",
+            "beginsong_header_end",
         }
 
         def _strip_optional_null_fields(obj: Any) -> Any:
@@ -539,7 +574,7 @@ class SongbookData:
                 return {
                     k: _strip_optional_null_fields(v)
                     for k, v in obj.items()
-                    if not (k in OPTIONAL_NULL_FIELDS and v is None)
+                    if k not in ALWAYS_STRIP_FIELDS and not (k in OPTIONAL_NULL_FIELDS and v is None)
                 }
             if isinstance(obj, list):
                 return [_strip_optional_null_fields(item) for item in obj]
@@ -577,45 +612,6 @@ _CHAPTER_MACROS = ("\\ulMainChapter", "\\chapter", "\\songchapter")
 # leading backslash). For these, the macro name and braces are stripped but
 # the inner text is kept.
 _LYRICS_TEXT_MACROS_KEEP_ARG: set[str] = {"text", "textit", "emph"}
-
-
-def _strip_tex_commands(text: str) -> str:
-    """Remove simple TeX commands from a short piece of text.
-
-    This is *not* a general TeX cleaner; it is just enough to derive
-    filename-friendly slugs from chapter and song titles.
-    """
-
-    # Line breaks like \\ -> space
-    text = text.replace("\\\\", " ")
-
-    # Remove common LaTeX commands and their optional args, keep inner text
-    # e.g. \textbf{Foo} -> "Foo".
-    text = re.sub(r"\\[a-zA-Z]+\*?(?:\[[^\]]*\])?\{([^}]*)\}", r"\1", text)
-
-    # Drop any remaining backslash-starting control words
-    text = re.sub(r"\\[a-zA-Z]+\*?", "", text)
-
-    return text
-
-
-def _slugify(text: str, *, default: str) -> str:
-    """
-    Return an ASCII slug suitable for filenames/dirnames.
-
-    - Lowercases
-    - Converts accented characters to their base forms
-    - Replaces whitespace and punctuation with -
-    - Collapses multiple dashes and strips leading/trailing dashes
-    """
-
-    cleaned = _strip_tex_commands(text)
-    cleaned = unicodedata.normalize("NFKD", cleaned)
-    cleaned = cleaned.encode("ascii", "ignore").decode("ascii")
-    cleaned = cleaned.lower()
-    cleaned = re.sub(r"[^a-z0-9]+", "-", cleaned)
-    cleaned = cleaned.strip("-")
-    return cleaned or default
 
 
 def _tex_to_plain_text(text: str) -> str:
@@ -1478,11 +1474,89 @@ def _apply_book_field(book_info: BookInfo, field_name: str, value: str) -> None:
     object.__setattr__(book_info, field_name, cleaned)
 
 
+_PSV_ID_RE = re.compile(r"^[a-z0-9-]+$")
+
+
+def _parse_ulsbs_psv_file(psv_file: Path) -> Dict[str, Tuple[int, int]]:
+    """Parse a .ulsbs.psv file containing song IDs, numbers and pages.
+
+    Supported non-comment line format is:
+
+        ID-NR-PAGE|<id>|<songnumber>|<page>
+
+    Lines whose first non-whitespace character is '#' are ignored.
+
+    Returns a mapping from (possibly de-duplicated) id to (songnumber, page).
+
+    Raises FileNotFoundError / ValueError on any problem.
+    """
+
+    psv_file = psv_file.expanduser().resolve()
+    if not psv_file.exists():
+        raise FileNotFoundError(f"PSV file not found: {psv_file}")
+    if not psv_file.is_file():
+        raise ValueError(f"PSV path is not a regular file: {psv_file}")
+
+    try:
+        txt = psv_file.read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        raise ValueError(f"PSV file is not valid UTF-8: {psv_file}") from e
+
+    id_to_nr_page: Dict[str, Tuple[int, int]] = {}
+
+    for lineno, line in enumerate(txt.splitlines(), start=1):
+        stripped = line.lstrip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            continue
+
+        if not stripped.startswith("ID-NR-PAGE"):
+            raise ValueError(f"{psv_file}:{lineno}: Unknown record type")
+
+        parts = stripped.split("|")
+        if len(parts) != 4:
+            raise ValueError(
+                f"{psv_file}:{lineno}: Malformed ID-NR-PAGE record (expected 4 pipe-separated fields)"
+            )
+
+        _tag, id_raw, songnr_raw, page_raw = parts
+
+        imported_id = id_raw.strip()
+        if not imported_id or _PSV_ID_RE.fullmatch(imported_id) is None:
+            raise ValueError(
+                f"{psv_file}:{lineno}: Invalid id '{imported_id}' (expected only lowercase a-z, 0-9, '-')"
+            )
+
+        try:
+            songnr = int(songnr_raw.strip())
+        except ValueError as e:
+            raise ValueError(f"{psv_file}:{lineno}: Invalid song number '{songnr_raw.strip()}'") from e
+
+        try:
+            page = int(page_raw.strip())
+        except ValueError as e:
+            raise ValueError(f"{psv_file}:{lineno}: Invalid page '{page_raw.strip()}'") from e
+
+        final_id = imported_id
+        if final_id in id_to_nr_page:
+            # Keep first occurrence untouched, postfix duplicates as -2, -3, ...
+            suffix = 2
+            while f"{imported_id}-{suffix}" in id_to_nr_page:
+                suffix += 1
+            final_id = f"{imported_id}-{suffix}"
+
+        id_to_nr_page[final_id] = (songnr, page)
+
+    return id_to_nr_page
+
+
 def build_song_database(
     processed_tex: Path,
     include_search_paths: Sequence[Path],
     variant: str = "unknown",
     plain_lowercase_lyrics: bool = False,
+    ulsbs_psv_file: Path | None = None,
 ) -> SongbookData:
     """
     Parse processed_tex and all its inputs into a SongbookData class.
@@ -1499,6 +1573,10 @@ def build_song_database(
         When True, populate lyrics_plain_lowercase on every SongInfo and
         Translation.  When False (the default) those fields are omitted from
         the data structures and from any JSON output.
+    - ulsbs_psv_file:
+        Optional path to a .ulsbs.psv file containing ID/number/page overrides.
+        When provided, it is parsed and matching SongInfo entries are updated
+        based on their beginsong option 'id'.
 
     Returns SongbookData (Complete chapter + song information for this document).
     """
@@ -1509,6 +1587,10 @@ def build_song_database(
 
     doc_root = processed_tex.parent
     search_paths = [p.resolve() for p in include_search_paths]
+
+    psv_id_to_nr_page: Dict[str, Tuple[int, int]] | None = None
+    if ulsbs_psv_file is not None:
+        psv_id_to_nr_page = _parse_ulsbs_psv_file(ulsbs_psv_file)
 
     book_info = BookInfo()
     book_info.variant = variant
@@ -1526,6 +1608,9 @@ def build_song_database(
         title: str,
         options: Dict[str, str],
         tex_file: Path,
+        beginsong_line: int,
+        beginsong_start: int,
+        beginsong_header_end: int,
         raw_block: str,
     ) -> None:
         nonlocal current_songnum, order_counter
@@ -1540,7 +1625,7 @@ def build_song_database(
             main_title = ""
             alt_titles = []
 
-        title_slug = _slugify(main_title, default="song")
+        title_slug = slugify(main_title, default="song")
         number = current_songnum
         if current_songnum is None:
             number = None
@@ -1549,6 +1634,16 @@ def build_song_database(
 
         # Normalise simple TeX constructs in \beginsong options as well.
         normalised_options: Dict[str, str] = {k: _tex_to_plain_text(v) for k, v in options.items()}
+
+        song_id = normalised_options.get("id")
+        if song_id is not None:
+            song_id = song_id.strip() or None
+
+        page: int | None = None
+        if psv_id_to_nr_page is not None and song_id is not None:
+            nr_page = psv_id_to_nr_page.get(song_id)
+            if nr_page is not None:
+                number, page = nr_page
 
         midi_compile_file_relative = _find_midi_in_song_block(raw_block, doc_root)
         audio_links = _collect_audio_links_from_block(raw_block)
@@ -1572,6 +1667,12 @@ def build_song_database(
             order_index=order_counter,
             chapter_title=current_chapter.title if current_chapter else None,
             chapter_slug=current_chapter.slug if current_chapter else None,
+            id=song_id,
+            page=page,
+            source_file_absolute=tex_file,
+            beginsong_line=beginsong_line,
+            beginsong_start=beginsong_start,
+            beginsong_header_end=beginsong_header_end,
             alt_titles=alt_titles,
             audio_links=audio_links,
             lyrics=lyrics,
@@ -1766,7 +1867,7 @@ def build_song_database(
                     continue
 
                 display_title = _tex_to_plain_text(raw_title.strip())
-                slug = _slugify(display_title, default="chapter")
+                slug = slugify(display_title, default="chapter")
                 source_file_relative = _relative_to_doc_root(path, doc_root)
                 chap = ChapterInfo(
                     title=display_title,
@@ -1840,7 +1941,16 @@ def build_song_database(
                 raw_block = src[song_start:end_idx]
 
                 current_song_in_progress = True
-                add_song(title=title.strip(), options=options, tex_file=path, raw_block=raw_block)
+                beginsong_line = src.count("\n", 0, song_start) + 1
+                add_song(
+                    title=title.strip(),
+                    options=options,
+                    tex_file=path,
+                    beginsong_line=beginsong_line,
+                    beginsong_start=song_start,
+                    beginsong_header_end=i_after_header,
+                    raw_block=raw_block,
+                )
                 current_song_in_progress = None
 
                 i = end_idx + len("\\endsong") if end_idx < n else n
@@ -1854,11 +1964,17 @@ def build_song_database(
     db_source_file_relative = _relative_to_doc_root(processed_tex, doc_root)
     creation_time = datetime.now(timezone.utc).isoformat()
 
+    all_songs: List[SongInfo] = list(songs_without_chapter)
+    for chap in chapters:
+        all_songs.extend(chap.songs)
+    songs_with_id = sum(1 for s in all_songs if s.id is not None)
+
     return SongbookData(
         book_info=book_info,
         chapters=chapters,
         songs_without_chapter=songs_without_chapter,
         source_file_relative=db_source_file_relative,
         total_songs=order_counter,
+        songs_with_id=songs_with_id,
         creation_time=creation_time,
     )

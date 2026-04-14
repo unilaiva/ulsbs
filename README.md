@@ -7,7 +7,7 @@ It provides:
 
 - the `ulsbs-compile` CLI for compiling songbooks
 - the base LaTeX classes and styles used by songbook documents
-- helper tools such as `ulsbs-book2json`, `ulsbs-midi2audio`, and `ulsbs-ly2tex`
+- helper tools such as `ulsbs-bookmeta`, `ulsbs-midi2audio`, and `ulsbs-ly2tex`
 - a VS Code extension for editing ULSBS song files
 
 ULSBS is intended to be used not only by the Unilaiva Songbook repository, but
@@ -60,7 +60,7 @@ For a real-world example of a repository using ULSBS, see:
     - [Extra variants](#extra-variants)
     - [Creating song selections](#creating-song-selections)
   - [Utilities](#utilities)
-    - [`ulsbs-book2json`](#ulsbs-book2json)
+    - [`ulsbs-bookmeta`](#ulsbs-bookmeta)
     - [`ulsbs-midi2audio`](#ulsbs-midi2audio)
     - [`ulsbs-ly2tex`](#ulsbs-ly2tex)
   - [Editor support](#editor-support)
@@ -967,14 +967,14 @@ In the Unilaiva repository, a concrete example exists at:
 
 ULSBS ships with a few helper tools in addition to the main compiler.
 
-### `ulsbs-book2json`
+### `ulsbs-bookmeta`
 
 Extract songbook data as JSON.
 
 Typical use:
 
 ```sh
-./ulsbs-book2json my-songbook_A5.tex > songbook.json
+./ulsbs-bookmeta my-songbook_A5.tex > songbook.json
 ```
 
 ### `ulsbs-midi2audio`
@@ -1012,6 +1012,6 @@ are:
 The main wrapper scripts are:
 
 - `ulsbs-compile`
-- `ulsbs-book2json`
+- `ulsbs-bookmeta`
 - `ulsbs-midi2audio`
 - `ulsbs-ly2tex`
