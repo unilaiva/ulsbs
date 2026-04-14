@@ -3387,15 +3387,27 @@
 }
 
 % Write one line to the psv file: ID-NR-PAGE|<id>|<songnumber>|<page>
+% Note that \UL@anchorbyid should be called before this command, as it
+% will create a deduplicated form of the song's id this macro uses if
+% available.
 \newcommand\UL@writeidtopage{%
   \ifx\songid\@empty
     % no id for this song -> write nothing
   \else
     \begingroup
+      % Use the resolved id (with possible -2, -3, ...) if available;
+      % fall back to \songid if for some reason it wasn't set.
+      \edef\UL@fileid{%
+        \ifx\UL@idwithsuffix\relax
+          \songid
+        \else
+          \UL@idwithsuffix
+        \fi
+      }%
       % Freeze id and songnum *now*; delay \thepage to shipout
       \edef\UL@tmp{%
         \write\UL@idtopagefile{%
-          ID-NR-PAGE|\songid|\thesongnum|\noexpand\thepage
+          ID-NR-PAGE|\UL@fileid|\thesongnum|\noexpand\thepage
         }%
       }%
       % Asynchronous write: expands \thepage at shipout
@@ -3405,27 +3417,45 @@
 }
 
 % Invisible anchor for each song, based on \songid
-% Put a link to it for example like this:
-%   \hyperlink{songid:forca-da-cura-a4fe5a}{Força da Cura}
-%
-% This is available as named destination in the PDF, and viewers ought to be
-% able to jump to it: file.pdf#nameddest=songid:forca-da-cura-a4fe5a
+% If the same \songid occurs multiple times, the first gets
+%   songid:<id>
+% and later ones get
+%   songid:<id>-2, songid:<id>-3, ...
+% This deduplication is done for the anchors only, not for the PSV file
+% written by \UL@writeidtopage
 \newcommand\UL@anchorbyid{%
   \ifx\songid\@empty
-    % no id for this song -> no anchor
+    % no id for this song -> no anchor, no file id
   \else
-    % Only if hyperref's hypertarget is available
+    % Always compute a unique id (even without hyperref), and store it in
+    % \UL@idwithsuffix (e.g., 'forca-da-cura-a4fe5a', 'forca-da-cura-a4fe5a-2', ...)
+    % and \UL@anchorname (e.g., 'songid:<id[-n]>').
+    \begingroup
+      \edef\UL@id{\songid}%
+      % Check whether we've seen this id before
+      \expandafter\ifx\csname UL@seen@\UL@id\endcsname\relax
+        % First occurrence: remember it as 1, no suffix
+        \expandafter\xdef\csname UL@seen@\UL@id\endcsname{1}%
+        \xdef\UL@idwithsuffix{\UL@id}%
+      \else
+        % Later occurrence: increment counter and add -<n> suffix
+        \expandafter\xdef\csname UL@seen@\UL@id\endcsname{%
+          \number\numexpr\csname UL@seen@\UL@id\endcsname+1\relax}%
+        \xdef\UL@idwithsuffix{\UL@id-\csname UL@seen@\UL@id\endcsname}%
+      \fi
+      \xdef\UL@anchorname{songid:\UL@idwithsuffix}%
+    \endgroup
+    % Only if hyperref's hypertarget is available, create the actual anchor
     \ifx\hypertarget\undefined\else
       \ifx\hypertarget\relax\else
-        % "songid:" prefix to avoid clashing with other names
-        \hypertarget{songid:\songid}{}%
+        \hypertarget{\UL@anchorname}{}%
       \fi
     \fi
   \fi
 }
 
 % Append file writing and PDF anchor creation to \songmark to get the
-% correct page.
+% correct page. Note that \UL@anchorbyid must be called first.
 \apptocmd{\songmark}{\UL@anchorbyid\UL@writeidtopage}{}{}
 
 % To set this for a song, use the optional id={} parameter for \beginsong.

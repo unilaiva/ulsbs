@@ -182,9 +182,9 @@ following JSON Schema (draft-07):
             "title_slug": {"type": "string"},
             "id": {
               "type": ["string", "null"],
-              "description": "Optional stable song identifier taken from beginsong option 'id'."
+              "description": "Optional stable song identifier taken from beginsong option 'id'. Duplicate ids are de-duplicated in document order as 'id', 'id-2', 'id-3', ... to match .ulsbs.psv parsing."
             },
-            "number": {"type": ["integer", "null"]},
+            "number": {"type": ["string", "null"]},
             "page": {
               "type": ["integer", "null"],
               "description": "Optional page number."
@@ -355,11 +355,16 @@ class SongInfo:
     - translations:
         Zero or more translated lyric blocks, each with an optional
         language code and lyrics structured as verses and lines.
+    - id:
+        Optional stable song identifier taken from beginsong option 'id'.
+        When the same id is used more than once in the document, later
+        occurrences are de-duplicated in document order as 'id-2', 'id-3',
+        and so on, matching .ulsbs.psv parsing.
     """
 
     title: str
     title_slug: str
-    number: int | None
+    number: str | None
     options: Dict[str, str]
     source_file_relative: Path
     midi_compile_file_relative: Path | None
@@ -1477,7 +1482,25 @@ def _apply_book_field(book_info: BookInfo, field_name: str, value: str) -> None:
 _PSV_ID_RE = re.compile(r"^[a-z0-9-]+$")
 
 
-def _parse_ulsbs_psv_file(psv_file: Path) -> Dict[str, Tuple[int, int]]:
+def _deduplicate_imported_id(imported_id: str, existing_ids: set[str]) -> str:
+    """Return a unique ID, postfixing '-2', '-3', ... if needed.
+
+    The first occurrence of a given imported_id is kept as-is; subsequent
+    duplicates receive a numeric suffix, matching the behaviour used when
+    parsing .ulsbs.psv files.
+    """
+
+    final_id = imported_id
+    if final_id in existing_ids:
+        suffix = 2
+        while f"{imported_id}-{suffix}" in existing_ids:
+            suffix += 1
+        final_id = f"{imported_id}-{suffix}"
+    existing_ids.add(final_id)
+    return final_id
+
+
+def _parse_ulsbs_psv_file(psv_file: Path) -> Dict[str, Tuple[str, int]]:
     """Parse a .ulsbs.psv file containing song IDs, numbers and pages.
 
     Supported non-comment line format is:
@@ -1502,7 +1525,8 @@ def _parse_ulsbs_psv_file(psv_file: Path) -> Dict[str, Tuple[int, int]]:
     except UnicodeDecodeError as e:
         raise ValueError(f"PSV file is not valid UTF-8: {psv_file}") from e
 
-    id_to_nr_page: Dict[str, Tuple[int, int]] = {}
+    id_to_nr_page: Dict[str, Tuple[str, int]] = {}
+    seen_ids: set[str] = set()
 
     for lineno, line in enumerate(txt.splitlines(), start=1):
         stripped = line.lstrip()
@@ -1528,24 +1552,19 @@ def _parse_ulsbs_psv_file(psv_file: Path) -> Dict[str, Tuple[int, int]]:
                 f"{psv_file}:{lineno}: Invalid id '{imported_id}' (expected only lowercase a-z, 0-9, '-')"
             )
 
-        try:
-            songnr = int(songnr_raw.strip())
-        except ValueError as e:
-            raise ValueError(f"{psv_file}:{lineno}: Invalid song number '{songnr_raw.strip()}'") from e
+        songnr = songnr_raw.strip()
+        if not songnr:
+            raise ValueError(f"{psv_file}:{lineno}: Empty song number")
 
         try:
             page = int(page_raw.strip())
         except ValueError as e:
             raise ValueError(f"{psv_file}:{lineno}: Invalid page '{page_raw.strip()}'") from e
 
-        final_id = imported_id
-        if final_id in id_to_nr_page:
-            # Keep first occurrence untouched, postfix duplicates as -2, -3, ...
-            suffix = 2
-            while f"{imported_id}-{suffix}" in id_to_nr_page:
-                suffix += 1
-            final_id = f"{imported_id}-{suffix}"
-
+        # Note that the exact same deduplication is already done by LaTeX when
+        # creating the .psv file, so this shouldn't really be needed here.
+        # It is done just to be extra safe. :)
+        final_id = _deduplicate_imported_id(imported_id, seen_ids)
         id_to_nr_page[final_id] = (songnr, page)
 
     return id_to_nr_page
@@ -1588,7 +1607,7 @@ def build_song_database(
     doc_root = processed_tex.parent
     search_paths = [p.resolve() for p in include_search_paths]
 
-    psv_id_to_nr_page: Dict[str, Tuple[int, int]] | None = None
+    psv_id_to_nr_page: Dict[str, Tuple[str, int]] | None = None
     if ulsbs_psv_file is not None:
         psv_id_to_nr_page = _parse_ulsbs_psv_file(ulsbs_psv_file)
 
@@ -1596,8 +1615,9 @@ def build_song_database(
     book_info.variant = variant
     chapters: List[ChapterInfo] = []
     songs_without_chapter: List[SongInfo] = []
-    visited: set[Path] = set()
+    visiting: set[Path] = set()
 
+    seen_song_ids: set[str] = set()
     current_chapter: ChapterInfo | None = None
     current_songnum: int | None = None
     current_song_in_progress: bool | None = None
@@ -1626,10 +1646,10 @@ def build_song_database(
             alt_titles = []
 
         title_slug = slugify(main_title, default="song")
-        number = current_songnum
         if current_songnum is None:
-            number = None
+            number: str | None = None
         else:
+            number = str(current_songnum)
             current_songnum += 1
 
         # Normalise simple TeX constructs in \beginsong options as well.
@@ -1638,6 +1658,8 @@ def build_song_database(
         song_id = normalised_options.get("id")
         if song_id is not None:
             song_id = song_id.strip() or None
+        if song_id is not None:
+            song_id = _deduplicate_imported_id(song_id, seen_song_ids)
 
         page: int | None = None
         if psv_id_to_nr_page is not None and song_id is not None:
@@ -1689,9 +1711,12 @@ def build_song_database(
         nonlocal current_chapter, current_songnum, current_song_in_progress, order_counter
 
         path = path.resolve()
-        if path in visited:
+        if path in visiting:
+            # Prevent infinite recursion on cyclic includes/documentclass chains,
+            # but allow the same file to be included multiple times in different
+            # places in the document tree.
             return
-        visited.add(path)
+        visiting.add(path)
 
         try:
             src = path.read_text(encoding="utf-8")
@@ -1958,6 +1983,8 @@ def build_song_database(
 
             # Default: skip this backslash and continue
             i += 1
+
+        visiting.remove(path)
 
     process_file(processed_tex, is_root=True)
 

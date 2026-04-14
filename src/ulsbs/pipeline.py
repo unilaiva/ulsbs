@@ -1039,8 +1039,12 @@ def step_midi_audio(
                 parent = parent / song.chapter_slug
             ensure_dir(parent)
 
-            if song.number is not None:
-                num_str = f"{song.number:03d}"
+            if song.number:
+                # Zero-pad purely numeric song numbers; keep others as-is.
+                if str(song.number).isdigit():
+                    num_str = f"{int(song.number):03d}"
+                else:
+                    num_str = str(song.number)
             else:
                 # Fallback to order index if counter is unavailable
                 num_str = f"{song.order_index:03d}"
@@ -1090,8 +1094,12 @@ def step_midi_audio(
                 parent = parent / song.chapter_slug
             ensure_dir(parent)
 
-            if song.number is not None:
-                num_str = f"{song.number:03d}"
+            if song.number:
+                # Zero-pad purely numeric song numbers; keep others as-is.
+                if str(song.number).isdigit():
+                    num_str = f"{int(song.number):03d}"
+                else:
+                    num_str = str(song.number)
             else:
                 num_str = f"{song.order_index:03d}"
             base = f"{num_str}__{song.title_slug}__from-midi"
