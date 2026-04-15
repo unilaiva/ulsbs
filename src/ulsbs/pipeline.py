@@ -69,8 +69,14 @@ from .util import (
     deduplicate_paths_preserve_order,
 )
 
+# The subdirectory name into which asset subdirs 'assets/{tex, ly, img}' from
+# ulsbs package will be copied under in each job's directory. The subdirs are
+# added to TeX/Ly include paths as appropriate.
 _JOB_ULSBS_ASSETS_DIRNAME = "ulsbs-assets"
+
+# Placeholder strings found in some files to be replaced when compiling:
 _LP_EXTRAINSTR_PLACEHOLDER = "ULSBS-PLACEHOLDER-FOR-EXTRA-INSTRUMENT-VARIANT-CODE"
+_PRINTOUT_INPUT_FILE_PLACEHOLDER = "ULSBS-PLACEHOLDER-FOR-INPUT-FILE-PDF"
 
 ABORT_EVENT = threading.Event()
 
@@ -78,12 +84,13 @@ ABORT_EVENT = threading.Event()
 class CompileError(RuntimeError):
     """Error during a compile step; may carry a path to a log file."""
 
-    def __init__(self, message: str, log_path: Path | None = None):
+    def __init__(self, message: str, log_path: Path | None = None) -> None:
         super().__init__(message)
         self.log_path = log_path
 
 
 # Result containers for parallel runs
+
 @dataclass(frozen=True)
 class JobSuccess:
     job: Job
@@ -650,7 +657,7 @@ def step_context_printouts(
             ui.noexec_line(f"{txt_doc} Printout template missing: {template.name}")
             return step
         ctx_out = cwd / f"{out_base}.context"
-        data = read_text(template).replace("REPLACE-THIS-FILENAME.pdf", f"{basename}.pdf")
+        data = read_text(template).replace(_PRINTOUT_INPUT_FILE_PLACEHOLDER, f"{basename}.pdf")
         write_text(ctx_out, data)
         logp = cwd / f"{step:02d}_context-{out_base}.log"
         try:
