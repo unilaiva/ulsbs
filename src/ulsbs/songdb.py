@@ -622,7 +622,7 @@ _LYRICS_TEXT_MACROS_KEEP_ARG: set[str] = {"text", "textit", "emph"}
 def _tex_to_plain_text(text: str) -> str:
     """Replace simple TeX accidentals with Unicode symbols and strip TeX markup.
 
-    - \\flt and \\shrp are converted to ♭ and ♯
+    - \\flt, \\shrp, \\& and \\# are converted to ♭ and ♯
     - TeX comments (%) are removed (but \\% is kept as a literal %)
     - TeX macros are stripped; their mandatory {...} arguments are kept,
       except when they contain only a TeX length (e.g. 0.5pt, 2ex)
@@ -634,6 +634,8 @@ def _tex_to_plain_text(text: str) -> str:
     # 1. Replace music accidentals
     text = re.sub(r"\\flt(?:\{\})?", "♭", text)
     text = re.sub(r"\\shrp(?:\{\})?", "♯", text)
+    text = re.sub(r"\\&", "♭", text)
+    text = re.sub(r"\\#", "♯", text)
 
     # 2. Remove TeX comments: % to end-of-line, except when escaped as \%
     text = re.sub(r"(?<!\\)%[^\r\n]*", "", text)
