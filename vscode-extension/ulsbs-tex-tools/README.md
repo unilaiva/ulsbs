@@ -19,6 +19,7 @@ and either:
 The extension adds ULSBS-aware editing support for LaTeX files, including:
 
 - snippets for common ULSBS song structures
+- completion suggestions for common ULSBS environments (including `explanation`, `passage`, `feeler`, `intersong`)
 - indentation and folding for song environments
 - Outline / breadcrumb structure for songs and related blocks
 - parsing and warnings for common structural issues
@@ -76,7 +77,7 @@ code --install-extension ulsbs-tex-tools-x.y.z.vsix
 
 Or from within VS Code:
 
-- **Extensions → ... → Install from VSIX...**
+- **Extensions -> ... -> Install from VSIX...**
 
 Then reload VS Code.
 
@@ -133,12 +134,15 @@ loaded.
 
 Quick cheat sheet:
 
-- snippets: `snippets/latex.json`
+- snippets (static templates): `snippets/latex.json`
+- completions (context-aware suggestions + some block snippets): `core/completions.js`
 - indentation / folding: `language-configuration.json`
-- song macro tokenizer: `core/songsyntax.js`
-- symbols / outline: `core/symbols.js`
-- parsing and warnings: `core/parser.js`, `core/diagnostics.js`
-- verse / lilypond region helpers: `core/regions.js`
+- tokenizer for structural macros/environments: `core/songsyntax.js`
+- parser (structure + issue production): `core/parser.js`
+- issue helpers (VS Code-independent): `core/issues.js`
+- diagnostics adapter (issues -> VS Code diagnostics): `core/diagnostics.js`
+- symbols / outline provider: `core/symbols.js`
+- verse / lilypond region helpers (decorations): `core/regions.js`
 - workspace detection: `core/workspace.js`
 - workspace scanning / songbook index: `core/songbooks.js`
 - sidebar tree view: `core/tree.js`
@@ -149,7 +153,17 @@ Quick cheat sheet:
 - supported file types / exclusions: `core/filetypes.js`
 - extension entry point: `extension.js`
 - settings: `package.json`, `core/config.js`
+- command UI helpers: `core/ui.js`
 - new songbook template: `assets/songbook-template_A5.tex`
+
+### Architecture notes
+
+- If you add a new ULSBS block/macro:
+  1. Add tokens in `core/songsyntax.js`.
+  2. Add structure + misuse warnings in `core/parser.js`.
+  3. Diagnostics will pick up warnings automatically via `core/diagnostics.js`.
+  4. Add outline mapping in `core/symbols.js` if you want it in the Outline view.
+  5. Add context-aware suggestions in `core/completions.js` (and/or a static snippet in `snippets/latex.json`).
 
 ## Browser support
 

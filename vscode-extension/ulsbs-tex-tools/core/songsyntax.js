@@ -77,6 +77,14 @@ const PATTERNS = [
       language: (match[1] || match[2] || "").trim()
     })
   },
+  {
+    type: "beginlilywrap",
+    regex: /\\begin\{lilywrap\}/g
+  },
+  {
+    type: "endlilywrap",
+    regex: /\\end\{lilywrap\}/g
+  },
   { type: "beginlilypond", regex: /\\begin\{lilypond\}/g },
   { type: "endsong", regex: /\\endsong\b/g },
   { type: "endverse", regex: /\\endverse\b/g },

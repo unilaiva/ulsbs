@@ -33,6 +33,7 @@
  */
 
 const { tokenizeSongLine } = require("./songsyntax");
+const { issueFromToken, issueAt } = require("./issues");
 
 /** @param {string} text @param {number} index @returns {boolean} */
 function isEscapedPercent(text, index) {
@@ -57,15 +58,6 @@ function stripComment(line) {
   return line;
 }
 
-function makeIssue(severity, message, token) {
-  return {
-    severity,
-    message,
-    line: token.line,
-    start: token.index,
-    end: token.index + token.text.length
-  };
-}
 
 function extractSongMeta(optionText) {
   const meta = {};
@@ -214,6 +206,26 @@ function analyzeText(text) {
     }
 
     if (token.type === "beginsongsenv") {
+      if (currentSong()) {
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "\\begin{songs} inside a song; songs environments should not be nested inside songs",
+            token
+          )
+        );
+      }
+
+      if (currentSongsEnv()) {
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "Nested \\begin{songs}; close the previous songs environment before opening a new one",
+            token
+          )
+        );
+      }
+
       const node = makeNode("songsenv", "songs", "\\begin{songs}", token);
       stack.push({ type: "songsenv", node });
       continue;
@@ -221,7 +233,13 @@ function analyzeText(text) {
 
     if (token.type === "endsongsenv") {
       if (!closeNearest("songsenv", token)) {
-        analysis.issues.push(makeIssue("warning", "\\end{songs} without matching \\begin{songs}", token));
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "\\end{songs} without matching \\begin{songs}",
+            token
+          )
+        );
       }
       continue;
     }
@@ -231,7 +249,7 @@ function analyzeText(text) {
 
       if (inSong) {
         analysis.issues.push(
-          makeIssue(
+          issueFromToken(
             "warning",
             "\\begin{intersong} inside a song; intersong blocks must be between songs, not inside them",
             token
@@ -252,7 +270,7 @@ function analyzeText(text) {
     if (token.type === "endintersong") {
       if (!closeNearest("intersong", token)) {
         analysis.issues.push(
-          makeIssue(
+          issueFromToken(
             "warning",
             "\\end{intersong} without matching \\begin{intersong}",
             token
@@ -279,7 +297,7 @@ function analyzeText(text) {
     if (token.type === "endexplanation") {
       if (!closeNearest("explanation", token)) {
         analysis.issues.push(
-          makeIssue(
+          issueFromToken(
             "warning",
             "\\end{explanation} without matching \\begin{explanation}",
             token
@@ -306,7 +324,7 @@ function analyzeText(text) {
     if (token.type === "endpassage") {
       if (!closeNearest("passage", token)) {
         analysis.issues.push(
-          makeIssue(
+          issueFromToken(
             "warning",
             "\\end{passage} without matching \\begin{passage}",
             token
@@ -330,7 +348,7 @@ function analyzeText(text) {
     if (token.type === "endfeeler") {
       if (!closeNearest("feeler", token)) {
         analysis.issues.push(
-          makeIssue(
+          issueFromToken(
             "warning",
             "\\end{feeler} without matching \\begin{feeler}",
             token
@@ -343,9 +361,19 @@ function analyzeText(text) {
     if (token.type === "beginsong") {
       resetSongCounters();
 
+      if (currentSong()) {
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "\\beginsong inside another song; songs cannot be nested",
+            token
+          )
+        );
+      }
+
       if (isMainCandidate && !currentSongsEnv()) {
         analysis.issues.push(
-          makeIssue(
+          issueFromToken(
             "warning",
             "\\beginsong is not inside a \\begin{songs} ... \\end{songs} environment in this main document",
             token
@@ -376,9 +404,30 @@ function analyzeText(text) {
     if (token.type === "beginverse") {
       const song = currentSong();
       if (!song) {
-        analysis.issues.push(makeIssue("warning", "\\beginverse outside a song", token));
+        analysis.issues.push(issueFromToken("warning", "\\beginverse outside a song", token));
         continue;
       }
+
+      if (currentNearest(["lilypond"])) {
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "\\beginverse inside a lilypond block; verse blocks should not be inside \\begin{lilypond}",
+            token
+          )
+        );
+      }
+
+      if (currentNearest(["verse", "mnverse"])) {
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "Nested verse start; close the previous verse before starting a new one",
+            token
+          )
+        );
+      }
+
       counters.verse += 1;
       const node = makeNode("verse", `verse ${counters.verse}`, "\\beginverse", token);
       attachChild(node, ["song"]);
@@ -389,9 +438,30 @@ function analyzeText(text) {
     if (token.type === "mnbeginverse") {
       const song = currentSong();
       if (!song) {
-        analysis.issues.push(makeIssue("warning", "\\mnbeginverse outside a song", token));
+        analysis.issues.push(issueFromToken("warning", "\\mnbeginverse outside a song", token));
         continue;
       }
+
+      if (currentNearest(["lilypond"])) {
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "\\mnbeginverse inside a lilypond block; verse blocks should not be inside \\begin{lilypond}",
+            token
+          )
+        );
+      }
+
+      if (currentNearest(["verse", "mnverse"])) {
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "Nested verse start; close the previous verse before starting a new one",
+            token
+          )
+        );
+      }
+
       counters.verse += 1;
       const node = makeNode("mnverse", `verse ${counters.verse}`, "\\mnbeginverse", token);
       attachChild(node, ["song"]);
@@ -400,9 +470,25 @@ function analyzeText(text) {
     }
 
     if (token.type === "beginrep") {
+      if (currentNearest(["lilypond"])) {
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "\\beginrep inside a lilypond block; rep blocks should not be inside \\begin{lilypond}",
+            token
+          )
+        );
+      }
+
       const parent = currentNearest(["rep", "verse", "mnverse", "translation"]);
       if (!parent) {
-        analysis.issues.push(makeIssue("warning", "\\beginrep outside a verse or translation", token));
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "\\beginrep outside a verse or translation",
+            token
+          )
+        );
         continue;
       }
       counters.rep += 1;
@@ -414,9 +500,20 @@ function analyzeText(text) {
 
     if (token.type === "begintranslation") {
       if (!currentSong()) {
-        analysis.issues.push(makeIssue("warning", "translation block outside a song", token));
+        analysis.issues.push(issueFromToken("warning", "translation block outside a song", token));
         continue;
       }
+
+      if (currentNearest(["lilypond"])) {
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "translation block inside a lilypond block; translation should not be inside \\begin{lilypond}",
+            token
+          )
+        );
+      }
+
       counters.translation += 1;
       const lang = token.language || "";
       const label = lang
@@ -437,7 +534,7 @@ function analyzeText(text) {
 
       if (!lang) {
         analysis.issues.push(
-          makeIssue(
+          issueFromToken(
             "warning",
             "Translation block has no language code; consider using [EN] or similar",
             token
@@ -449,9 +546,30 @@ function analyzeText(text) {
 
     if (token.type === "beginlilypond") {
       if (!currentSong()) {
-        analysis.issues.push(makeIssue("warning", "\\begin{lilypond} outside a song", token));
+        analysis.issues.push(issueFromToken("warning", "\\begin{lilypond} outside a song", token));
         continue;
       }
+
+      if (currentNearest(["verse", "mnverse", "rep", "translation"])) {
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "\\begin{lilypond} inside a verse/rep/translation; lilypond blocks should be direct children of a song",
+            token
+          )
+        );
+      }
+
+      if (currentNearest(["lilypond"])) {
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "Nested \\begin{lilypond}; close the previous lilypond block before opening a new one",
+            token
+          )
+        );
+      }
+
       counters.lilypond += 1;
       const node = makeNode(
         "lilypond",
@@ -466,42 +584,78 @@ function analyzeText(text) {
 
     if (token.type === "endverse") {
       if (!closeNearestAny(["verse", "mnverse"], token)) {
-        analysis.issues.push(makeIssue("warning", "\\endverse without matching \\beginverse or \\mnbeginverse", token));
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "\\endverse without matching \\beginverse or \\mnbeginverse",
+            token
+          )
+        );
       }
       continue;
     }
 
     if (token.type === "mnendverse") {
       if (!closeNearest("mnverse", token)) {
-        analysis.issues.push(makeIssue("warning", "\\mnendverse without matching \\mnbeginverse", token));
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "\\mnendverse without matching \\mnbeginverse",
+            token
+          )
+        );
       }
       continue;
     }
 
     if (token.type === "endrep") {
       if (!closeNearest("rep", token)) {
-        analysis.issues.push(makeIssue("warning", "\\endrep without matching \\beginrep", token));
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "\\endrep without matching \\beginrep",
+            token
+          )
+        );
       }
       continue;
     }
 
     if (token.type === "endtranslation") {
       if (!closeNearest("translation", token)) {
-        analysis.issues.push(makeIssue("warning", "translation end without matching translation start", token));
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "translation end without matching translation start",
+            token
+          )
+        );
       }
       continue;
     }
 
     if (token.type === "endlilypond") {
       if (!closeNearest("lilypond", token)) {
-        analysis.issues.push(makeIssue("warning", "\\end{lilypond} without matching \\begin{lilypond}", token));
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "\\end{lilypond} without matching \\begin{lilypond}",
+            token
+          )
+        );
       }
       continue;
     }
 
     if (token.type === "endsong") {
       if (!closeNearest("song", token)) {
-        analysis.issues.push(makeIssue("warning", "\\endsong without matching \\beginsong", token));
+        analysis.issues.push(
+          issueFromToken(
+            "warning",
+            "\\endsong without matching \\beginsong",
+            token
+          )
+        );
       }
       continue;
     }
@@ -516,29 +670,35 @@ function analyzeText(text) {
 
     if (entry.type === "song") {
       analysis.songs.push(entry.node);
-      analysis.issues.push({
-        severity: "warning",
-        message: "Unclosed \\beginsong at end of file",
-        line: entry.node.startLine,
-        start: entry.node.startChar,
-        end: entry.node.startChar + 10
-      });
+      analysis.issues.push(
+        issueAt(
+          "warning",
+          "Unclosed \\beginsong at end of file",
+          entry.node.startLine,
+          entry.node.startChar,
+          entry.node.startChar + Math.max(10, entry.node.openTextLength ?? 10)
+        )
+      );
     } else if (entry.type === "songsenv") {
-      analysis.issues.push({
-        severity: "warning",
-        message: "Unclosed \\begin{songs} at end of file",
-        line: entry.node.startLine,
-        start: entry.node.startChar,
-        end: entry.node.startChar + 13
-      });
+      analysis.issues.push(
+        issueAt(
+          "warning",
+          "Unclosed \\begin{songs} at end of file",
+          entry.node.startLine,
+          entry.node.startChar,
+          entry.node.startChar + Math.max(13, entry.node.openTextLength ?? 13)
+        )
+      );
     } else {
-      analysis.issues.push({
-        severity: "warning",
-        message: `Unclosed ${entry.node.detail || entry.node.type} at end of file`,
-        line: entry.node.startLine,
-        start: entry.node.startChar,
-        end: entry.node.startChar + 10
-      });
+      analysis.issues.push(
+        issueAt(
+          "warning",
+          `Unclosed ${entry.node.detail || entry.node.type} at end of file`,
+          entry.node.startLine,
+          entry.node.startChar,
+          entry.node.startChar + Math.max(10, entry.node.openTextLength ?? 10)
+        )
+      );
     }
   }
 

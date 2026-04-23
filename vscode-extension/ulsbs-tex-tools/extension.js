@@ -16,6 +16,12 @@ const { registerChordDecorations } = require("./core/chords");
 const { registerDiagnostics } = require("./core/diagnostics");
 const { registerCompileCommands } = require("./core/compile");
 const { registerTreeView } = require("./core/tree");
+const { registerCompletionProvider } = require("./core/completions");
+const {
+  requirePrimaryWorkspaceFolder,
+  uriExists,
+  logAndShowError
+} = require("./core/ui");
 
 /**
  * Extension activation entry point.
@@ -29,6 +35,7 @@ async function activate(context) {
   registerSymbolProvider(vscode, context);
   registerMeasureBarDecorations(vscode, context);
   registerChordDecorations(vscode, context);
+  registerCompletionProvider(vscode, context);
 
   // Controllers / feature modules
   const treeController = registerTreeView(vscode, context, songbookService);
@@ -40,31 +47,17 @@ async function activate(context) {
     treeController
   );
 
-  function getPrimaryWorkspaceFolder() {
-    return vscode.workspace.workspaceFolders?.[0] ?? null;
-  }
-
-  /** @param {import('vscode').Uri} uri */
-  async function uriExists(uri) {
-    try {
-      await vscode.workspace.fs.stat(uri);
-      return true;
-    } catch {
-      return false;
-    }
-  }
 
   context.subscriptions.push(
     vscode.commands.registerCommand("ulsbsTexTools.openConfig", async () => {
       try {
-        const folder = getPrimaryWorkspaceFolder();
+        const folder = requirePrimaryWorkspaceFolder(vscode);
         if (!folder) {
-          void vscode.window.showErrorMessage("No workspace folder is open.");
           return;
         }
 
         const configUri = vscode.Uri.joinPath(folder.uri, ULSBS_CONFIG_BASENAME);
-        if (!(await uriExists(configUri))) {
+        if (!(await uriExists(vscode, configUri))) {
           void vscode.window.showErrorMessage(
             `ULSBS configuration file not found at ${vscode.workspace.asRelativePath(configUri, false)}`
           );
@@ -73,8 +66,10 @@ async function activate(context) {
 
         await vscode.window.showTextDocument(configUri);
       } catch (error) {
-        console.error("ULSBS: Failed to open configuration file", error);
-        void vscode.window.showErrorMessage(
+        logAndShowError(
+          vscode,
+          "ULSBS: Failed to open configuration file",
+          error,
           "Failed to open ULSBS configuration file."
         );
       }
@@ -82,9 +77,8 @@ async function activate(context) {
 
     vscode.commands.registerCommand("ulsbsTexTools.createSongbook", async () => {
       try {
-        const folder = getPrimaryWorkspaceFolder();
+        const folder = requirePrimaryWorkspaceFolder(vscode);
         if (!folder) {
-          void vscode.window.showErrorMessage("No workspace folder is open.");
           return;
         }
 
@@ -92,7 +86,7 @@ async function activate(context) {
         const clsRelative = "ulsbs/src/ulsbs/assets/tex/ulsbs-songbook.cls";
         const clsUri = vscode.Uri.joinPath(folder.uri, clsRelative);
 
-        if (!(await uriExists(clsUri))) {
+        if (!(await uriExists(vscode, clsUri))) {
           void vscode.window.showErrorMessage(
             `ULSBS songbook class not found at ${vscode.workspace.asRelativePath(clsUri, false)}`
           );
@@ -118,7 +112,7 @@ async function activate(context) {
         const filename = `${name}.tex`;
 
         const targetUri = vscode.Uri.joinPath(folder.uri, filename);
-        if (await uriExists(targetUri)) {
+        if (await uriExists(vscode, targetUri)) {
           void vscode.window.showErrorMessage(
             `File already exists: ${vscode.workspace.asRelativePath(targetUri, false)}`
           );
@@ -136,8 +130,10 @@ async function activate(context) {
         try {
           templateBytes = await vscode.workspace.fs.readFile(templateUri);
         } catch (error) {
-          console.error("ULSBS: Failed to read songbook template", error);
-          void vscode.window.showErrorMessage(
+          logAndShowError(
+            vscode,
+            "ULSBS: Failed to read songbook template",
+            error,
             "Failed to read ULSBS songbook template."
           );
           return;
@@ -149,8 +145,12 @@ async function activate(context) {
         await songbookService.refresh();
         treeController.refresh();
       } catch (error) {
-        console.error("ULSBS: Failed to create new songbook", error);
-        void vscode.window.showErrorMessage("Failed to create new ULSBS songbook.");
+        logAndShowError(
+          vscode,
+          "ULSBS: Failed to create new songbook",
+          error,
+          "Failed to create new ULSBS songbook."
+        );
       }
     })
   );

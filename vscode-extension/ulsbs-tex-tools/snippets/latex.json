@@ -1,71 +1,62 @@
 {
-  "ULSBS chord definition": {
+  "Chord definition (ULSBS)": {
     "prefix": "\\[",
     "body": "\\[${1}]",
-    "description": "Insert \\[ ... ]"
+    "description": "Insert \\[ ... ] (ULSBS). Place chord names within this."
   },
 
-  "begin{songs} ... end{songs}": {
-    "prefix": [ "\\begin{songs}" ],
+  "begin{songs} ... end{songs} (ULSBS)": {
+    "prefix": [ "begin{songs}", "\\begin{songs}" ],
     "body": [
       "\\begin{songs}",
       "\t$0",
-      "\\end{songs"
+      "\\end{songs}"
     ],
-    "description": "Insert songs environment"
+    "description": "Insert songs environment. Songs must be within songs environments."
   },
 
-  "beginsong ... endsong": {
-    "prefix": [ "beginsong", "\\beginsong" ],
-    "body": [
-      "\\beginsong{${1:title}}",
-      "\t$0",
-      "\\endsong"
-    ],
-    "description": "Insert beginsong/endsong block"
-  },
 
-  "beginverse ... endverse": {
-    "prefix": [ "beginverse", "\\beginverse" ],
-    "body": [
-      "\\beginverse",
-      "\t$0",
-      "\\endverse"
-    ],
-    "description": "Insert beginverse/endverse block"
-  },
-
-  "mnbeginverse ... mnendverse": {
-    "prefix": [ "mnbeginverse", "\\mnbeginverse" ],
-    "body": [
-      "\\mnbeginverse",
-      "\t$0",
-      "\\mnendverse"
-    ],
-    "description": "Insert mnbeginverse/mnendverse block"
-  },
-
-  "beginrep ... endrep": {
-    "prefix": [ "beginrep", "\\beginrep" ],
-    "body": [
-      "\\beginrep",
-      "\t$0",
-      "\\endrep"
-    ],
-    "description": "Insert beginrep/endrep block"
-  },
-
-  "begin{translation} ... end{translation}": {
+  "begin{translation} ... end{translation} (ULSBS)": {
     "prefix": [ "translation", "\\begin{translation}" ],
     "body": [
-      "\\begin{translation}",
+      "\\begin{translation}[$1]",
       "\t$0",
       "\\end{translation}"
     ],
     "description": "Insert translation environment"
   },
 
-  "begin{lilypond} ... end{lilypond}": {
+  "begin{explanation} ... end{explanation} (ULSBS)": {
+    "prefix": [ "explanation", "\\begin{explanation}" ],
+    "body": [
+      "\\begin{explanation}[$1]",
+      "\t$0",
+      "\\end{explanation}"
+    ],
+    "description": "Insert explanation environment"
+  },
+
+  "begin{passage} ... end{passage} (ULSBS)": {
+    "prefix": [ "passage", "\\begin{passage}" ],
+    "body": [
+      "\\begin{passage}[$1]",
+      "\t$0",
+      "\\end{passage}"
+    ],
+    "description": "Insert passage environment"
+  },
+
+  "begin{feeler} ... end{feeler} (ULSBS)": {
+    "prefix": [ "feeler", "\\begin{feeler}" ],
+    "body": [
+      "\\begin{feeler}",
+      "\t$0",
+      "\\end{feeler}"
+    ],
+    "description": "Insert feeler environment"
+  },
+
+  "begin{lilypond} ... end{lilypond} (ULSBS)": {
     "prefix": [ "lilypond", "\\begin{lilypond}" ],
     "body": [
       "\\begin{lilypond}",
@@ -75,7 +66,7 @@
     "description": "Insert lilypond environment"
   },
 
-  "begin{lilywrap+lilypond} ... end{lilypond+lilywrap}": {
+  "begin{lilywrap+lilypond} ... end{lilypond+lilywrap} (ULSBS)": {
     "prefix": [ "lilywrap", "\\begin{lilywrap}" ],
     "body": [
       "\\begin{lilywrap}\\begin{lilypond}",
