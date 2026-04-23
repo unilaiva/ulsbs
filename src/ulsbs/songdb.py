@@ -532,6 +532,14 @@ class SongbookData:
         Number of songs that have an explicit SongInfo.id.
     - creation_time:
         ISO 8601 timestamp when this database instance was created.
+
+    Notes
+    -----
+    SongbookData instances are primarily created by build_song_database().
+
+    The helper methods filter_by_song_ids() and to_text() can be used by CLI
+    tools to post-process/serialise a database without re-parsing the TeX
+    sources.
     """
 
     book_info: BookInfo
@@ -604,6 +612,305 @@ class SongbookData:
             self.to_json(indent=indent),
             encoding="utf-8",
         )
+
+    def filter_by_song_ids(self, only_song_ids: Sequence[str] | None) -> "SongbookData":
+        """Return a reduced SongbookData containing only songs whose id matches.
+
+        Parameters
+        ----------
+        - only_song_ids:
+            Iterable/sequence of SongInfo.id values to keep. Songs with id=None
+            can never match and are therefore removed.
+
+        Returns
+        -------
+        A new SongbookData instance with:
+
+        - chapters filtered to only include chapters that still contain at
+          least one song
+        - songs_without_chapter filtered similarly
+        - total_songs and songs_with_id recomputed for the reduced dataset
+
+        Notes
+        -----
+        - Document order (SongInfo.order_index) is preserved.
+        - BookInfo and per-chapter metadata are kept as-is.
+        """
+
+        if not only_song_ids:
+            return self
+
+        wanted = {s for s in only_song_ids if s}
+        if not wanted:
+            return self
+
+        def _keep(song: SongInfo) -> bool:
+            return song.id is not None and song.id in wanted
+
+        new_songs_without = [s for s in self.songs_without_chapter if _keep(s)]
+
+        new_chapters: List[ChapterInfo] = []
+        for chap in self.chapters:
+            kept_songs = [s for s in chap.songs if _keep(s)]
+            if not kept_songs:
+                continue
+            new_chapters.append(
+                ChapterInfo(
+                    title=chap.title,
+                    slug=chap.slug,
+                    source_file_relative=chap.source_file_relative,
+                    songs=kept_songs,
+                    audio_links=list(chap.audio_links),
+                )
+            )
+
+        total = len(new_songs_without) + sum(len(c.songs) for c in new_chapters)
+        songs_with_id = total  # by construction all kept songs have a non-null id
+
+        return SongbookData(
+            book_info=self.book_info,
+            chapters=new_chapters,
+            songs_without_chapter=new_songs_without,
+            source_file_relative=self.source_file_relative,
+            total_songs=total,
+            songs_with_id=songs_with_id,
+            creation_time=self.creation_time,
+        )
+
+    def to_text(self, *, markdown: bool = False) -> str:
+        """Serialise selected metadata as plain text or Markdown.
+
+        This is intended for human-friendly CLI output (ulsbs-bookmeta --plain
+        / --markdown). The output is intentionally compact and prints only:
+
+        - book title (+ song count)
+        - chapter titles (+ song count) and chapter audio links
+        - for each song: title, id, song key (from beginsong option 'key' when
+          present), song audio links, lyrics and translations
+
+        Formatting rules
+        ----------------
+        - Fields that are not set are omitted entirely.
+        - Verse line divisions are preserved: each array element in
+          SongInfo.lyrics[verse] and Translation.lyrics[verse] is printed as
+          its own line.
+        - Verses are separated by a blank line.
+        - There are two blank lines between songs.
+        - If there are no songs inside any chapter (i.e. all songs are in
+          songs_without_chapter), chapter headings are omitted.
+
+        Parameters
+        ----------
+        - markdown:
+            When True, output is formatted as Markdown.
+
+        Returns
+        -------
+        A single string that (when non-empty) ends with a trailing newline.
+        """
+
+        def _song_count() -> int:
+            return len(self.songs_without_chapter) + sum(len(c.songs) for c in self.chapters)
+
+        def _format_audio_link_plain(link: AudioLink) -> str:
+            extras: List[str] = []
+            if link.title:
+                extras.append(link.title)
+            if link.key:
+                extras.append(f"key={link.key}")
+            if link.pitch:
+                extras.append(f"pitch={link.pitch}")
+            if extras:
+                return f"{link.url} ({', '.join(extras)})"
+            return link.url
+
+        def _format_audio_link_md(link: AudioLink) -> str:
+            # Use angle brackets to make bare URLs clickable.
+            url = f"<{link.url}>"
+            extras: List[str] = []
+            if link.key:
+                extras.append(f"key={link.key}")
+            if link.pitch:
+                extras.append(f"pitch={link.pitch}")
+            extras_str = f" ({', '.join(extras)})" if extras else ""
+            if link.title:
+                return f"**{link.title}**: {url}{extras_str}"
+            return f"{url}{extras_str}"
+
+        def _append_verses_plain(lines: List[str], verses: List[List[str]]) -> None:
+            for vi, verse in enumerate(verses):
+                lines.extend(verse)
+                if vi != len(verses) - 1:
+                    lines.append("")
+
+        def _verses_to_text_block(verses: List[List[str]]) -> str:
+            blocks: List[str] = []
+            for verse in verses:
+                blocks.append("\n".join(verse))
+            return "\n\n".join(blocks)
+
+        def _append_song(lines: List[str], song: SongInfo) -> None:
+            # Title
+            if markdown:
+                lines.append(f"### SONG: {song.title}")
+            else:
+                lines.append(f"SONG: {song.title}")
+                # Extra spacing requested for plain mode.
+                lines.append("")
+
+            # Metadata block (id/key/audio)
+            meta_emitted = False
+
+            if song.id:
+                meta_emitted = True
+                if markdown:
+                    lines.append(f"- **id:** `{song.id}`")
+                else:
+                    lines.append(f"id: {song.id}")
+
+            song_key = song.options.get("key")
+            if song_key:
+                meta_emitted = True
+                if markdown:
+                    lines.append(f"- **key:** `{song_key}`")
+                else:
+                    lines.append(f"key: {song_key}")
+
+            if song.audio_links:
+                meta_emitted = True
+                if markdown:
+                    lines.append("- **audio links:**")
+                    for link in song.audio_links:
+                        lines.append(f"  - {_format_audio_link_md(link)}")
+                else:
+                    for link in song.audio_links:
+                        lines.append(f"audio: {_format_audio_link_plain(link)}")
+
+            if (not markdown) and meta_emitted and (song.lyrics or song.translations):
+                # Extra spacing requested for plain mode.
+                lines.append("")
+
+            # Lyrics
+            if song.lyrics:
+                if markdown:
+                    lines.append("")
+                    lines.append("#### Lyrics")
+                    lines.append("```text")
+                    lines.append(_verses_to_text_block(song.lyrics))
+                    lines.append("```")
+                else:
+                    lines.append("LYRICS:")
+                    lines.append("")
+                    _append_verses_plain(lines, song.lyrics)
+
+            # Translations
+            if song.translations:
+                if not markdown:
+                    # Add a blank line between lyrics and translations.
+                    if song.lyrics:
+                        lines.append("")
+
+                for tr in song.translations:
+                    if markdown:
+                        lines.append("")
+                        if tr.language:
+                            lines.append(f"#### Translation ({tr.language})")
+                        else:
+                            lines.append("#### Translation")
+                        lines.append("```text")
+                        lines.append(_verses_to_text_block(tr.lyrics))
+                        lines.append("```")
+                    else:
+                        if tr.language:
+                            lines.append(f"TRANSLATION ({tr.language}):")
+                        else:
+                            lines.append("TRANSLATION:")
+                        lines.append("")
+                        _append_verses_plain(lines, tr.lyrics)
+                        # Blank line between translation blocks.
+                        lines.append("")
+
+                if not markdown and lines and lines[-1] == "":
+                    # Remove the final extra blank line after the last
+                    # translation block, if we added one.
+                    lines.pop()
+
+        out_lines: List[str] = []
+
+        book_title = self.book_info.maintitle or self.book_info.subtitle
+        if book_title:
+            count = _song_count()
+            if markdown:
+                out_lines.append(f"# {book_title} ({count} song{'s' if count != 1 else ''})")
+            else:
+                out_lines.append(f"{book_title} ({count} song{'s' if count != 1 else ''})")
+
+        if self.book_info.audio_links:
+            if markdown:
+                if book_title:
+                    out_lines.append("")
+                out_lines.append("## Audio links")
+                for link in self.book_info.audio_links:
+                    out_lines.append(f"- {_format_audio_link_md(link)}")
+            else:
+                for link in self.book_info.audio_links:
+                    out_lines.append(f"audio: {_format_audio_link_plain(link)}")
+
+        has_chapter_songs = any(c.songs for c in self.chapters)
+
+        songs_to_print: List[Tuple[str | None, ChapterInfo | None, SongInfo]] = []
+        # songs_without_chapter are printed first (as-is), then chapters.
+        for s in self.songs_without_chapter:
+            songs_to_print.append((None, None, s))
+        if has_chapter_songs:
+            for chap in self.chapters:
+                if not chap.songs:
+                    continue
+                songs_to_print.append(("__chapter_header__", chap, None))  # type: ignore[arg-type]
+                for s in chap.songs:
+                    songs_to_print.append((None, chap, s))
+
+        # Build output.
+        first_song_emitted = False
+        pending_chapter_first_song_gap_plain = False
+        for kind, chap, song in songs_to_print:
+            if kind == "__chapter_header__":
+                if out_lines:
+                    out_lines.append("")
+                chap_song_count = len(chap.songs) if chap else 0
+                if markdown:
+                    out_lines.append(
+                        f"## CHAPTER: {chap.title} ({chap_song_count} song{'s' if chap_song_count != 1 else ''})"
+                    )
+                    if chap.audio_links:
+                        for link in chap.audio_links:
+                            out_lines.append(f"- {_format_audio_link_md(link)}")
+                else:
+                    out_lines.append(
+                        f"CHAPTER: {chap.title} ({chap_song_count} song{'s' if chap_song_count != 1 else ''})"
+                    )
+                    for link in chap.audio_links:
+                        out_lines.append(f"audio: {_format_audio_link_plain(link)}")
+                    pending_chapter_first_song_gap_plain = True
+                continue
+
+            if song is None:
+                continue
+
+            blanks_before_song = 2 if first_song_emitted else 0
+            if pending_chapter_first_song_gap_plain and (not markdown):
+                blanks_before_song = max(blanks_before_song, 2)
+
+            out_lines.extend([""] * blanks_before_song)
+
+            pending_chapter_first_song_gap_plain = False
+            first_song_emitted = True
+
+            _append_song(out_lines, song)
+
+        if not out_lines:
+            return ""
+        return "\n".join(out_lines).rstrip() + "\n"
 
 
 # Helpers
@@ -1266,7 +1573,14 @@ def _strip_macros_for_lyrics(text: str) -> str:
             i = k
 
     # Second pass: collapse remaining standalone { ... } groups.
-    return _collapse_standalone_brace_groups("".join(out))
+    out_txt = _collapse_standalone_brace_groups("".join(out))
+
+    # Final pass: strip any remaining literal braces. This is done *after*
+    # macro/argument handling so that braces can still be used for grouping
+    # while parsing.
+    out_txt = out_txt.replace("{", "").replace("}", "")
+
+    return out_txt
 
 
 def _normalise_verses(
@@ -1336,6 +1650,18 @@ def _extract_lyrics_from_song_block(
         while i < n:
             if raw_song.startswith("\\mnbeginverse", i):
                 start = i + len("\\mnbeginverse")
+
+                # Optional [..] argument (e.g. \mnbeginverse[1]) should not be
+                # treated as lyric content.
+                j = start
+                while j < n and raw_song[j].isspace():
+                    j += 1
+                if j < n and raw_song[j] == "[":
+                    try:
+                        _, start = _parse_optional_bracket_argument(raw_song, j)
+                    except ValueError:
+                        start = j
+
                 end = raw_song.find("\\mnendverse", start)
                 if end == -1:
                     break
@@ -1345,6 +1671,18 @@ def _extract_lyrics_from_song_block(
 
             if raw_song.startswith("\\beginverse", i):
                 start = i + len("\\beginverse")
+
+                # Optional [..] argument (e.g. \beginverse[1]) should not be
+                # treated as lyric content.
+                j = start
+                while j < n and raw_song[j].isspace():
+                    j += 1
+                if j < n and raw_song[j] == "[":
+                    try:
+                        _, start = _parse_optional_bracket_argument(raw_song, j)
+                    except ValueError:
+                        start = j
+
                 end = raw_song.find("\\endverse", start)
                 if end == -1:
                     break
@@ -1354,6 +1692,18 @@ def _extract_lyrics_from_song_block(
 
             if raw_song.startswith("\\begin{verse}", i):
                 start = i + len("\\begin{verse}")
+
+                # Optional [..] argument (e.g. \begin{verse}[1]) should not be
+                # treated as lyric content.
+                j = start
+                while j < n and raw_song[j].isspace():
+                    j += 1
+                if j < n and raw_song[j] == "[":
+                    try:
+                        _, start = _parse_optional_bracket_argument(raw_song, j)
+                    except ValueError:
+                        start = j
+
                 end = raw_song.find("\\end{verse}", start)
                 if end == -1:
                     break

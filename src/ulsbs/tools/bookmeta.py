@@ -6,6 +6,7 @@
 CLI helper to:
 
 - dump song/chapter metadata as JSON
+- dump a simplified plain-text or Markdown summary of the book contents
 - check song id coverage/validity
 - interactively create/fix song ids in source files
 """
@@ -35,7 +36,7 @@ if sys.version_info < REQUIRED:
 
 
 from ..constants import CONTENT_DIRNAME, INCLUDE_DIRNAME  # noqa: E402 (must test Python version first)
-from ..songdb import SongInfo, build_song_database  # noqa: E402 (must test Python version first)
+from ..songdb import SongInfo, SongbookData, build_song_database  # noqa: E402 (must test Python version first)
 from ..ui import UI  # noqa: E402 (must test Python version first)
 from ..util import slugify  # noqa: E402 (must test Python version first)
 
@@ -148,7 +149,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="ulsbs-bookmeta",
         description=(
-            "Parse a songbook main TeX file and either output JSON metadata, "
+            "Parse a songbook main TeX file and either output JSON, plain text or Markdown metadata, "
             "check song ids, or interactively create/fix song ids. "
             "Follows \\input / \\include using MAIN_TEX's directory, any -I paths, "
             f"'{CONTENT_DIRNAME}' / '{INCLUDE_DIRNAME}' subdirectories under MAIN_TEX and the current working "
@@ -158,6 +159,22 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
     mode = p.add_mutually_exclusive_group(required=True)
     mode.add_argument("--json", action="store_true", help="Output SongbookData as JSON")
+    mode.add_argument(
+        "--plain",
+        action="store_true",
+        help=(
+            "Output a simplified plain-text listing of the book structure and songs "
+            "(titles/ids/audio/lyrics/translations only)"
+        ),
+    )
+    mode.add_argument(
+        "--markdown",
+        action="store_true",
+        help=(
+            "Output a simplified Markdown listing of the book structure and songs "
+            "(titles/ids/audio/lyrics/translations only)"
+        ),
+    )
     mode.add_argument(
         "--check-song-ids",
         action="store_true",
@@ -191,7 +208,22 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "-o",
         "--output",
         type=Path,
-        help="(json mode only) Write JSON to this file instead of stdout.",
+        help=(
+            "(json/plain/markdown modes only) Write output to this file instead of stdout. "
+            "In --json mode this writes JSON; in --plain/--markdown modes this writes the text output."
+        ),
+    )
+
+    p.add_argument(
+        "-i",
+        "--only-song-ids",
+        nargs="+",
+        default=None,
+        metavar="ID",
+        help=(
+            "Only include songs whose beginsong option 'id' matches one of these values. "
+            "This filter is applied in all modes (json/plain/markdown/check/create)."
+        ),
     )
 
     p.add_argument(
@@ -483,11 +515,31 @@ def _apply_changes(changes: list[_PlannedChange]) -> None:
         raise
 
 
-def _run_json_mode(ns, db) -> int:
+def _run_json_mode(ns, db: SongbookData) -> int:
     if ns.output:
         db.to_json_file(ns.output)
     else:
         sys.stdout.write(db.to_json())
+    return 0
+
+
+def _run_plain_mode(ns, db: SongbookData) -> int:
+    # Plain/Markdown output must remain uncolored.
+    txt = db.to_text(markdown=False)
+    if ns.output:
+        ns.output.write_text(txt, encoding="utf-8")
+    else:
+        sys.stdout.write(txt)
+    return 0
+
+
+def _run_markdown_mode(ns, db: SongbookData) -> int:
+    # Plain/Markdown output must remain uncolored.
+    txt = db.to_text(markdown=True)
+    if ns.output:
+        ns.output.write_text(txt, encoding="utf-8")
+    else:
+        sys.stdout.write(txt)
     return 0
 
 
@@ -579,8 +631,8 @@ def main(argv: list[str] | None = None) -> int:
         if not main_tex.is_file():
             raise RuntimeError(f"Not a regular file: {ns.main_tex}")
 
-        if (ns.check_song_ids or ns.create_song_ids) and ns.output:
-            raise RuntimeError("--output is only valid in --json mode")
+        if ns.output and (ns.check_song_ids or ns.create_song_ids):
+            raise RuntimeError("--output is only valid in --json/--plain/--markdown modes")
 
         include_dirs = _normalise_include_dirs(main_tex, ns.include_dirs)
 
@@ -596,7 +648,8 @@ def main(argv: list[str] | None = None) -> int:
                     psv_file = default_psv
         else:
             if ns.psv is not None:
-                ui.warning_line("Note: --psv is ignored unless --json is used")
+                msg = "Note: --psv is ignored unless --json is used"
+                ui.warning_line(msg, True)
 
         try:
             db = build_song_database(
@@ -610,9 +663,22 @@ def main(argv: list[str] | None = None) -> int:
             ui.error_line(f"Failed to build song database{extra}: {e}")
             return 1
 
+        # Apply optional song-id filtering in all modes.
+        if ns.only_song_ids:
+            existing_ids = {s.id for s in _flatten_songs_in_order(db) if s.id is not None}
+            missing = [sid for sid in ns.only_song_ids if sid not in existing_ids]
+            db = db.filter_by_song_ids(ns.only_song_ids)
+            if missing:
+                msg = "--only-song-ids: not found: " + ", ".join(missing)
+                ui.warning_line(msg, True)
+
         if ns.json:
             # JSON output must remain uncolored.
             return _run_json_mode(ns, db)
+        if ns.plain:
+            return _run_plain_mode(ns, db)
+        if ns.markdown:
+            return _run_markdown_mode(ns, db)
         if ns.check_song_ids:
             return _run_check_mode(ui, db)
         if ns.create_song_ids:
