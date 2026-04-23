@@ -1,9 +1,18 @@
 // SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+/**
+ * Compile commands integration (opens a terminal and runs `ulsbs-compile`).
+ * @module
+ */
+
 const { getSettings } = require("./config");
 const { getWorkspaceFolderForUri } = require("./workspace");
 
+/**
+ * Minimal shell quoting for safe terminal command construction.
+ * @param {string} arg
+ */
 function shellQuote(arg) {
   if (/^[A-Za-z0-9_./:@-]+$/.test(arg)) {
     return arg;
@@ -11,10 +20,18 @@ function shellQuote(arg) {
   return `'${String(arg).replace(/'/g, `'\\''`)}'`;
 }
 
+/** @param {import('vscode')} vscode */
 function isWeb(vscode) {
   return vscode.env.uiKind === vscode.UIKind.Web;
 }
 
+/**
+ * Register compile-related commands.
+ * @param {import('vscode')} vscode
+ * @param {import('vscode').ExtensionContext} context
+ * @param {any} songbookService
+ * @param {{refresh?: Function, setSelectedProfile?: Function}|undefined|null} treeController
+ */
 function registerCompileCommands(vscode, context, songbookService, treeController) {
   let enabled = false;
   let selectedProfile = "default";

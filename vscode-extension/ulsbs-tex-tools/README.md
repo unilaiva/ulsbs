@@ -35,6 +35,10 @@ It understands ULSBS-specific structures such as:
 \begin{songs} ... \end{songs}
 \begin{translation} ... \end{translation}
 \begin{lilypond} ... \end{lilypond}
+\begin{explanation} ... \end{explanation}
+\begin{passage} ... \end{passage}
+\begin{feeler} ... \end{feeler}
+\begin{intersong} ... \end{intersong}
 \[ ... ]
 ```
 
@@ -131,14 +135,17 @@ Quick cheat sheet:
 
 - snippets: `snippets/latex.json`
 - indentation / folding: `language-configuration.json`
+- song macro tokenizer: `core/songsyntax.js`
 - symbols / outline: `core/symbols.js`
 - parsing and warnings: `core/parser.js`, `core/diagnostics.js`
+- verse / lilypond region helpers: `core/regions.js`
 - workspace detection: `core/workspace.js`
 - workspace scanning / songbook index: `core/songbooks.js`
 - sidebar tree view: `core/tree.js`
 - compile commands: `core/compile.js`
 - chord decorations: `core/chords.js`
 - measure bar decorations: `core/measures.js`
+- shared active-editor update wiring: `core/editor-updater.js`
 - supported file types / exclusions: `core/filetypes.js`
 - extension entry point: `extension.js`
 - settings: `package.json`, `core/config.js`

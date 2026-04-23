@@ -1,15 +1,30 @@
 // SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+/**
+ * File-type helpers and document filtering for ULSBS TeX tools.
+ * Centralizes "should we process this document/URI" checks.
+ * @module
+ */
+
+/** @returns {string[]} */
 function getSupportedExtensions() {
   return [".tex", ".lytex", ".latex", ".lylatex"];
 }
 
+/**
+ * @param {string} path
+ * @returns {boolean}
+ */
 function hasSupportedExtension(path) {
   const lower = String(path).toLowerCase();
   return getSupportedExtensions().some((ext) => lower.endsWith(ext));
 }
 
+/**
+ * Document selector used by providers.
+ * @returns {import('vscode').DocumentSelector}
+ */
 function getDocumentSelector() {
   return [
     { language: "latex" },
@@ -21,6 +36,10 @@ function getDocumentSelector() {
   ];
 }
 
+/**
+ * @param {import('vscode').TextDocument|import('vscode').Uri|{uri?: import('vscode').Uri}|null|undefined} documentOrUri
+ * @returns {boolean}
+ */
 function isSupportedDocument(documentOrUri) {
   if (!documentOrUri) {
     return false;
@@ -35,9 +54,16 @@ function isSupportedDocument(documentOrUri) {
   return hasSupportedExtension(path);
 }
 
+/**
+ * Normalize `excludeGlob` setting to a string array.
+ * @param {string|string[]|undefined|null} excludeGlob
+ * @returns {string[]}
+ */
 function normalizeExcludeGlobs(excludeGlob) {
   if (Array.isArray(excludeGlob)) {
-    return excludeGlob.filter((item) => typeof item === "string" && item.trim() !== "");
+    return excludeGlob.filter(
+      (item) => typeof item === "string" && item.trim() !== ""
+    );
   }
   if (typeof excludeGlob === "string" && excludeGlob.trim() !== "") {
     return [excludeGlob];
@@ -45,6 +71,7 @@ function normalizeExcludeGlobs(excludeGlob) {
   return [];
 }
 
+/** @param {string} path */
 function normalizePath(path) {
   return String(path || "")
     .replace(/\\/g, "/")
@@ -52,6 +79,11 @@ function normalizePath(path) {
     .toLowerCase();
 }
 
+/**
+ * Heuristic conversion from a glob-ish pattern to a substring needle.
+ * (This intentionally avoids a full glob implementation.)
+ * @param {string} pattern
+ */
 function globLikePatternToNeedle(pattern) {
   let needle = normalizePath(pattern);
 
@@ -70,6 +102,7 @@ function globLikePatternToNeedle(pattern) {
   return needle;
 }
 
+/** @param {string} path @param {string} needle */
 function pathContainsSegment(path, needle) {
   if (!needle) {
     return false;
@@ -86,6 +119,12 @@ function pathContainsSegment(path, needle) {
   );
 }
 
+/**
+ * Check whether a URI matches the configured exclude globs.
+ * @param {import('vscode')} vscode
+ * @param {import('vscode').Uri} uri
+ * @param {string|string[]|undefined|null} excludeGlobs
+ */
 function isExcludedUri(vscode, uri, excludeGlobs) {
   if (!uri) {
     return false;
@@ -112,11 +151,32 @@ function isExcludedUri(vscode, uri, excludeGlobs) {
   });
 }
 
+/**
+ * Unified filter used by most providers/decoration updaters.
+ * @param {import('vscode')} vscode
+ * @param {import('vscode').TextDocument} document
+ * @param {{excludeGlob?: string|string[]} | undefined | null} [settings]
+ */
+function shouldProcessDocument(vscode, document, settings) {
+  if (!isSupportedDocument(document)) {
+    return false;
+  }
+
+  const excludeGlob =
+    settings?.excludeGlob ??
+    vscode.workspace
+      .getConfiguration("ulsbsTexTools")
+      .get("excludeGlob", []);
+
+  return !isExcludedUri(vscode, document.uri, excludeGlob);
+}
+
 module.exports = {
   getSupportedExtensions,
   getDocumentSelector,
   isSupportedDocument,
   hasSupportedExtension,
   normalizeExcludeGlobs,
-  isExcludedUri
+  isExcludedUri,
+  shouldProcessDocument
 };

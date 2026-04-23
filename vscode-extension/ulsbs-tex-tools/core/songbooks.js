@@ -1,10 +1,28 @@
 // SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+/**
+ * Workspace indexer for ULSBS songbooks.
+ * Scans TeX-like files, resolves \input/\include dependencies and identifies main songbook roots.
+ * @module
+ */
+
+/**
+ * @typedef {Object} SongbookIndex
+ * @property {import('vscode').WorkspaceFolder} folder
+ * @property {Map<string, any>} docs All indexed documents (keyed by URI string).
+ * @property {any[]} roots Detected main songbooks.
+ * @property {string[]} profiles Compile profiles parsed from `ulsbs-config.toml`.
+ */
+
 const { analyzeText } = require("./parser");
 const { getSettings } = require("./config");
 const { getAllWorkspaceFolders, getWorkspaceFolderForUri, ULSBS_CONFIG_BASENAME } = require("./workspace");
-const { hasSupportedExtension, isExcludedUri } = require("./filetypes");
+const {
+  hasSupportedExtension,
+  isExcludedUri,
+  getSupportedExtensions
+} = require("./filetypes");
 
 function uriKey(uri) {
   return uri.toString();
@@ -93,7 +111,7 @@ function includeCandidates(vscode, workspaceFolderUri, includingUri, rawTarget) 
     candidates.push(base);
 
     if (!hasSupportedExtension(rawTarget)) {
-      for (const ext of [".tex", ".lytex", ".latex", ".lylatex"]) {
+      for (const ext of getSupportedExtensions()) {
         candidates.push(base.with({ path: `${base.path}${ext}` }));
       }
     }
@@ -107,6 +125,10 @@ async function readText(vscode, uri) {
   return new TextDecoder("utf-8").decode(bytes);
 }
 
+/**
+ * Service that caches per-folder songbook indexes.
+ * @implements {import('vscode').Disposable}
+ */
 class SongbookService {
   constructor(vscode) {
     this.vscode = vscode;
@@ -114,12 +136,14 @@ class SongbookService {
     this._disposables = [];
   }
 
+  /** Dispose resources (the VS Code extension host also disposes this via subscriptions). */
   dispose() {
     for (const item of this._disposables) {
       item.dispose?.();
     }
   }
 
+  /** Rebuild all workspace-folder indexes. */
   async refresh() {
     this.cache.clear();
     const folders = getAllWorkspaceFolders(this.vscode);
@@ -129,6 +153,11 @@ class SongbookService {
     }
   }
 
+  /**
+   * Get (and lazily build) the index for the workspace folder containing `uri`.
+   * @param {import('vscode').Uri|null|undefined} uri
+   * @returns {Promise<SongbookIndex|null>}
+   */
   async getIndexForUri(uri) {
     const folder = getWorkspaceFolderForUri(this.vscode, uri);
     if (!folder) {
@@ -277,11 +306,16 @@ class SongbookService {
     };
   }
 
+  /** @param {import('vscode').Uri|null|undefined} uri */
   async getAllSongbooks(uri) {
     const index = await this.getIndexForUri(uri);
     return index?.roots ?? [];
   }
 
+  /**
+   * Find songbooks that directly are, or depend on, the given document.
+   * @param {import('vscode').Uri|null|undefined} uri
+   */
   async getAffectedSongbooks(uri) {
     const index = await this.getIndexForUri(uri);
     if (!index || !uri) {
@@ -296,12 +330,18 @@ class SongbookService {
     });
   }
 
+  /** @param {import('vscode').Uri|null|undefined} uri */
   async getProfiles(uri) {
     const index = await this.getIndexForUri(uri);
     return index?.profiles ?? ["default"];
   }
 }
 
+/**
+ * Create the SongbookService instance used across the extension.
+ * @param {import('vscode')} vscode
+ * @returns {SongbookService}
+ */
 function createSongbookService(vscode) {
   return new SongbookService(vscode);
 }

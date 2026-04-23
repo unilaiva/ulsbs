@@ -185,7 +185,8 @@
           },
           "default": [
             "**/temp/**",
-            "**/ulsbs/assets/tex/**"
+            "**/ulsbs/assets/tex/**",
+            "**/ulsbs-tex-tools/assets/**"
           ],
           "description": "Glob patterns for files and folders to exclude from ULSBS workspace scanning."
         },

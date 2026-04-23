@@ -1,6 +1,40 @@
 // SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+/**
+ * Lightweight line-based parser for ULSBS songbook TeX.
+ * Produces (1) an outline-like tree of songs/sections and (2) basic structural warnings.
+ * @module
+ */
+
+/**
+ * @typedef {{severity: 'warning'|'error', message: string, line: number, start: number, end: number}} Issue
+ * @typedef {{rawTarget: string, line: number, start: number, end: number}} Include
+ * @typedef {{
+ *   type: string,
+ *   name: string,
+ *   detail: string,
+ *   startLine: number,
+ *   startChar: number,
+ *   endLine: number,
+ *   endChar: number,
+ *   openTextLength: number,
+ *   children: OutlineNode[],
+ *   meta: Record<string, any>
+ * }} OutlineNode
+ * @typedef {{
+ *   isMainCandidate: boolean,
+ *   includes: Include[],
+ *   songs: OutlineNode[],
+ *   outline: OutlineNode[],
+ *   issues: Issue[],
+ *   tokenCount: number
+ * }} Analysis
+ */
+
+const { tokenizeSongLine } = require("./songsyntax");
+
+/** @param {string} text @param {number} index @returns {boolean} */
 function isEscapedPercent(text, index) {
   let backslashes = 0;
   for (let i = index - 1; i >= 0 && text[i] === "\\"; i--) {
@@ -9,6 +43,11 @@ function isEscapedPercent(text, index) {
   return backslashes % 2 === 1;
 }
 
+/**
+ * Strip the LaTeX comment portion of a line (`% ...`).
+ * @param {string} line
+ * @returns {string}
+ */
 function stripComment(line) {
   for (let i = 0; i < line.length; i++) {
     if (line[i] === "%" && !isEscapedPercent(line, i)) {
@@ -47,84 +86,6 @@ function extractSongMeta(optionText) {
   return meta;
 }
 
-function tokenizeLine(line, lineNumber) {
-  const code = stripComment(line);
-  const tokens = [];
-
-  const patterns = [
-    {
-      type: "beginsong",
-      regex: /\\beginsong(?:\[(.*?)\])?\{([^}]*)\}(?:\[(.*?)\])?/g,
-      map: (match) => ({
-        title: (match[2] || "").trim(),
-        options: (match[1] || match[3] || "").trim()
-      })
-    },
-    {
-      type: "beginsongsenv",
-      regex: /\\begin\{songs\}/g
-    },
-    {
-      type: "endsongsenv",
-      regex: /\\end\{songs\}/g
-    },
-    {
-      type: "beginintersong",
-      regex: /\\begin\{intersong\}/g
-    },
-    {
-      type: "endintersong",
-      regex: /\\end\{intersong\}/g
-    },
-    { type: "beginverse", regex: /\\beginverse\b/g },
-    { type: "mnbeginverse", regex: /\\mnbeginverse\b/g },
-    { type: "beginrep", regex: /\\beginrep\b/g },
-    {
-      type: "begintranslation",
-      regex: /\\begin\{translation\}(?:\[(.*?)\])?|\\begintranslation(?:\[(.*?)\])?/g,
-      map: (match) => ({
-        language: (match[1] || match[2] || "").trim()
-      })
-    },
-    { type: "beginlilypond", regex: /\\begin\{lilypond\}/g },
-    { type: "endsong", regex: /\\endsong\b/g },
-    { type: "endverse", regex: /\\endverse\b/g },
-    { type: "mnendverse", regex: /\\mnendverse\b/g },
-    { type: "endrep", regex: /\\endrep\b/g },
-    { type: "endtranslation", regex: /\\end\{translation\}|\\endtranslation\b/g },
-    { type: "endlilypond", regex: /\\end\{lilypond\}/g },
-    {
-      type: "include",
-      regex: /\\(?:input|include|subfile)\{([^}]+)\}/g,
-      map: (match) => ({ target: match[1].trim() })
-    },
-    { type: "documentclass", regex: /\\documentclass(?:\[[^\]]*\])?\{[^}]+\}/g },
-    { type: "begindocument", regex: /\\begin\{document\}/g }
-  ];
-
-  for (const pattern of patterns) {
-    let match;
-    while ((match = pattern.regex.exec(code)) !== null) {
-      tokens.push({
-        type: pattern.type,
-        line: lineNumber,
-        index: match.index,
-        text: match[0],
-        ...(pattern.map ? pattern.map(match) : {})
-      });
-    }
-  }
-
-  tokens.sort((a, b) => {
-    if (a.index !== b.index) {
-      return a.index - b.index;
-    }
-    return a.type.localeCompare(b.type);
-  });
-
-  return tokens;
-}
-
 function makeNode(type, name, detail, token, meta = {}) {
   return {
     type,
@@ -134,18 +95,25 @@ function makeNode(type, name, detail, token, meta = {}) {
     startChar: token.index,
     endLine: token.line,
     endChar: token.index + token.text.length,
+    openTextLength: token.text.length,
     children: [],
     meta
   };
 }
 
+/**
+ * Analyze a full document.
+ * @param {string} text
+ * @returns {Analysis}
+ */
 function analyzeText(text) {
   const lines = text.split(/\r?\n/);
   const tokens = [];
   let isMainCandidate = false;
 
   for (let i = 0; i < lines.length; i++) {
-    const lineTokens = tokenizeLine(lines[i], i);
+    const code = stripComment(lines[i]);
+    const lineTokens = tokenizeSongLine(code, i);
     for (const token of lineTokens) {
       if (token.type === "documentclass" || token.type === "begindocument") {
         isMainCandidate = true;
@@ -158,6 +126,7 @@ function analyzeText(text) {
     isMainCandidate,
     includes: [],
     songs: [],
+    outline: [],
     issues: [],
     tokenCount: tokens.length
   };
@@ -270,12 +239,104 @@ function analyzeText(text) {
         );
       }
 
-      // Otherwise allowed anywhere (including outside songs environment)
+      const node = makeNode("intersong", "intersong", "intersong", token);
+
+      if (!attachChild(node, ["song"])) {
+        analysis.outline.push(node);
+      }
+
+      stack.push({ type: "intersong", node });
       continue;
     }
 
     if (token.type === "endintersong") {
-      // No structural tracking for intersong blocks needed here
+      if (!closeNearest("intersong", token)) {
+        analysis.issues.push(
+          makeIssue(
+            "warning",
+            "\\end{intersong} without matching \\begin{intersong}",
+            token
+          )
+        );
+      }
+      continue;
+    }
+
+    if (token.type === "beginexplanation") {
+      const lang = token.language || "";
+      const label = lang ? `explanation [${lang}]` : "explanation";
+      const detail = lang ? `explanation (${lang})` : "explanation";
+      const node = makeNode("explanation", label, detail, token, { language: lang });
+
+      if (!attachChild(node, ["song"])) {
+        analysis.outline.push(node);
+      }
+
+      stack.push({ type: "explanation", node });
+      continue;
+    }
+
+    if (token.type === "endexplanation") {
+      if (!closeNearest("explanation", token)) {
+        analysis.issues.push(
+          makeIssue(
+            "warning",
+            "\\end{explanation} without matching \\begin{explanation}",
+            token
+          )
+        );
+      }
+      continue;
+    }
+
+    if (token.type === "beginpassage") {
+      const lang = token.language || "";
+      const label = lang ? `passage [${lang}]` : "passage";
+      const detail = lang ? `passage (${lang})` : "passage";
+      const node = makeNode("passage", label, detail, token, { language: lang });
+
+      if (!attachChild(node, ["song"])) {
+        analysis.outline.push(node);
+      }
+
+      stack.push({ type: "passage", node });
+      continue;
+    }
+
+    if (token.type === "endpassage") {
+      if (!closeNearest("passage", token)) {
+        analysis.issues.push(
+          makeIssue(
+            "warning",
+            "\\end{passage} without matching \\begin{passage}",
+            token
+          )
+        );
+      }
+      continue;
+    }
+
+    if (token.type === "beginfeeler") {
+      const node = makeNode("feeler", "feeler", "feeler", token);
+
+      if (!attachChild(node, ["song"])) {
+        analysis.outline.push(node);
+      }
+
+      stack.push({ type: "feeler", node });
+      continue;
+    }
+
+    if (token.type === "endfeeler") {
+      if (!closeNearest("feeler", token)) {
+        analysis.issues.push(
+          makeIssue(
+            "warning",
+            "\\end{feeler} without matching \\begin{feeler}",
+            token
+          )
+        );
+      }
       continue;
     }
 
@@ -304,6 +365,10 @@ function analyzeText(text) {
         token,
         meta
       );
+
+      // Keep songs (and other blocks) in source order for outline consumers.
+      analysis.outline.push(node);
+
       stack.push({ type: "song", node });
       continue;
     }
@@ -482,5 +547,6 @@ function analyzeText(text) {
 
 module.exports = {
   analyzeText,
-  stripComment
+  stripComment,
+  extractSongMeta
 };

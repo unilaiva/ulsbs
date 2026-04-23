@@ -1,6 +1,18 @@
 // SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+/**
+ * Tree view (Activity Bar: ULSBS -> Songbooks).
+ * @module
+ */
+
+/**
+ * Register the ULSBS Songbooks tree view and wire it to the SongbookService.
+ * @param {import('vscode')} vscode
+ * @param {import('vscode').ExtensionContext} context
+ * @param {ReturnType<import('./songbooks').createSongbookService>} songbookService
+ * @returns {{refresh: () => void, setEnabled: (value: boolean) => void, setSelectedProfile: (profile: string) => void}}
+ */
 function registerTreeView(vscode, context, songbookService) {
   let enabled = false;
   let selectedProfile = "default";

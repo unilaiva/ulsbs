@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-const { stripComment } = require("./parser");
-const { getDocumentSelector, isExcludedUri } = require("./filetypes");
-const { getSettings } = require("./config");
+/**
+ * DocumentSymbol provider for ULSBS TeX.
+ * Powers the VS Code Outline view.
+ * @module
+ */
 
-function getDocumentSelectorLocal() {
-  return getDocumentSelector();
-}
+const { analyzeText, stripComment } = require("./parser");
+const { getDocumentSelector, shouldProcessDocument } = require("./filetypes");
 
 function pos(vscode, line, ch) {
   return new vscode.Position(line, ch);
@@ -20,632 +21,240 @@ function range(vscode, startLine, startChar, endLine, endChar) {
   );
 }
 
-function selectionRange(vscode, lineIndex, startChar, endChar) {
-  return new vscode.Range(
-    pos(vscode, lineIndex, startChar),
-    pos(vscode, lineIndex, endChar)
+function clampSelectionEnd(startChar, openTextLength) {
+  const len = Number.isFinite(openTextLength) ? openTextLength : 1;
+  return startChar + Math.max(1, len);
+}
+
+/**
+ * @param {import('vscode')} vscode
+ * @param {string} name
+ * @param {string} detail
+ * @param {import('vscode').SymbolKind} kind
+ * @param {{startLine:number,startChar:number,endLine:number,endChar:number,openTextLength?:number}} span
+ */
+function makeSpanSymbol(vscode, name, detail, kind, span) {
+  const fullRange = range(vscode, span.startLine, 0, span.endLine, span.endChar);
+  const selection = range(
+    vscode,
+    span.startLine,
+    span.startChar,
+    span.startLine,
+    clampSelectionEnd(span.startChar, span.openTextLength)
   );
+
+  return new vscode.DocumentSymbol(name, detail, kind, fullRange, selection);
 }
 
-function makeSymbol(vscode, name, detail, kind, lineIndex, startChar, endChar) {
-  return new vscode.DocumentSymbol(
-    name,
-    detail,
-    kind,
-    range(vscode, lineIndex, startChar, lineIndex, endChar),
-    selectionRange(vscode, lineIndex, startChar, endChar)
-  );
+/**
+ * Convert the parser outline nodes into VS Code DocumentSymbols.
+ * @param {import('vscode')} vscode
+ * @param {any} node
+ * @returns {import('vscode').DocumentSymbol|null}
+ */
+function symbolFromOutlineNode(vscode, node) {
+  const kindByType = {
+    song: vscode.SymbolKind.Module,
+    verse: vscode.SymbolKind.Namespace,
+    mnverse: vscode.SymbolKind.Namespace,
+    translation: vscode.SymbolKind.Namespace,
+    lilypond: vscode.SymbolKind.Namespace,
+    explanation: vscode.SymbolKind.Namespace,
+    passage: vscode.SymbolKind.Namespace,
+    feeler: vscode.SymbolKind.Namespace,
+    intersong: vscode.SymbolKind.Namespace
+  };
+
+  const kind = kindByType[node.type];
+  if (!kind) {
+    return null;
+  }
+
+  const symbol = makeSpanSymbol(vscode, node.name, node.detail, kind, node);
+
+  for (const child of node.children ?? []) {
+    // Rep blocks are intentionally kept out of the outline for now.
+    if (child.type === "rep") {
+      continue;
+    }
+
+    const childSymbol = symbolFromOutlineNode(vscode, child);
+    if (childSymbol) {
+      symbol.children.push(childSymbol);
+    }
+  }
+
+  return symbol;
 }
 
-function updateSymbolRange(vscode, symbol, startLine, lineIndex, endChar) {
-  symbol.range = range(vscode, startLine, 0, lineIndex, endChar);
-}
-
+/**
+ * Register the symbol provider.
+ * @param {import('vscode')} vscode
+ * @param {import('vscode').ExtensionContext} context
+ */
 function registerSymbolProvider(vscode, context) {
   const provider = vscode.languages.registerDocumentSymbolProvider(
-    getDocumentSelectorLocal(),
+    getDocumentSelector(),
     {
       provideDocumentSymbols(document) {
         try {
-          const settings = getSettings(vscode);
-          if (isExcludedUri(vscode, document.uri, settings.excludeGlob)) {
+          if (!shouldProcessDocument(vscode, document)) {
             return [];
           }
 
-          const lines = document.getText().split(/\r?\n/);
-          const songs = [];
-          const stack = [];
+          const text = document.getText();
+          const lines = text.split(/\r?\n/);
 
-          const counters = {
-            verse: 0,
-            rep: 0,
-            translation: 0,
-            lilypond: 0
-          };
+          // 1) Song/ULSBS structure from the shared parser.
+          const analysis = analyzeText(text);
+          const outlineSymbols = (analysis.outline ?? [])
+            .map((node) => symbolFromOutlineNode(vscode, node))
+            .filter(Boolean);
 
-          function resetSongCounters() {
-            counters.verse = 0;
-            counters.rep = 0;
-            counters.translation = 0;
-            counters.lilypond = 0;
-          }
-
-          function currentNearest(types) {
-            for (let i = stack.length - 1; i >= 0; i--) {
-              if (types.includes(stack[i].type)) {
-                return stack[i];
-              }
+          // 2) Single-line structural macros that are useful in the outline,
+          // even outside of ULSBS song environments.
+          const tokenDefs = [
+            {
+              type: "ulmainchapter",
+              regex: /\\ulMainChapter\*?(?:\[(.*?)\])?\{([^}]*)\}\{([^}]*)\}(?:\[(.*?)\])?/g
+            },
+            {
+              type: "chapter",
+              regex: /\\chapter\*?(?:\[(.*?)\])?\{([^}]*)\}/g
+            },
+            {
+              type: "songchapter",
+              regex: /\\songchapter\*?(?:\[(.*?)\])?\{([^}]*)\}/g
+            },
+            {
+              type: "section",
+              regex: /\\section\*?(?:\[(.*?)\])?\{([^}]*)\}/g
+            },
+            {
+              type: "subsection",
+              regex: /\\subsection\*?(?:\[(.*?)\])?\{([^}]*)\}/g
+            },
+            {
+              type: "includegraphics",
+              regex: /\\includegraphics(?:\[[^\]]*])?\{([^}]*)\}/g
+            },
+            {
+              type: "image",
+              regex: /\\image[a-zA-Z]*\s*(?:\[[^\]]*])?\{([^}]*)\}/g
             }
-            return null;
-          }
+          ];
 
-          function addChildToNearestParent(symbol, preferredParents) {
-            let parent = currentNearest(preferredParents);
+          /** @type {{line: number, ch: number, symbol: import('vscode').DocumentSymbol}[]} */
+          const atomic = [];
 
-            if (!parent) {
-              parent = currentNearest(["song"]);
-            }
-
-            if (parent && parent.symbol) {
-              parent.symbol.children.push(symbol);
-              return true;
-            }
-            return false;
-          }
-
-          function closeNearest(type, lineIndex, endChar) {
-            for (let i = stack.length - 1; i >= 0; i--) {
-              if (stack[i].type === type) {
-                const entry = stack.splice(i, 1)[0];
-                if (entry.symbol) {
-                  updateSymbolRange(
-                    vscode,
-                    entry.symbol,
-                    entry.startLine,
-                    lineIndex,
-                    endChar
-                  );
-
-                  if (type === "song") {
-                    songs.push(entry.symbol);
-                  }
-                }
-                return entry;
-              }
-            }
-            return null;
-          }
-
-          function closeNearestAny(types, lineIndex, endChar) {
-            for (let i = stack.length - 1; i >= 0; i--) {
-              if (types.includes(stack[i].type)) {
-                const entry = stack.splice(i, 1)[0];
-                if (entry.symbol) {
-                  updateSymbolRange(
-                    vscode,
-                    entry.symbol,
-                    entry.startLine,
-                    lineIndex,
-                    endChar
-                  );
-
-                  if (entry.type === "song") {
-                    songs.push(entry.symbol);
-                  }
-                }
-                return entry;
-              }
-            }
-            return null;
-          }
-
-          for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const code = stripComment(line);
-
-            const tokenDefs = [
-              {
-                type: "ulmainchapter",
-                regex: /\\ulMainChapter\*?(?:\[(.*?)\])?\{([^}]*)\}\{([^}]*)\}(?:\[(.*?)\])?/g
-              },
-              {
-                type: "chapter",
-                regex: /\\chapter\*?(?:\[(.*?)\])?\{([^}]*)\}/g
-              },
-              {
-                type: "songchapter",
-                regex: /\\songchapter\*?(?:\[(.*?)\])?\{([^}]*)\}/g
-              },
-              {
-                type: "section",
-                regex: /\\section\*?(?:\[(.*?)\])?\{([^}]*)\}/g
-              },
-              {
-                type: "subsection",
-                regex: /\\subsection\*?(?:\[(.*?)\])?\{([^}]*)\}/g
-              },
-
-              { type: "beginsongsenv", regex: /\\begin\{songs\}/g },
-              { type: "endsongsenv", regex: /\\end\{songs\}/g },
-
-              {
-                type: "beginintersong",
-                regex: /\\begin\{intersong\*?\}/g
-              },
-              {
-                type: "endintersong",
-                regex: /\\end\{intersong\*?\}/g
-              },
-
-              {
-                type: "beginsong",
-                regex: /\\beginsong(?:\[(.*?)\])?\{([^}]*)\}(?:\[(.*?)\])?/g
-              },
-              { type: "endsong", regex: /\\endsong\b/g },
-
-              { type: "beginverse", regex: /\\beginverse\b/g },
-              { type: "endverse", regex: /\\endverse\b/g },
-
-              { type: "mnbeginverse", regex: /\\mnbeginverse\b/g },
-              { type: "mnendverse", regex: /\\mnendverse\b/g },
-
-              { type: "beginrep", regex: /\\beginrep\b/g },
-              { type: "endrep", regex: /\\endrep\b/g },
-
-              {
-                type: "begintranslation",
-                regex: /\\begin\{translation\}(?:\[(.*?)\])?|\\begintranslation(?:\[(.*?)\])?/g
-              },
-              { type: "endtranslation", regex: /\\end\{translation\}|\\endtranslation\b/g },
-
-              {
-                type: "beginexplanation",
-                regex: /\\begin\{explanation\}(?:\[(.*?)\])?/g
-              },
-              { type: "endexplanation", regex: /\\end\{explanation\}/g },
-
-              {
-                type: "beginpassage",
-                regex: /\\begin\{passage\}(?:\[(.*?)\])?/g
-              },
-              { type: "endpassage", regex: /\\end\{passage\}/g },
-
-              { type: "beginfeeler", regex: /\\begin\{feeler\}/g },
-              { type: "endfeeler", regex: /\\end\{feeler\}/g },
-
-              { type: "beginlilypond", regex: /\\begin\{lilypond\}/g },
-              { type: "endlilypond", regex: /\\end\{lilypond\}/g },
-
-              {
-                type: "includegraphics",
-                regex: /\\includegraphics(?:\[[^\]]*])?\{([^}]*)\}/g
-              },
-              {
-                type: "image",
-                regex: /\\image[a-zA-Z]*\s*(?:\[[^\]]*])?\{([^}]*)\}/g
-              }
-            ];
-
-            const tokens = [];
+          for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+            const code = stripComment(lines[lineIndex]);
 
             for (const def of tokenDefs) {
+              def.regex.lastIndex = 0;
               let match;
               while ((match = def.regex.exec(code)) !== null) {
-                tokens.push({
-                  type: def.type,
-                  index: match.index,
-                  text: match[0],
-                  match
-                });
-              }
-            }
+                const start = match.index;
+                const end = match.index + match[0].length;
 
-            tokens.sort((a, b) => {
-              if (a.index !== b.index) {
-                return a.index - b.index;
-              }
-              return a.type.localeCompare(b.type);
-            });
+                if (def.type === "ulmainchapter") {
+                  const shortTitle = (match[1] || "").trim();
+                  const longTitle = (match[2] || "").trim();
+                  const name = shortTitle || longTitle || "Chapter";
 
-            for (const token of tokens) {
-              const start = token.index;
-              const end = token.index + token.text.length;
+                  atomic.push({
+                    line: lineIndex,
+                    ch: start,
+                    symbol: new vscode.DocumentSymbol(
+                      name,
+                      "\\ulMainChapter",
+                      vscode.SymbolKind.Namespace,
+                      range(vscode, lineIndex, start, lineIndex, end),
+                      range(vscode, lineIndex, start, lineIndex, end)
+                    )
+                  });
+                  continue;
+                }
 
-              if (token.type === "ulmainchapter") {
-                const shortTitle = (token.match[1] || "").trim();
-                const longTitle = (token.match[2] || "").trim();
-                const name = shortTitle || longTitle || "Chapter";
+                if (def.type === "chapter" || def.type === "songchapter") {
+                  const shortTitle = (match[1] || "").trim();
+                  const longTitle = (match[2] || "").trim();
+                  const name = shortTitle || longTitle || "Chapter";
+                  const detail = def.type === "chapter" ? "\\chapter" : "\\songchapter";
 
-                const symbol = makeSymbol(
-                  vscode,
-                  name,
-                  "\\ulMainChapter",
-                  vscode.SymbolKind.Namespace,
-                  i,
-                  start,
-                  end
-                );
+                  atomic.push({
+                    line: lineIndex,
+                    ch: start,
+                    symbol: new vscode.DocumentSymbol(
+                      name,
+                      detail,
+                      vscode.SymbolKind.Namespace,
+                      range(vscode, lineIndex, start, lineIndex, end),
+                      range(vscode, lineIndex, start, lineIndex, end)
+                    )
+                  });
+                  continue;
+                }
 
-                songs.push(symbol);
-                continue;
-              }
+                if (def.type === "section" || def.type === "subsection") {
+                  const shortTitle = (match[1] || "").trim();
+                  const longTitle = (match[2] || "").trim();
+                  const name =
+                    shortTitle ||
+                    longTitle ||
+                    (def.type === "section" ? "Section" : "Subsection");
 
-              if (token.type === "chapter" || token.type === "songchapter") {
-                const shortTitle = (token.match[1] || "").trim();
-                const longTitle = (token.match[2] || "").trim();
-                const name = shortTitle || longTitle || "Chapter";
+                  const detail = def.type === "section" ? "\\section" : "\\subsection";
 
-                const symbol = makeSymbol(
-                  vscode,
-                  name,
-                  token.type === "chapter" ? "\\chapter" : "\\songchapter",
-                  vscode.SymbolKind.Namespace,
-                  i,
-                  start,
-                  end
-                );
+                  atomic.push({
+                    line: lineIndex,
+                    ch: start,
+                    symbol: new vscode.DocumentSymbol(
+                      name,
+                      detail,
+                      vscode.SymbolKind.Namespace,
+                      range(vscode, lineIndex, start, lineIndex, end),
+                      range(vscode, lineIndex, start, lineIndex, end)
+                    )
+                  });
+                  continue;
+                }
 
-                songs.push(symbol);
-                continue;
-              }
+                if (def.type === "includegraphics" || def.type === "image") {
+                  const rawPath = (match[1] || "").trim();
+                  if (!rawPath) {
+                    continue;
+                  }
 
-              if (token.type === "section" || token.type === "subsection") {
-                const shortTitle = (token.match[1] || "").trim();
-                const longTitle = (token.match[2] || "").trim();
-                const name =
-                  shortTitle ||
-                  longTitle ||
-                  (token.type === "section" ? "Section" : "Subsection");
-
-                const symbol = makeSymbol(
-                  vscode,
-                  name,
-                  token.type === "section" ? "\\section" : "\\subsection",
-                  vscode.SymbolKind.Namespace,
-                  i,
-                  start,
-                  end
-                );
-
-                songs.push(symbol);
-                continue;
-              }
-
-              if (token.type === "includegraphics" || token.type === "image") {
-                const rawPath = (token.match[1] || "").trim();
-                if (rawPath) {
                   const fileName = rawPath.split(/[\\/]/).pop() || rawPath;
-                  const symbol = makeSymbol(
-                    vscode,
-                    fileName,
-                    token.type === "includegraphics" ? "\\includegraphics" : "\\image*",
-                    vscode.SymbolKind.File,
-                    i,
-                    start,
-                    end
-                  );
-                  songs.push(symbol);
-                }
-                continue;
-              }
+                  const detail = def.type === "includegraphics" ? "\\includegraphics" : "\\image*";
 
-              if (token.type === "beginsongsenv") {
-                stack.push({
-                  type: "songsenv",
-                  startLine: i,
-                  symbol: null
-                });
-                continue;
-              }
-
-              if (token.type === "endsongsenv") {
-                closeNearest("songsenv", i, end);
-                continue;
-              }
-
-              if (token.type === "beginsong") {
-                resetSongCounters();
-
-                const title = (token.match[2] || "").trim() || "Song";
-                const options = (token.match[1] || token.match[3] || "").trim();
-
-                const detailParts = [];
-                const byMatch = options.match(/\bby\s*=\s*\{([^}]*)\}/);
-                if (byMatch) {
-                  detailParts.push(`by: ${byMatch[1].trim()}`);
-                }
-                const keyMatch = options.match(/\bkey\s*=\s*\{([^}]*)\}/);
-                if (keyMatch) {
-                  detailParts.push(`key: ${keyMatch[1].trim()}`);
-                }
-
-                const symbol = makeSymbol(
-                  vscode,
-                  title,
-                  detailParts.join(" · "),
-                  vscode.SymbolKind.Module,
-                  i,
-                  start,
-                  end
-                );
-
-                stack.push({
-                  type: "song",
-                  startLine: i,
-                  symbol
-                });
-                continue;
-              }
-
-              if (token.type === "beginverse") {
-                counters.verse += 1;
-                const symbol = makeSymbol(
-                  vscode,
-                  `verse ${counters.verse}`,
-                  "\\beginverse",
-                  vscode.SymbolKind.Namespace,
-                  i,
-                  start,
-                  end
-                );
-                if (addChildToNearestParent(symbol, ["song"])) {
-                  stack.push({
-                    type: "verse",
-                    startLine: i,
-                    symbol
+                  atomic.push({
+                    line: lineIndex,
+                    ch: start,
+                    symbol: new vscode.DocumentSymbol(
+                      fileName,
+                      detail,
+                      vscode.SymbolKind.File,
+                      range(vscode, lineIndex, start, lineIndex, end),
+                      range(vscode, lineIndex, start, lineIndex, end)
+                    )
                   });
                 }
-                continue;
-              }
-
-              if (token.type === "mnbeginverse") {
-                counters.verse += 1;
-                const symbol = makeSymbol(
-                  vscode,
-                  `verse ${counters.verse}`,
-                  "\\mnbeginverse",
-                  vscode.SymbolKind.Namespace,
-                  i,
-                  start,
-                  end
-                );
-                if (addChildToNearestParent(symbol, ["song"])) {
-                  stack.push({
-                    type: "mnverse",
-                    startLine: i,
-                    symbol
-                  });
-                }
-                continue;
-              }
-
-              if (token.type === "beginrep") {
-                counters.rep += 1;
-
-                if (currentNearest(["rep", "verse", "mnverse", "translation"])) {
-                  stack.push({
-                    type: "rep",
-                    startLine: i,
-                    symbol: null
-                  });
-                }
-                continue;
-              }
-
-              if (token.type === "begintranslation") {
-                counters.translation += 1;
-                const lang = (token.match[1] || token.match[2] || "").trim();
-                const name = lang
-                  ? `translation ${counters.translation} [${lang}]`
-                  : `translation ${counters.translation}`;
-                const detail = lang
-                  ? `translation (${lang})`
-                  : "translation";
-
-                const symbol = makeSymbol(
-                  vscode,
-                  name,
-                  detail,
-                  vscode.SymbolKind.Namespace,
-                  i,
-                  start,
-                  end
-                );
-                if (addChildToNearestParent(symbol, ["song"])) {
-                  stack.push({
-                    type: "translation",
-                    startLine: i,
-                    symbol
-                  });
-                }
-                continue;
-              }
-
-              if (token.type === "beginexplanation") {
-                const lang = (token.match[1] || "").trim();
-                const name = lang ? `explanation [${lang}]` : "explanation";
-                const detail = lang ? `explanation (${lang})` : "explanation";
-
-                const symbol = makeSymbol(
-                  vscode,
-                  name,
-                  detail,
-                  vscode.SymbolKind.Namespace,
-                  i,
-                  start,
-                  end
-                );
-                if (addChildToNearestParent(symbol, ["song"])) {
-                  stack.push({
-                    type: "explanation",
-                    startLine: i,
-                    symbol
-                  });
-                }
-                continue;
-              }
-
-              if (token.type === "beginpassage") {
-                const lang = (token.match[1] || "").trim();
-                const name = lang ? `passage [${lang}]` : "passage";
-                const detail = lang ? `passage (${lang})` : "passage";
-
-                const symbol = makeSymbol(
-                  vscode,
-                  name,
-                  detail,
-                  vscode.SymbolKind.Namespace,
-                  i,
-                  start,
-                  end
-                );
-                const attached = addChildToNearestParent(symbol, ["song"]);
-                if (!attached) {
-                  songs.push(symbol);
-                }
-                stack.push({
-                  type: "passage",
-                  startLine: i,
-                  symbol
-                });
-                continue;
-              }
-
-              if (token.type === "beginfeeler") {
-                const symbol = makeSymbol(
-                  vscode,
-                  "feeler",
-                  "feeler",
-                  vscode.SymbolKind.Namespace,
-                  i,
-                  start,
-                  end
-                );
-                if (addChildToNearestParent(symbol, ["song"])) {
-                  stack.push({
-                    type: "feeler",
-                    startLine: i,
-                    symbol
-                  });
-                }
-                continue;
-              }
-
-              if (token.type === "beginintersong") {
-                const symbol = makeSymbol(
-                  vscode,
-                  "intersong",
-                  "intersong",
-                  vscode.SymbolKind.Namespace,
-                  i,
-                  start,
-                  end
-                );
-
-                songs.push(symbol);
-
-                stack.push({
-                  type: "intersong",
-                  startLine: i,
-                  symbol
-                });
-                continue;
-              }
-
-              if (token.type === "beginlilypond") {
-                counters.lilypond += 1;
-                const symbol = makeSymbol(
-                  vscode,
-                  `lilypond ${counters.lilypond}`,
-                  "\\begin{lilypond}",
-                  vscode.SymbolKind.Namespace,
-                  i,
-                  start,
-                  end
-                );
-                if (addChildToNearestParent(symbol, ["song"])) {
-                  stack.push({
-                    type: "lilypond",
-                    startLine: i,
-                    symbol
-                  });
-                }
-                continue;
-              }
-
-              if (token.type === "endverse") {
-                closeNearestAny(["verse", "mnverse"], i, end);
-                continue;
-              }
-
-              if (token.type === "mnendverse") {
-                closeNearest("mnverse", i, end);
-                continue;
-              }
-
-              if (token.type === "endrep") {
-                closeNearest("rep", i, end);
-                continue;
-              }
-
-              if (token.type === "endtranslation") {
-                closeNearest("translation", i, end);
-                continue;
-              }
-
-              if (token.type === "endexplanation") {
-                closeNearest("explanation", i, end);
-                continue;
-              }
-
-              if (token.type === "endpassage") {
-                closeNearest("passage", i, end);
-                continue;
-              }
-
-              if (token.type === "endfeeler") {
-                closeNearest("feeler", i, end);
-                continue;
-              }
-
-              if (token.type === "endintersong") {
-                closeNearest("intersong", i, end);
-                continue;
-              }
-
-              if (token.type === "endlilypond") {
-                closeNearest("lilypond", i, end);
-                continue;
-              }
-
-              if (token.type === "endsong") {
-                closeNearest("song", i, end);
-                continue;
               }
             }
           }
 
-          const lastLine = Math.max(0, lines.length - 1);
-          const lastLen = lines[lastLine] ? lines[lastLine].length : 0;
+          const atomicSymbols = atomic.map((a) => a.symbol);
+          const all = [...atomicSymbols, ...outlineSymbols];
 
-          for (let i = stack.length - 1; i >= 0; i--) {
-            const entry = stack[i];
-            if (!entry.symbol) {
-              continue;
-            }
-            updateSymbolRange(
-              vscode,
-              entry.symbol,
-              entry.startLine,
-              lastLine,
-              lastLen
-            );
-            if (entry.type === "song") {
-              songs.push(entry.symbol);
-            }
-          }
+          all.sort((a, b) => {
+            const da = a.selectionRange.start;
+            const db = b.selectionRange.start;
+            return da.line - db.line || da.character - db.character;
+          });
 
-          return songs;
+          return all;
         } catch (error) {
           console.error("ULSBS symbol provider failed:", error);
           return [];

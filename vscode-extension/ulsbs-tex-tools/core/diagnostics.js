@@ -1,10 +1,21 @@
 // SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+/**
+ * Diagnostics provider (structural warnings/errors for ULSBS macros).
+ * @module
+ */
+
 const { analyzeText } = require("./parser");
-const { isSupportedDocument, isExcludedUri } = require("./filetypes");
+const { shouldProcessDocument } = require("./filetypes");
 const { getSettings } = require("./config");
 
+/**
+ * Register a DiagnosticCollection and keep it in sync with editor events.
+ * @param {import('vscode')} vscode
+ * @param {import('vscode').ExtensionContext} context
+ * @param {any} songbookService Unused currently; kept for API symmetry.
+ */
 function registerDiagnostics(vscode, context, songbookService) {
   const collection = vscode.languages.createDiagnosticCollection("ulsbs-tex-tools");
   context.subscriptions.push(collection);
@@ -17,12 +28,13 @@ function registerDiagnostics(vscode, context, songbookService) {
       : vscodeObj.DiagnosticSeverity.Warning;
   }
 
+  /** @param {import('vscode').TextDocument} document */
   function updateDocument(document) {
     if (!enabled) return;
-    if (!isSupportedDocument(document)) return;
+    if (!document) return;
 
     const settings = getSettings(vscode);
-    if (isExcludedUri(vscode, document.uri, settings.excludeGlob)) {
+    if (!shouldProcessDocument(vscode, document, settings)) {
       collection.delete(document.uri);
       return;
     }
@@ -49,10 +61,8 @@ function registerDiagnostics(vscode, context, songbookService) {
     vscode.workspace.onDidOpenTextDocument(updateDocument),
     vscode.workspace.onDidSaveTextDocument(updateDocument),
     vscode.workspace.onDidChangeTextDocument((event) => {
-      const auto = vscode.workspace
-        .getConfiguration("ulsbsTexTools")
-        .get("autoRefreshDiagnostics", true);
-      if (auto) {
+      const settings = getSettings(vscode);
+      if (settings.autoRefreshDiagnostics) {
         updateDocument(event.document);
       }
     }),

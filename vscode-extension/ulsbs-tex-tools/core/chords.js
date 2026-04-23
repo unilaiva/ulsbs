@@ -1,14 +1,31 @@
 // SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-const { stripComment } = require("./parser");
-const { isSupportedDocument, isExcludedUri } = require("./filetypes");
-const { getSettings } = require("./config");
+/**
+ * Decorations for ULSBS chord markup inside verse lines (e.g. `\\[Am]`).
+ * Also styles melody macro args (\\mn*, \\ma*) in italics.
+ * @module
+ */
 
+const { stripComment } = require("./parser");
+const { shouldProcessDocument } = require("./filetypes");
+const { updateVerseState } = require("./regions");
+const { registerActiveEditorUpdater } = require("./editor-updater");
+
+/** @param {string} ch */
 function isLetter(ch) {
   return /[A-Za-z@]/.test(ch);
 }
 
+/**
+ * Parse a balanced group like `{...}` or `[...]` starting at `startIndex`.
+ * Returns the index *after* the closing delimiter.
+ * @param {string} text
+ * @param {number} startIndex
+ * @param {string} openChar
+ * @param {string} closeChar
+ * @returns {{endIndex: number}}
+ */
 function parseBalancedGroup(text, startIndex, openChar, closeChar) {
   // startIndex points at openChar
   if (text[startIndex] !== openChar) {
@@ -43,6 +60,11 @@ function parseBalancedGroup(text, startIndex, openChar, closeChar) {
   return { endIndex: text.length };
 }
 
+/**
+ * Find ranges inside `\\[ ... ]` content to decorate as chords/melody.
+ * @param {string} content
+ * @param {number} baseOffsetInLine Offset where `content` starts in the full line.
+ */
 function getDecorationRangesInBracketContent(content, baseOffsetInLine) {
   const chordRanges = [];
   const melodyRanges = [];
@@ -169,6 +191,11 @@ function findBracketSegments(line) {
   return segments;
 }
 
+/**
+ * Register live chord/melody decorations for the active editor.
+ * @param {import('vscode')} vscode
+ * @param {import('vscode').ExtensionContext} context
+ */
 function registerChordDecorations(vscode, context) {
   const chordDecorationType = vscode.window.createTextEditorDecorationType({
     fontWeight: "bold"
@@ -184,14 +211,7 @@ function registerChordDecorations(vscode, context) {
     }
 
     const document = editor.document;
-    if (!isSupportedDocument(document)) {
-      editor.setDecorations(chordDecorationType, []);
-      editor.setDecorations(melodyDecorationType, []);
-      return;
-    }
-
-    const settings = getSettings(vscode);
-    if (isExcludedUri(vscode, document.uri, settings.excludeGlob)) {
+    if (!shouldProcessDocument(vscode, document)) {
       editor.setDecorations(chordDecorationType, []);
       editor.setDecorations(melodyDecorationType, []);
       return;
@@ -208,10 +228,7 @@ function registerChordDecorations(vscode, context) {
       const rawLine = lines[lineIndex];
       const code = stripComment(rawLine);
 
-      const hasBeginVerse = /\\beginverse\b|\\mnbeginverse\b/.test(code);
-      const hasEndVerse = /\\endverse\b|\\mnendverse\b/.test(code);
-
-      const lineInVerse = inVerse || hasBeginVerse;
+      const { lineInVerse, nextInVerse } = updateVerseState(inVerse, code);
 
       if (lineInVerse) {
         const segments = findBracketSegments(code);
@@ -245,58 +262,19 @@ function registerChordDecorations(vscode, context) {
         }
       }
 
-      // Verse state: if both end and begin appear on the same line, we
-      // treat it as "close previous verse, open new verse" so the next
-      // line is still considered inside a verse.
-      if (hasEndVerse && hasBeginVerse) {
-        inVerse = true;
-      } else if (hasEndVerse) {
-        inVerse = false;
-      } else if (hasBeginVerse) {
-        inVerse = true;
-      }
+      inVerse = nextInVerse;
     }
 
     editor.setDecorations(chordDecorationType, chordRanges);
     editor.setDecorations(melodyDecorationType, melodyRanges);
   }
 
-  function handleActiveEditorChange(editor) {
-    void updateEditor(editor);
-  }
+  context.subscriptions.push(chordDecorationType, melodyDecorationType);
 
-  function handleDocumentChange(event) {
-    const active = vscode.window.activeTextEditor;
-    if (active && event.document === active.document) {
-      void updateEditor(active);
-    }
-  }
-
-  context.subscriptions.push(
-    chordDecorationType,
-    melodyDecorationType,
-    vscode.window.onDidChangeActiveTextEditor(handleActiveEditorChange),
-    vscode.workspace.onDidChangeTextDocument(handleDocumentChange),
-    vscode.workspace.onDidOpenTextDocument(() => {
-      const active = vscode.window.activeTextEditor;
-      if (active) {
-        void updateEditor(active);
-      }
-    })
-  );
-
-  // Initial update for the currently active editor
-  if (vscode.window.activeTextEditor) {
-    void updateEditor(vscode.window.activeTextEditor);
-  }
+  const updater = registerActiveEditorUpdater(vscode, context, updateEditor);
 
   return {
-    refreshActive() {
-      const active = vscode.window.activeTextEditor;
-      if (active) {
-        void updateEditor(active);
-      }
-    }
+    refreshActive: updater.refreshActive
   };
 }
 

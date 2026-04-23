@@ -1,10 +1,21 @@
 // SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-const { stripComment } = require("./parser");
-const { isSupportedDocument, isExcludedUri } = require("./filetypes");
-const { getSettings } = require("./config");
+/**
+ * Decorations for measure bars (`|`) inside verse/lilypond regions.
+ * @module
+ */
 
+const { stripComment } = require("./parser");
+const { shouldProcessDocument } = require("./filetypes");
+const { updateVerseState, updateLilypondState } = require("./regions");
+const { registerActiveEditorUpdater } = require("./editor-updater");
+
+/**
+ * Register live editor decorations for measure bars.
+ * @param {import('vscode')} vscode
+ * @param {import('vscode').ExtensionContext} context
+ */
 function registerMeasureBarDecorations(vscode, context) {
   const decorationType = vscode.window.createTextEditorDecorationType({
     color: new vscode.ThemeColor("editorCodeLens.foreground"),
@@ -18,13 +29,7 @@ function registerMeasureBarDecorations(vscode, context) {
     }
 
     const document = editor.document;
-    if (!isSupportedDocument(document)) {
-      editor.setDecorations(decorationType, []);
-      return;
-    }
-
-    const settings = getSettings(vscode);
-    if (isExcludedUri(vscode, document.uri, settings.excludeGlob)) {
+    if (!shouldProcessDocument(vscode, document)) {
       editor.setDecorations(decorationType, []);
       return;
     }
@@ -40,12 +45,10 @@ function registerMeasureBarDecorations(vscode, context) {
       const rawLine = lines[lineIndex];
       const code = stripComment(rawLine);
 
-      const hasBeginVerse = /\\beginverse\b|\\mnbeginverse\b/.test(code);
-      const hasEndVerse = /\\endverse\b|\\mnendverse\b/.test(code);
-      const hasBeginLily = /\\begin\{lilypond\}/.test(code);
-      const hasEndLily = /\\end\{lilypond\}/.test(code);
+      const { lineInVerse, nextInVerse } = updateVerseState(inVerse, code);
+      const { lineInLily, nextInLily } = updateLilypondState(inLilypond, code);
 
-      const lineInRegion = inVerse || hasBeginVerse || inLilypond || hasBeginLily;
+      const lineInRegion = lineInVerse || lineInLily;
 
       if (lineInRegion) {
         for (let col = 0; col < code.length; col++) {
@@ -57,58 +60,17 @@ function registerMeasureBarDecorations(vscode, context) {
         }
       }
 
-      // Verse state: if both end and begin appear on the same line, we
-      // treat it as "close previous verse, open new verse" so the next
-      // line is still considered inside a verse.
-      if (hasEndVerse && hasBeginVerse) {
-        inVerse = true;
-      } else if (hasEndVerse) {
-        inVerse = false;
-      } else if (hasBeginVerse) {
-        inVerse = true;
-      }
-
-      // Lilypond state: if begin and end are on the same line, consider it
-      // a single-line block and leave the following line outside lilypond.
-      if (hasBeginLily && hasEndLily) {
-        inLilypond = false;
-      } else if (hasEndLily) {
-        inLilypond = false;
-      } else if (hasBeginLily) {
-        inLilypond = true;
-      }
+      inVerse = nextInVerse;
+      inLilypond = nextInLily;
     }
 
     editor.setDecorations(decorationType, ranges);
   }
 
-  function handleActiveEditorChange(editor) {
-    void updateEditor(editor);
-  }
+  context.subscriptions.push(decorationType);
 
-  function handleDocumentChange(event) {
-    const active = vscode.window.activeTextEditor;
-    if (active && event.document === active.document) {
-      void updateEditor(active);
-    }
-  }
-
-  context.subscriptions.push(
-    decorationType,
-    vscode.window.onDidChangeActiveTextEditor(handleActiveEditorChange),
-    vscode.workspace.onDidChangeTextDocument(handleDocumentChange),
-    vscode.workspace.onDidOpenTextDocument(() => {
-      const active = vscode.window.activeTextEditor;
-      if (active) {
-        void updateEditor(active);
-      }
-    })
-  );
-
-  // Initial update for the currently active editor
-  if (vscode.window.activeTextEditor) {
-    void updateEditor(vscode.window.activeTextEditor);
-  }
+  // Keep decorations up to date for the active editor.
+  return registerActiveEditorUpdater(vscode, context, updateEditor);
 }
 
 module.exports = {

@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+/**
+ * VS Code extension entry point for ULSBS TeX tools.
+ * @module
+ */
+
 const vscode = require("vscode");
 
 const { isUlsbsWorkspace, ULSBS_CONFIG_BASENAME } = require("./core/workspace");
@@ -12,6 +17,11 @@ const { registerDiagnostics } = require("./core/diagnostics");
 const { registerCompileCommands } = require("./core/compile");
 const { registerTreeView } = require("./core/tree");
 
+/**
+ * Extension activation entry point.
+ * Wires up ULSBS services, commands, views and decorations.
+ * @param {vscode.ExtensionContext} context VS Code extension context
+ */
 async function activate(context) {
   const songbookService = createSongbookService(vscode);
   context.subscriptions.push(songbookService);
@@ -20,22 +30,41 @@ async function activate(context) {
   registerMeasureBarDecorations(vscode, context);
   registerChordDecorations(vscode, context);
 
-  const openConfigCommand = vscode.commands.registerCommand(
-    "ulsbsTexTools.openConfig",
-    async () => {
+  // Controllers / feature modules
+  const treeController = registerTreeView(vscode, context, songbookService);
+  const diagnosticsController = registerDiagnostics(vscode, context, songbookService);
+  const compileController = registerCompileCommands(
+    vscode,
+    context,
+    songbookService,
+    treeController
+  );
+
+  function getPrimaryWorkspaceFolder() {
+    return vscode.workspace.workspaceFolders?.[0] ?? null;
+  }
+
+  /** @param {import('vscode').Uri} uri */
+  async function uriExists(uri) {
+    try {
+      await vscode.workspace.fs.stat(uri);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("ulsbsTexTools.openConfig", async () => {
       try {
-        const folder = vscode.workspace.workspaceFolders?.[0];
+        const folder = getPrimaryWorkspaceFolder();
         if (!folder) {
           void vscode.window.showErrorMessage("No workspace folder is open.");
           return;
         }
 
         const configUri = vscode.Uri.joinPath(folder.uri, ULSBS_CONFIG_BASENAME);
-
-        try {
-          // Ensure the file exists; if not, this will throw
-          await vscode.workspace.fs.stat(configUri);
-        } catch {
+        if (!(await uriExists(configUri))) {
           void vscode.window.showErrorMessage(
             `ULSBS configuration file not found at ${vscode.workspace.asRelativePath(configUri, false)}`
           );
@@ -45,29 +74,25 @@ async function activate(context) {
         await vscode.window.showTextDocument(configUri);
       } catch (error) {
         console.error("ULSBS: Failed to open configuration file", error);
-        void vscode.window.showErrorMessage("Failed to open ULSBS configuration file.");
+        void vscode.window.showErrorMessage(
+          "Failed to open ULSBS configuration file."
+        );
       }
-    }
-  );
-  context.subscriptions.push(openConfigCommand);
+    }),
 
-  const createSongbookCommand = vscode.commands.registerCommand(
-    "ulsbsTexTools.createSongbook",
-    async () => {
+    vscode.commands.registerCommand("ulsbsTexTools.createSongbook", async () => {
       try {
-        const folder = vscode.workspace.workspaceFolders?.[0];
+        const folder = getPrimaryWorkspaceFolder();
         if (!folder) {
           void vscode.window.showErrorMessage("No workspace folder is open.");
           return;
         }
 
-        // Ensure the ulsbs-songbook.cls exists in this workspace
+        // Ensure ULSBS exists in this workspace.
         const clsRelative = "ulsbs/src/ulsbs/assets/tex/ulsbs-songbook.cls";
         const clsUri = vscode.Uri.joinPath(folder.uri, clsRelative);
 
-        try {
-          await vscode.workspace.fs.stat(clsUri);
-        } catch {
+        if (!(await uriExists(clsUri))) {
           void vscode.window.showErrorMessage(
             `ULSBS songbook class not found at ${vscode.workspace.asRelativePath(clsUri, false)}`
           );
@@ -80,11 +105,7 @@ async function activate(context) {
           value: "my-songbook"
         });
 
-        if (!base) {
-          return;
-        }
-
-        let name = base.trim();
+        let name = base?.trim();
         if (!name) {
           return;
         }
@@ -97,16 +118,11 @@ async function activate(context) {
         const filename = `${name}.tex`;
 
         const targetUri = vscode.Uri.joinPath(folder.uri, filename);
-
-        // Avoid overwriting an existing file
-        try {
-          await vscode.workspace.fs.stat(targetUri);
+        if (await uriExists(targetUri)) {
           void vscode.window.showErrorMessage(
             `File already exists: ${vscode.workspace.asRelativePath(targetUri, false)}`
           );
           return;
-        } catch {
-          // ok, file does not exist yet
         }
 
         // Read template from extension assets
@@ -121,32 +137,22 @@ async function activate(context) {
           templateBytes = await vscode.workspace.fs.readFile(templateUri);
         } catch (error) {
           console.error("ULSBS: Failed to read songbook template", error);
-          void vscode.window.showErrorMessage("Failed to read ULSBS songbook template.");
+          void vscode.window.showErrorMessage(
+            "Failed to read ULSBS songbook template."
+          );
           return;
         }
 
-        // Write new songbook file and open it
         await vscode.workspace.fs.writeFile(targetUri, templateBytes);
         await vscode.window.showTextDocument(targetUri);
 
-        // Refresh workspace index so the new songbook appears immediately
         await songbookService.refresh();
-        treeController?.refresh?.();
+        treeController.refresh();
       } catch (error) {
         console.error("ULSBS: Failed to create new songbook", error);
         void vscode.window.showErrorMessage("Failed to create new ULSBS songbook.");
       }
-    }
-  );
-  context.subscriptions.push(createSongbookCommand);
-
-  const treeController = registerTreeView(vscode, context, songbookService);
-  const diagnosticsController = registerDiagnostics(vscode, context, songbookService);
-  const compileController = registerCompileCommands(
-    vscode,
-    context,
-    songbookService,
-    treeController
+    })
   );
 
   async function refreshFeatureState() {
@@ -168,10 +174,7 @@ async function activate(context) {
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(async (event) => {
-      if (
-        event.affectsConfiguration("ulsbsTexTools") ||
-        event.affectsConfiguration("ulsbsTexTools.enable")
-      ) {
+      if (event.affectsConfiguration("ulsbsTexTools")) {
         await refreshFeatureState();
       }
     }),
@@ -183,6 +186,10 @@ async function activate(context) {
   await refreshFeatureState();
 }
 
+/**
+ * Extension deactivation hook.
+ * (Most resources are disposed automatically via `context.subscriptions`.)
+ */
 function deactivate() {}
 
 module.exports = {
