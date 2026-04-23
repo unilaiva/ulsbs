@@ -132,9 +132,17 @@ Quick cheat sheet:
 - snippets: `snippets/latex.json`
 - indentation / folding: `language-configuration.json`
 - symbols / outline: `core/symbols.js`
-- parsing and warnings: `core/parser.js`
-- workspace scanning: `core/songbooks.js`
+- parsing and warnings: `core/parser.js`, `core/diagnostics.js`
+- workspace detection: `core/workspace.js`
+- workspace scanning / songbook index: `core/songbooks.js`
+- sidebar tree view: `core/tree.js`
+- compile commands: `core/compile.js`
+- chord decorations: `core/chords.js`
+- measure bar decorations: `core/measures.js`
+- supported file types / exclusions: `core/filetypes.js`
+- extension entry point: `extension.js`
 - settings: `package.json`, `core/config.js`
+- new songbook template: `assets/songbook-template_A5.tex`
 
 ## Browser support
 
