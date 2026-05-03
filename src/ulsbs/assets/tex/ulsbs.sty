@@ -1775,7 +1775,11 @@
   \IfLangTF{portuguese}{%
     \addtocontents{toc}{~\hfill\textbf{Página}\par}
   }{%
-    \addtocontents{toc}{~\hfill\textbf{Page}\par}
+    \IfLangTF{finnish}{%
+      \addtocontents{toc}{~\hfill\textbf{Sivu}\par}
+    }{
+      \addtocontents{toc}{~\hfill\textbf{Page}\par}
+    }
   }
   \newpage\pagestyle{ulsbs}% return to the default header style
 }
