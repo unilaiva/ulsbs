@@ -460,7 +460,7 @@ Useful configuration features:
   - deployment behavior
 - `create-printouts`, `coverimage`, `json`, `midifiles`, `audiofiles`
   - enable or disable extra outputs
-- `common-deploy-icons`, `common-deploy-metadata`, `common-deploy-other`
+- `common-deploy-icons`, `common-deploy-social-images`, `common-deploy-metadata`, `common-deploy-other`
   - extra files to copy during deploy
 - profile inheritance with `inherit-from`
 - array merging with `merge-keys`

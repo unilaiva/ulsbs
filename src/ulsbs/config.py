@@ -120,6 +120,7 @@ class Config:
         default_factory=tuple
     )  # From config, possibly overwritten by CLI
     common_deploy_icons: Tuple[Path, ...] = field(default_factory=tuple)
+    common_deploy_social_images: Tuple[Path, ...] = field(default_factory=tuple)
     common_deploy_metadata: Tuple[Path, ...] = field(default_factory=tuple)
     common_deploy_other: Tuple[Path, ...] = field(default_factory=tuple)
 
@@ -593,6 +594,7 @@ _ALLOWED_FILE_KEYS: Set[str] = {
     # Files
     "songbooks",
     "common_deploy_icons",
+    "common_deploy_social_images",
     "common_deploy_metadata",
     "common_deploy_other",
     "deploy_dir",
@@ -875,6 +877,7 @@ def build_config(
             "_sequential_flag",
             "songbooks",
             "common_deploy_icons",
+            "common_deploy_social_images",
             "common_deploy_metadata",
             "common_deploy_other",
         }
@@ -1050,6 +1053,14 @@ def build_config(
             file_over["common_deploy_icons"], cfg_dir, must_exist=common_must_exist
         )
 
+    common_deploy_social_images: Tuple[Path, ...] = ()
+    if "common_deploy_social_images" in file_over:
+        if not isinstance(file_over["common_deploy_social_images"], (list, tuple)):
+            raise ValueError("common-deploy-social-images must be an array")
+        common_deploy_social_images = _expand_patterns(
+            file_over["common_deploy_social_images"], cfg_dir, must_exist=common_must_exist
+        )
+
     common_deploy_metadata: Tuple[Path, ...] = ()
     if "common_deploy_metadata" in file_over:
         if not isinstance(file_over["common_deploy_metadata"], (list, tuple)):
@@ -1109,6 +1120,7 @@ def build_config(
         conf,
         songbooks=(selected_songbooks or songbooks_cfg),
         common_deploy_icons=common_deploy_icons,
+        common_deploy_social_images=common_deploy_social_images,
         common_deploy_metadata=common_deploy_metadata,
         common_deploy_other=common_deploy_other,
         mididir_readme_file=mididir_readme_file_path,

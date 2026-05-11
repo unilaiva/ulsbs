@@ -131,6 +131,9 @@ songbooks = [
 common-deploy-icons = [
   # "assets/icons/*.png",
 ]
+common-deploy-social-images = [
+  # "assets/social/*.png",
+]
 common-deploy-metadata = [
   # "assets/metadata/*.json",
 ]

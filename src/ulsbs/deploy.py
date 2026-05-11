@@ -22,6 +22,7 @@ from .constants import (
     RESULT_TYPE_MIDIDIR,
     RESULT_TYPE_AUDIODIR,
     RESULT_TYPE_COMMONICON,
+    RESULT_TYPE_COMMONSOCIAL,
     RESULT_TYPE_COMMONMETADATA,
     RESULT_TYPE_COMMONOTHER,
     RESULT_PRINTOUT_SUBDIRNAME,
@@ -35,6 +36,7 @@ from .constants import (
     DEPLOY_MIDI_SUBDIRNAME,
     DEPLOY_AUDIO_SUBDIRNAME,
     DEPLOY_COMMONICON_SUBDIRNAME,
+    DEPLOY_COMMONSOCIAL_SUBDIRNAME,
     DEPLOY_COMMONMETADATA_SUBDIRNAME,
     DEPLOY_COMMONOTHER_SUBDIRNAME,
     NODEPLOY_FNAMEPART,
@@ -65,6 +67,8 @@ def deploy_results(ui: UI, cfg: Config) -> None:
     # Append common files to the deploy list if not there already, with abs path
     for icon in sorted(cfg.common_deploy_icons):
         resultlist.append_line_if_missing(RESULT_TYPE_COMMONICON, icon)
+    for social in sorted(cfg.common_deploy_social_images):
+        resultlist.append_line_if_missing(RESULT_TYPE_COMMONSOCIAL, social)
     for md in sorted(cfg.common_deploy_metadata):
         resultlist.append_line_if_missing(RESULT_TYPE_COMMONMETADATA, md)
     for oth in sorted(cfg.common_deploy_other):
@@ -86,6 +90,7 @@ def deploy_results(ui: UI, cfg: Config) -> None:
 
         if cfg.deploy_common and ftype not in (
             RESULT_TYPE_COMMONICON,
+            RESULT_TYPE_COMMONSOCIAL,
             RESULT_TYPE_COMMONMETADATA,
             RESULT_TYPE_COMMONOTHER,
         ):
@@ -106,6 +111,9 @@ def deploy_results(ui: UI, cfg: Config) -> None:
         elif ftype == RESULT_TYPE_COMMONICON:
             src = Path(fname)
             dst_dir = deploy_dir / DEPLOY_COMMONICON_SUBDIRNAME
+        elif ftype == RESULT_TYPE_COMMONSOCIAL:
+            src = Path(fname)
+            dst_dir = deploy_dir / DEPLOY_COMMONSOCIAL_SUBDIRNAME
         elif ftype == RESULT_TYPE_COMMONMETADATA:
             src = Path(fname)
             dst_dir = deploy_dir / DEPLOY_COMMONMETADATA_SUBDIRNAME
