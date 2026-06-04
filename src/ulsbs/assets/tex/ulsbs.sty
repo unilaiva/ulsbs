@@ -161,14 +161,6 @@
 \RequirePackage{expl3}% Used for some ifs etc
 \RequirePackage{xparse}% Used in \ulMainChapter
 \RequirePackage{tcolorbox}% for creating colored boxes, used in language code display
-% hyperref is used for URL links and by 'songs' package for index links in PDF.
-% Use option 'colorlinks' to colorize the links always, for both print and
-% digital viewing. It is possible to use colors only for digital viewing and
-% black for printing, by using 'ocgcolorlinks' option, which requires PDF
-% version 1.5, instead. That creates different layers for view and print,
-% which creates nicer result for black-and-white prints, but some printing
-% software might ignore both layers thus printing nothing for links -- so we
-% are not using it for now. The actual colors are defined further below.
 % Use 'microtype' package for better appearance (especially for non-song chapters):
 %   final - enable microtype; use "draft" to disable
 %   protrusion=true, activate protrusion
@@ -188,6 +180,14 @@
             factor=1100,
             stretch=10,
             shrink=10]{microtype}
+% hyperref is used for URL links and by 'songs' package for index links in PDF.
+% Use option 'colorlinks' to colorize the links always, for both print and
+% digital viewing. It is possible to use colors only for digital viewing and
+% black for printing, by using 'ocgcolorlinks' option, which requires PDF
+% version 1.5, instead. That creates different layers for view and print,
+% which creates nicer result for black-and-white prints, but some printing
+% software might ignore both layers thus printing nothing for links -- so we
+% are not using it for now. The actual colors are defined further below.
 \RequirePackage[bookmarks,
            unicode,
            colorlinks]{hyperref} % used by 'songs' package for index links in PDF
