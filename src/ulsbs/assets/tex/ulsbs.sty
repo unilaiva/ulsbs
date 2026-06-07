@@ -3376,12 +3376,43 @@
 % Machine-readable output file: <jobname>.ulsbs.psv
 \newwrite\UL@idtopagefile
 
+% Cross-engine support for recording physical positions:
+% - pdfTeX:   \pdfsavepos / \pdflastypos (sp)
+% - LuaTeX:   \savepos    / \lastsavedpos (sp)
+\newif\ifUL@havepos
+\UL@haveposfalse
+
+\begingroup
+  % Prefer pdfTeX-style primitives if available
+  \ifx\pdfsavepos\undefined
+  \else
+    \ifx\pdflastypos\undefined
+    \else
+      \global\UL@havepostrue
+      \gdef\UL@savepos{\pdfsavepos}%%
+      \gdef\UL@lastypos{\pdflastypos}%%
+    \fi
+  \fi
+  % Fallback to LuaTeX primitives if pdfTeX ones are missing
+  \ifUL@havepos\else
+    \ifx\savepos\undefined
+    \else
+      \ifx\lastypos\undefined
+      \else
+        \global\UL@havepostrue
+        \gdef\UL@savepos{\savepos}%%
+        \gdef\UL@lastypos{\lastypos}%%
+      \fi
+    \fi
+  \fi
+\endgroup
+
 % Open the output file when the document begins, and write a comment line(s)
 % describing content.
 \AtBeginDocument{%
   \immediate\openout\UL@idtopagefile=\jobname.ulsbs.psv
   \write\UL@idtopagefile{%
-    \string# ID-NR-PAGE|<id>|<songnumber>|<page>
+    \string# ID-NR-PAGE-Y|<id>|<songnumber>|<page>|<y-pos(sp)>
   }%
 }
 
@@ -3390,7 +3421,7 @@
   \immediate\closeout\UL@idtopagefile
 }
 
-% Write one line to the psv file: ID-NR-PAGE|<id>|<songnumber>|<page>
+% Write one line to the psv file: ID-NR-PAGE-Y|<id>|<songnumber>|<page>|<y-pos>
 % Note that \UL@anchorbyid should be called before this command, as it
 % will create a deduplicated form of the song's id this macro uses if
 % available.
@@ -3408,13 +3439,16 @@
           \UL@idwithsuffix
         \fi
       }%
-      % Freeze id and songnum *now*; delay \thepage to shipout
+      % Freeze id and songnum *now*; delay \thepage (and y-pos) to shipout
       \edef\UL@tmp{%
         \write\UL@idtopagefile{%
-          ID-NR-PAGE|\UL@fileid|\thesongnum|\noexpand\thepage
+          ID-NR-PAGE-Y|\UL@fileid|\thesongnum|\noexpand\thepage%
+          \ifUL@havepos
+            |\noexpand\the\UL@lastypos%
+          \fi
         }%
       }%
-      % Asynchronous write: expands \thepage at shipout
+      % Asynchronous write: expands \thepage and y-pos at shipout
       \UL@tmp
     \endgroup
   \fi
@@ -3452,6 +3486,10 @@
     % Only if hyperref's hypertarget is available, create the actual anchor
     \ifx\hypertarget\undefined\else
       \ifx\hypertarget\relax\else
+        % Record current position (for y-offset) if available
+        \ifUL@havepos
+          \UL@savepos
+        \fi
         \hypertarget{\UL@anchorname}{}%
       \fi
     \fi

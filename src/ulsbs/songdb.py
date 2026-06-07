@@ -189,6 +189,14 @@ following JSON Schema (draft-07):
               "type": ["integer", "null"],
               "description": "Optional page number."
             },
+            "page_y_sp": {
+              "type": ["integer", "null"],
+              "description": "Optional vertical position on the page in TeX scaled points, when available from .ulsbs.psv."
+            },
+            "page_y_pdf_bp": {
+              "type": ["number", "null"],
+              "description": "Optional vertical position on the page in PDF user units (bp) from the bottom edge, derived from page_y_sp and the paper size when known."
+            },
             "options": {
               "type": "object",
               "additionalProperties": {"type": "string"}
@@ -360,6 +368,15 @@ class SongInfo:
         When the same id is used more than once in the document, later
         occurrences are de-duplicated in document order as 'id-2', 'id-3',
         and so on, matching .ulsbs.psv parsing.
+    - page_y_sp:
+        Optional vertical position on the page, in TeX scaled points,
+        when available from the .ulsbs.psv file.
+    - page_y_pdf_bp:
+        Optional vertical position on the page, in PDF user units (bp),
+        measured from the bottom edge of the physical page. This is
+        derived from page_y_sp and the paper size when known. It will be
+        None when page_y_sp is missing or the paper size cannot be
+        resolved.
     """
 
     title: str
@@ -373,6 +390,8 @@ class SongInfo:
     chapter_slug: str | None
     id: str | None = None
     page: int | None = None
+    page_y_sp: int | None = None
+    page_y_pdf_bp: float | None = None
 
     # Internal fields (not included in any JSON output)
     source_file_absolute: Path | None = None
@@ -572,6 +591,8 @@ class SongbookData:
             "audio_result_file_relative",
             "id",
             "page",
+            "page_y_sp",
+            "page_y_pdf_bp",
         }
 
         ALWAYS_STRIP_FIELDS = {
@@ -1831,6 +1852,64 @@ def _apply_book_field(book_info: BookInfo, field_name: str, value: str) -> None:
     object.__setattr__(book_info, field_name, cleaned)
 
 
+# Conversion helpers for TeX/PDF coordinate systems
+_PT_PER_SP = 1.0 / 65536.0
+_BP_PER_PT = 72.0 / 72.27  # TeX pt -> PDF bp
+_MM_TO_BP = 72.0 / 25.4    # millimetres -> PDF bp
+
+
+def _paper_height_bp(paper: str | None) -> float | None:
+    """Return physical page height in PDF user units (bp) for a given paper.
+
+    Supports common LaTeX/geometry paper options such as "a4paper",
+    "a5paper", "a6paper", "a3paper" and "letter"/"letterpaper". For
+    unknown or unset paper sizes, returns None.
+    """
+
+    if not paper:
+        return None
+    p = paper.lower()
+
+    # Heights are for portrait orientation (width x height).
+    height_mm_by_option: dict[str, float] = {
+        "a3": 420.0,        # 297 x 420 mm
+        "a3paper": 420.0,
+        "a4": 297.0,        # 210 x 297 mm
+        "a4paper": 297.0,
+        "a5": 210.0,        # 148 x 210 mm
+        "a5paper": 210.0,
+        "a6": 148.0,        # 105 x 148 mm
+        "a6paper": 148.0,
+        "letter": 279.4,    # 8.5 x 11 in
+        "letterpaper": 279.4,
+    }
+
+    height_mm = height_mm_by_option.get(p)
+    if height_mm is None:
+        # Fallback: unknown paper size
+        return None
+    return height_mm * _MM_TO_BP
+
+
+def _page_y_sp_to_pdf_bp(page_y_sp: int, page_height_bp: float) -> float:
+    """Convert TeX y position (sp from TeX origin) to PDF y (bp from bottom).
+
+    TeX's \\pdfsavepos / \\pdflastypos report y in scaled points (sp) from an
+    internal origin that is 1 inch below the top edge of the page, with y
+    increasing downwards. PDF destinations, in contrast, use user units
+    (bp) from the *bottom* edge of the page, with y increasing upwards.
+
+    This helper performs the unit conversion and vertical flip, assuming a
+    known physical page height in bp.
+    """
+
+    # Convert scaled points -> TeX points -> bp
+    y_pt = page_y_sp * _PT_PER_SP
+    y_from_top_bp = 72.0 + y_pt * _BP_PER_PT  # 1in offset + content
+    y_from_bottom_bp = page_height_bp - y_from_top_bp
+    return y_from_bottom_bp
+
+
 _PSV_ID_RE = re.compile(r"^[a-z0-9-]+$")
 
 
@@ -1852,16 +1931,20 @@ def _deduplicate_imported_id(imported_id: str, existing_ids: set[str]) -> str:
     return final_id
 
 
-def _parse_ulsbs_psv_file(psv_file: Path) -> Dict[str, Tuple[str, int]]:
-    """Parse a .ulsbs.psv file containing song IDs, numbers and pages.
+def _parse_ulsbs_psv_file(psv_file: Path) -> Dict[str, Tuple[str, int, int | None]]:
+    """Parse a .ulsbs.psv file containing song IDs, numbers, pages and optional y-positions.
 
-    Supported non-comment line format is:
+    Supported non-comment line formats are:
 
         ID-NR-PAGE|<id>|<songnumber>|<page>
+        ID-NR-PAGE-Y|<id>|<songnumber>|<page>|<y-pos-sp>
 
     Lines whose first non-whitespace character is '#' are ignored.
 
-    Returns a mapping from (possibly de-duplicated) id to (songnumber, page).
+    Returns a mapping from (possibly de-duplicated) id to
+    (songnumber, page, y_pos_sp) where *y_pos_sp* is an integer TeX
+    scaled-point value or None when the file uses the older 4-field
+    format.
 
     Raises FileNotFoundError / ValueError on any problem.
     """
@@ -1877,7 +1960,7 @@ def _parse_ulsbs_psv_file(psv_file: Path) -> Dict[str, Tuple[str, int]]:
     except UnicodeDecodeError as e:
         raise ValueError(f"PSV file is not valid UTF-8: {psv_file}") from e
 
-    id_to_nr_page: Dict[str, Tuple[str, int]] = {}
+    id_to_nr_page: Dict[str, Tuple[str, int, int | None]] = {}
     seen_ids: set[str] = set()
 
     for lineno, line in enumerate(txt.splitlines(), start=1):
@@ -1891,12 +1974,19 @@ def _parse_ulsbs_psv_file(psv_file: Path) -> Dict[str, Tuple[str, int]]:
             raise ValueError(f"{psv_file}:{lineno}: Unknown record type")
 
         parts = stripped.split("|")
-        if len(parts) != 4:
+        if len(parts) == 4:
+            _tag, id_raw, songnr_raw, page_raw = parts
+            y_raw: str | None = None
+        elif len(parts) == 5:
+            _tag, id_raw, songnr_raw, page_raw, y_raw = parts
+        else:
             raise ValueError(
-                f"{psv_file}:{lineno}: Malformed ID-NR-PAGE record (expected 4 pipe-separated fields)"
+                f"{psv_file}:{lineno}: Malformed ID-NR-PAGE record (expected 4 or 5 pipe-separated fields)"
             )
 
-        _tag, id_raw, songnr_raw, page_raw = parts
+        # Validate tag for the two supported formats.
+        if _tag not in {"ID-NR-PAGE", "ID-NR-PAGE-Y"}:
+            raise ValueError(f"{psv_file}:{lineno}: Unsupported record tag '{_tag}'")
 
         imported_id = id_raw.strip()
         if not imported_id or _PSV_ID_RE.fullmatch(imported_id) is None:
@@ -1913,11 +2003,22 @@ def _parse_ulsbs_psv_file(psv_file: Path) -> Dict[str, Tuple[str, int]]:
         except ValueError as e:
             raise ValueError(f"{psv_file}:{lineno}: Invalid page '{page_raw.strip()}'") from e
 
+        y_pos_sp: int | None = None
+        if y_raw is not None:
+            y_raw_stripped = y_raw.strip()
+            if y_raw_stripped:
+                try:
+                    y_pos_sp = int(y_raw_stripped)
+                except ValueError as e:
+                    raise ValueError(
+                        f"{psv_file}:{lineno}: Invalid y-pos '{y_raw_stripped}'"
+                    ) from e
+
         # Note that the exact same deduplication is already done by LaTeX when
         # creating the .psv file, so this shouldn't really be needed here.
         # It is done just to be extra safe. :)
         final_id = _deduplicate_imported_id(imported_id, seen_ids)
-        id_to_nr_page[final_id] = (songnr, page)
+        id_to_nr_page[final_id] = (songnr, page, y_pos_sp)
 
     return id_to_nr_page
 
@@ -1959,7 +2060,7 @@ def build_song_database(
     doc_root = processed_tex.parent
     search_paths = [p.resolve() for p in include_search_paths]
 
-    psv_id_to_nr_page: Dict[str, Tuple[str, int]] | None = None
+    psv_id_to_nr_page: Dict[str, Tuple[str, int, int | None]] | None = None
     if ulsbs_psv_file is not None:
         psv_id_to_nr_page = _parse_ulsbs_psv_file(ulsbs_psv_file)
 
@@ -2014,10 +2115,16 @@ def build_song_database(
             song_id = _deduplicate_imported_id(song_id, seen_song_ids)
 
         page: int | None = None
+        page_y_sp: int | None = None
+        page_y_pdf_bp: float | None = None
         if psv_id_to_nr_page is not None and song_id is not None:
             nr_page = psv_id_to_nr_page.get(song_id)
             if nr_page is not None:
-                number, page = nr_page
+                number, page, page_y_sp = nr_page
+                if page_y_sp is not None:
+                    height_bp = _paper_height_bp(book_info.paper)
+                    if height_bp is not None:
+                        page_y_pdf_bp = _page_y_sp_to_pdf_bp(page_y_sp, height_bp)
 
         midi_compile_file_relative = _find_midi_in_song_block(raw_block, doc_root)
         audio_links = _collect_audio_links_from_block(raw_block)
@@ -2043,6 +2150,8 @@ def build_song_database(
             chapter_slug=current_chapter.slug if current_chapter else None,
             id=song_id,
             page=page,
+            page_y_sp=page_y_sp,
+            page_y_pdf_bp=page_y_pdf_bp,
             source_file_absolute=tex_file,
             beginsong_line=beginsong_line,
             beginsong_start=beginsong_start,
