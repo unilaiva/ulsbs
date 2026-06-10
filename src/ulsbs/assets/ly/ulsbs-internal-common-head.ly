@@ -53,6 +53,8 @@
     % Playout mark color. This ought to be manually synced with 'pomarkcolor'
     % defined in file ulsbs.sty:
     color-pomark = #(rgb-color 0 0.5 0)
+    % The color for secondary melody:
+    color-melodytwo = #darkmagenta
 
     \layout {
       \context {

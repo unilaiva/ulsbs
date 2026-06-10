@@ -12,7 +12,7 @@
     %% two voices, and lyrics, in that order, if they have been defined.
     %%
     %% In the songs using this, specify \voiceOne and \voiceTwo within
-    %% \theMelodyOne and \theMeldodyTwo to set stem direction.
+    %% \theMelody and \theMeldodyTwo to set stem direction.
     %%
     %% Requires that 'ulsbs-include-head.ly' has been included before.
     %%
@@ -29,7 +29,18 @@
         \new Staff <<
           \clef "treble"
           \new Voice = "theVoice" { \theMelody }
-          \new Voice = "theVoiceTwo" { \theMelodyTwo }
+          \\
+          \new Voice = "theVoiceTwo" {
+            %\override AmbitusLine.color = #color-melodytwo
+            \override AmbitusNoteHead.color = #color-melodytwo
+            \override AmbitusAccidental.color = #color-melodytwo
+            \override NoteHead.color = #color-melodytwo
+            \override Stem.color = #color-melodytwo
+            \override Beam.color = #color-melodytwo
+            \override Tie.color = #color-melodytwo
+            \override Slur.color = #color-melodytwo
+            \theMelodyTwo
+          }
         >>
         \include "ulsbs-internal-scorepart-lyrics.ly"
       >>
