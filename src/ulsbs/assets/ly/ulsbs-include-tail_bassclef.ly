@@ -11,7 +11,7 @@
     %%
     %% This file should be included as the last thing within 'lilypond'
     %% environment, and creates a score with chord names, notes, guitar
-    %% tabulature and lyrics, in that order, if they have been defined.
+    %% tablature and lyrics, in that order, if they have been defined.
     %%
     %% Requires that 'ulsbs-include-head.ly' has been included before.
     %%

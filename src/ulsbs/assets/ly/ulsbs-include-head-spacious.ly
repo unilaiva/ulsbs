@@ -30,12 +30,12 @@
     %%
     %% Note that if 'theChords' or 'theLyricsOne' is omitted, chords and lyrics
     %% will be ignored. If file 'input{ulsbs-include-tail.ly' is replaced with
-    %% 'input{ulsbs-include-tail-notab.ly', no guitar tabulature is created. Or if
+    %% 'input{ulsbs-include-tail-notab.ly', no guitar tablature is created. Or if
     %% it is replaced with 'input{ulsbs-include-tail-lyricsbelow.ly', the lyrics will
-    %% be laid below the tabulature staff instead of between normal and tab
+    %% be laid below the tablature staff instead of between normal and tab
     %% staffs.
     %%
-    %% Note that tabulature is transposed two octaves down!
+    %% Note that tablature is transposed two octaves down!
     %%
 
     % Includes the common settings

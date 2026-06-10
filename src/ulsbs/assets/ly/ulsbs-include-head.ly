@@ -30,9 +30,9 @@
     %%
     %% Note that if 'theChords' or 'theLyricsOne' is omitted, chords and lyrics
     %% will be ignored. If file 'ulsbs-include-tail.ly' is replaced with
-    %% 'ulsbs-include-tail-notab.ly', no guitar tabulature is created. Or if
+    %% 'ulsbs-include-tail-notab.ly', no guitar tablature is created. Or if
     %% it is replaced with 'ulsbs-include-tail-lyricsbelow.ly', the lyrics will
-    %% be laid below the tabulature staff instead of between normal and tab
+    %% be laid below the tablature staff instead of between normal and tab
     %% staffs. 'ulsbs-include-tail-notab-nolyrics' omits the lyrics and tabs,
     %% both.
     %%
@@ -43,7 +43,7 @@
     %%
     %% Melodies are supposed to be written one octave above the common female
     %% singing range (two octaves above the male one). This is taken into
-    %% account for tabulature staff and MIDI. Tabs are by default transposed
+    %% account for tablature staff and MIDI. Tabs are by default transposed
     %% two octaves down, and for MIDI the main melody is transposed one octave
     %% down. Optional second voice is transposed two octaves down by default.
     %%
