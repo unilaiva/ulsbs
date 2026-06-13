@@ -947,10 +947,59 @@ _CHAPTER_MACROS = ("\\ulMainChapter", "\\chapter", "\\songchapter")
 _LYRICS_TEXT_MACROS_KEEP_ARG: set[str] = {"text", "textit", "emph"}
 
 
-def _tex_to_plain_text(text: str) -> str:
-    """Replace simple TeX accidentals with Unicode symbols and strip TeX markup.
+def _replace_common_tex_punctuation(text: str) -> str:
+    """Replace a small subset of common TeX punctuation with Unicode.
 
-    - \\flt, \\shrp, \\& and \\# are converted to ♭ and ♯
+    Notes
+    -----
+    - Quote tokens are only converted when they are not preceded by a
+      backslash, to avoid interfering with accent macros like \\`a.
+    """
+
+    # Dashes (order matters: em dash first)
+    text = text.replace("---", "—")
+    text = text.replace("--", "–")
+
+    # TeX-style quotes
+    text = re.sub(r"(?<!\\)``", "“", text)
+    text = re.sub(r"(?<!\\)''", "”", text)
+    text = re.sub(r"(?<!\\)`", "‘", text)
+
+    # Other small helpers
+    text = re.sub(r"\\(?:ldots|dots)(?:\{\})?", "…", text)
+    text = re.sub(r"\\textendash(?:\{\})?", "–", text)
+    text = re.sub(r"\\textemdash(?:\{\})?", "—", text)
+    text = re.sub(r"(?<!\\)~", " ", text)
+
+    return text
+
+
+def _replace_unescaped_key_accidentals(text: str) -> str:
+    """Replace unescaped '#' and '&' with music accidentals.
+
+    Intended for fields that represent musical keys/pitches where plain '#'
+    and '&' are used as ASCII shorthands.
+
+    Note: '\\#' and '\\&' are *not* treated as accidentals.
+    """
+
+    text = re.sub(r"(?<!\\)#", "♯", text)
+    text = re.sub(r"(?<!\\)&", "♭", text)
+    return text
+
+
+def _tex_to_plain_text_keylike(text: str) -> str:
+    """Like _tex_to_plain_text(), but also converts unescaped #/& to ♯/♭."""
+
+    return _tex_to_plain_text(_replace_unescaped_key_accidentals(text))
+
+
+def _tex_to_plain_text(text: str) -> str:
+    """Replace simple TeX constructs with Unicode symbols and strip TeX markup.
+
+    - \\flt and \\shrp are converted to ♭ and ♯
+    - Escaped control symbols \\#, \\& and \\% are unescaped to '#', '&' and '%'
+    - Common TeX punctuation is converted (---/--, ``/''/`)
     - TeX comments (%) are removed (but \\% is kept as a literal %)
     - TeX macros are stripped; their mandatory {...} arguments are kept,
       except when they contain only a TeX length (e.g. 0.5pt, 2ex)
@@ -959,11 +1008,12 @@ def _tex_to_plain_text(text: str) -> str:
     - All newline styles are normalized and whitespace collapses to a single space
     """
 
-    # 1. Replace music accidentals
+    # 1. Replace music accidentals (ulsbs-specific TeX macros)
     text = re.sub(r"\\flt(?:\{\})?", "♭", text)
     text = re.sub(r"\\shrp(?:\{\})?", "♯", text)
-    text = re.sub(r"\\&", "♭", text)
-    text = re.sub(r"\\#", "♯", text)
+
+    # 1b. Replace common TeX punctuation
+    text = _replace_common_tex_punctuation(text)
 
     # 2. Remove TeX comments: % to end-of-line, except when escaped as \%
     text = re.sub(r"(?<!\\)%[^\r\n]*", "", text)
@@ -1006,8 +1056,10 @@ def _tex_to_plain_text(text: str) -> str:
     )
     text = macro_with_args_re.sub(_macro_with_args_repl, text)
 
-    # 5. Convert escaped percent to literal percent
+    # 5. Unescape common TeX control symbols
     text = text.replace(r"\%", "%")
+    text = text.replace(r"\#", "#")
+    text = text.replace(r"\&", "&")
 
     # 6. Drop remaining control sequences without mandatory args (e.g. \foo, \\, \&)
     text = re.sub(r"\\[A-Za-z]+|\\.", " ", text)
@@ -1024,10 +1076,10 @@ def _tex_to_plain_text(text: str) -> str:
 def _unescape_tex_url(text: str) -> str:
     """Undo simple TeX escaping used inside URLs.
 
-    Currently this only normalises \\% back to a literal %.
+    This normalises common TeX-escaped control symbols back to literals.
     """
 
-    return text.replace(r"\%", "%")
+    return text.replace(r"\%", "%").replace(r"\#", "#").replace(r"\&", "&")
 
 
 def _parse_braced_argument(src: str, start: int) -> Tuple[str, int]:
@@ -1342,11 +1394,11 @@ def _parse_audio_command(src: str, start: int) -> Tuple[AudioLink | None, int]:
 
     # Normalise simple TeX constructs in option values
     if key is not None:
-        key = _tex_to_plain_text(key)
+        key = _tex_to_plain_text_keylike(key)
     if title is not None:
         title = _tex_to_plain_text(title)
     if pitch is not None:
-        pitch = _tex_to_plain_text(pitch)
+        pitch = _tex_to_plain_text_keylike(pitch)
 
     normalised_url = _unescape_tex_url(url.strip())
 
@@ -1623,6 +1675,7 @@ def _normalise_verses(
         # Drop TeX comments first.
         cleaned = re.sub(r"(?<!\\)%[^\r\n]*", "", verse_src)
         cleaned = _strip_macros_for_lyrics(cleaned)
+        cleaned = _replace_common_tex_punctuation(cleaned)
 
         verse_lines: List[str] = []
         for raw_line in cleaned.splitlines():
@@ -2106,7 +2159,16 @@ def build_song_database(
             current_songnum += 1
 
         # Normalise simple TeX constructs in \beginsong options as well.
-        normalised_options: Dict[str, str] = {k: _tex_to_plain_text(v) for k, v in options.items()}
+        #
+        # Special case for music-key-like fields: treat plain '#' and '&' as
+        # accidental shorthands.
+        _keylike_fields = {"key", "gk", "pitch"}
+        normalised_options: Dict[str, str] = {}
+        for k, v in options.items():
+            if k.lower() in _keylike_fields:
+                normalised_options[k] = _tex_to_plain_text_keylike(v)
+            else:
+                normalised_options[k] = _tex_to_plain_text(v)
 
         song_id = normalised_options.get("id")
         if song_id is not None:
