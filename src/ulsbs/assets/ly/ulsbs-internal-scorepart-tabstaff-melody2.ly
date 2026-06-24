@@ -9,6 +9,9 @@
         \new TabStaff {
           \override TabStaff.StaffSymbol.color = #color-melodytwo
           \override TabStaff.TabNoteHead.color = #color-melodytwo
+          \override TabStaff.Tie.color = #color-melodytwo
+          \override TabStaff.Slur.color = #color-melodytwo
+          \override TabStaff.Parentheses.color = #color-melodytwo
           \clef "moderntab"
           \transpose c c,,
           \theMelodyTwo

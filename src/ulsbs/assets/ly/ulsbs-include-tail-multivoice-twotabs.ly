@@ -37,6 +37,8 @@
             \override Beam.color = #color-melodytwo
             \override Tie.color = #color-melodytwo
             \override Slur.color = #color-melodytwo
+            \override Parentheses.color = #color-melodytwo
+            \override Staff.LedgerLineSpanner.color = #color-melodytwo
             \theMelodyTwo
           }
         >>

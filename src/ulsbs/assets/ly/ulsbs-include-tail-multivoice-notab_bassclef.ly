@@ -39,6 +39,7 @@
             \override Beam.color = #color-melodytwo
             \override Tie.color = #color-melodytwo
             \override Slur.color = #color-melodytwo
+            \override Parentheses.color = #color-melodytwo
             \transpose c c,, \theMelody }
           \new Voice = "theVoiceTwo" { \transpose c c,, \theMelodyTwo }
         >>

@@ -39,11 +39,13 @@
             \override Beam.color = #color-melodytwo
             \override Tie.color = #color-melodytwo
             \override Slur.color = #color-melodytwo
+            \override Parentheses.color = #color-melodytwo
+            \override Staff.LedgerLineSpanner.color = #color-melodytwo
             \transpose c c,, \theMelodyTwo
           }
         >>
-        \include "ulsbs-internal-scorepart-tabstaff-melody2.ly"
-        \include "ulsbs-internal-scorepart-tabstaff.ly"
+        %\include "ulsbs-internal-scorepart-tabstaff-melody2.ly"
+        %\include "ulsbs-internal-scorepart-tabstaff.ly"
         \include "ulsbs-internal-scorepart-lyrics.ly"
       >>
       \layout { }
