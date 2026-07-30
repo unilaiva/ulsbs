@@ -46,7 +46,7 @@ class ProjectPaths:
         config_file = project_root / CONFIG_FILENAME
         if not (config_file.exists() and config_file.is_file()):
             raise SystemExit(
-                f"Config file not found: {config_file}.Please create one; it can be empty."
+                f"Config file not found: {config_file}. Please create one; it can be empty."
             )
         temp_dir = project_root / TEMP_DIRNAME
         result_dir = project_root / RESULT_DIRNAME
