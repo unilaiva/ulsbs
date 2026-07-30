@@ -2251,6 +2251,16 @@ def build_song_database(
         n = len(src)
         while i < n:
             ch = src[i]
+            if ch == "%":
+                backslashes = 0
+                j = i - 1
+                while j >= 0 and src[j] == "\\":
+                    backslashes += 1
+                    j -= 1
+                if backslashes % 2 == 0:
+                    newline = src.find("\n", i)
+                    i = newline + 1 if newline != -1 else n
+                    continue
             if ch != "\\":
                 i += 1
                 continue
