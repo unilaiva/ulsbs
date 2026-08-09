@@ -5,3 +5,6 @@ repeat-level=0
 repeat-occurrences=2
 dash-length=2.0pt
 dash-gap=1.25pt
+marker-height-delta=0.0pt
+marker-depth-delta=0.0pt
+marker-last-penalty=0

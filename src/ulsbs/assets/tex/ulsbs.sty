@@ -4147,6 +4147,8 @@
     local rule_id = node.id("rule")
     local glue_id = node.id("glue")
     local kern_id = node.id("kern")
+    local whatsit_id = node.id("whatsit")
+    local user_defined_subtype = node.subtype("user_defined")
 
     --[[ Return a glue node's actual size after its containing box has applied
     stretch or shrink. The fallback supports older LuaTeX node libraries. ]]
@@ -4223,7 +4225,7 @@
           collect_rule(context, n, cursor, baseline, parent)
         elseif n.id == hlist_id or n.id == vlist_id then
           walk_box(n, cursor, baseline + n.shift, context)
-        elseif n.id == kern_id then
+        elseif n.id == whatsit_id and n.subtype == user_defined_subtype then
           collect_end_marker(context, n)
         end
         if n.id == glue_id then
@@ -4251,8 +4253,9 @@
         elseif n.id == glue_id then
           cursor = cursor + effective_glue(n, parent)
         elseif n.id == kern_id then
-          collect_end_marker(context, n)
           cursor = cursor + n.kern
+        elseif n.id == whatsit_id and n.subtype == user_defined_subtype then
+          collect_end_marker(context, n)
         end
       end
     end
@@ -4373,11 +4376,13 @@
     \begingroup%
       \attribute\UL@rep@attribute=\csname UL@rep@id@\the\UL@rep@level\endcsname\relax%
       \attribute\UL@rep@endattribute=1\relax%
-      \kern0pt%
+      \directlua{%
+        local marker = node.new("whatsit", "user_defined")
+        marker.type = 100
+        marker.value = 0
+        node.write(marker)
+      }%
     \endgroup%
-    % Prevent this zero kern from introducing an interline breakpoint. If the
-    % repeat ends the verse, SB@endverse removes this guard penalty as usual.
-    \penalty\@M%
   }
 \else
   % XeTeX and other non-Lua engines cannot inspect and rewrite the final node

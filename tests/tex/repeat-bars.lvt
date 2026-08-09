@@ -21,6 +21,14 @@
 \TYPE{repeat-occurrences=\the\UL@rep@serial}
 \TYPE{dash-length=\the\repbarcontinuationdashlengthdimen}
 \TYPE{dash-gap=\the\repbarcontinuationdashgapdimen}
+\setbox0=\vbox{Marker before\par}
+\UL@rep@level=1
+\expandafter\def\csname UL@rep@id@1\endcsname{1}
+\setbox2=\vbox{Marker before\par\UL@rep@endmarker}
+\UL@rep@level=0
+\TYPE{marker-height-delta=\the\dimexpr\ht2-\ht0\relax}
+\TYPE{marker-depth-delta=\the\dimexpr\dp2-\dp0\relax}
+\TYPE{marker-last-penalty=\the\lastpenalty}
 \makeatother
 \END
 \end{document}
