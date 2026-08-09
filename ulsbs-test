@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+#
+# SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+set -euo pipefail
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "ERROR: python3 is not installed or not found in PATH." >&2
+  exit 1
+fi
+
+ARGS=( "$@" )
+
+run_with_pythonpath() {
+  export PYTHONPATH="$1"
+  exec python3 -m ulsbs.testing "${ARGS[@]}"
+}
+
+if [[ -n "${ULSBS_ENGINE:-}" ]]; then
+  if [[ -d "$ULSBS_ENGINE/src/ulsbs" ]]; then
+    run_with_pythonpath "$(cd "$ULSBS_ENGINE/src" && pwd)"
+  fi
+  echo "ERROR: ULSBS_ENGINE='$ULSBS_ENGINE' does not contain src/ulsbs" >&2
+  exit 1
+fi
+
+if [[ -d "ulsbs/src/ulsbs" ]]; then
+  run_with_pythonpath "$(cd "ulsbs/src" && pwd)"
+fi
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+if [[ -d "$SCRIPT_DIR/src/ulsbs" ]]; then
+  run_with_pythonpath "$(cd "$SCRIPT_DIR/src" && pwd)"
+fi
+
+if python3 -c "import ulsbs.testing" >/dev/null 2>&1; then
+  exec python3 -m ulsbs.testing "${ARGS[@]}"
+fi
+
+echo "ERROR: Could not find the ULSBS test harness." >&2
+exit 1

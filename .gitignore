@@ -36,6 +36,9 @@ result
 # Python
 __pycache__
 
+# Test harness output
+/build/
+
 # other
 old
 *~

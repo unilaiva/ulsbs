@@ -1,0 +1,26 @@
+\input regression-test.tex
+\documentclass[paper={a5paper},maintitle={Repeat Regression}]{ulsbs-songbook}
+\begin{document}
+\begin{songs}{}
+\beginsong{Repeat Regression}
+  \beginverse
+    \beginrep
+      Outer line.
+      \beginrep
+        Nested line.
+      \endrep
+      Final outer line.
+    \endrep
+  \endverse
+\endsong
+\end{songs}
+\START
+\makeatletter
+\TYPE{engine=LuaTeX}
+\TYPE{repeat-level=\the\UL@rep@level}
+\TYPE{repeat-occurrences=\the\UL@rep@serial}
+\TYPE{dash-length=\the\repbarcontinuationdashlengthdimen}
+\TYPE{dash-gap=\the\repbarcontinuationdashgapdimen}
+\makeatother
+\END
+\end{document}

@@ -64,6 +64,7 @@ For a real-world example of a repository using ULSBS, see:
     - [`ulsbs-midi2audio`](#ulsbs-midi2audio)
     - [`ulsbs-ly2tex`](#ulsbs-ly2tex)
   - [Editor support](#editor-support)
+  - [Testing](#testing)
   - [More information](#more-information)
   - [License](#license)
 
@@ -999,6 +1000,31 @@ Installation instructions are in:
 
 - `vscode-extension/ulsbs-tex-tools/README.md`
 
+## Testing
+
+Run the complete test suite from the ULSBS source directory with:
+
+```sh
+./ulsbs-test
+```
+
+Tests use the same Docker or Podman `ulsbs-compiler` image as normal songbook
+compilation. The command builds the image when necessary, runs LuaLaTeX
+regression tests through `l3build`, and runs compilation/PDF-structure tests
+through Python's standard-library `unittest` runner.
+
+Useful options:
+
+```sh
+./ulsbs-test --container-rebuild
+./ulsbs-test --container-engine podman
+./ulsbs-test --no-container
+./ulsbs-test --verbose
+```
+
+Host testing is intended for development only; the containerized suite is the
+canonical result because it uses the supported ULSBS toolchain and fonts.
+
 ## More information
 
 The most important source files to inspect when extending or debugging ULSBS
@@ -1016,6 +1042,7 @@ The main wrapper scripts are:
 - `ulsbs-bookmeta`
 - `ulsbs-midi2audio`
 - `ulsbs-ly2tex`
+- `ulsbs-test`
 
 
 ## License

@@ -1,0 +1,27 @@
+\pdfvariable compresslevel=0
+\pdfvariable objcompresslevel=0
+\documentclass[paper={a5paper},maintitle={Repeat Test}]{ulsbs-songbook}
+\begin{document}
+\begin{songs}{}
+\beginsong{Repeat Test}[key={C}]
+  \beginverse
+    Outside the repeat.
+    \beginrep
+      First |\[C]outer repeat line.
+      Second outer repeat line that is deliberately long enough to wrap onto multiple visual lyric lines in this narrow column and exercise wrapped paragraphs.
+      \beginrep
+        First |\[G]nested repeat line.
+        Second nested repeat line.
+      \endrep
+      Final outer repeat line.
+    \endrep
+    Outside again.
+  \endverse
+  \beginverse
+    \beginrep
+      One-line repeat.
+    \endrep
+  \endverse
+\endsong
+\end{songs}
+\end{document}

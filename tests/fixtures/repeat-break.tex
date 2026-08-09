@@ -1,0 +1,89 @@
+\pdfvariable compresslevel=0
+\pdfvariable objcompresslevel=0
+\documentclass[paper={a5paper},maintitle={Repeat Break Test}]{ulsbs-songbook}
+\makeatletter
+% Production repeats are intentionally unbreakable. Relax that policy only in
+% this fixture to exercise physical page and column segmentation at shipout.
+\def\SB@par{%
+  \ifhmode
+    \SB@cnt\interlinepenalty
+    \interlinepenalty\@M
+    \endgraf
+    \interlinepenalty\SB@cnt
+    \penalty0
+  \fi
+}
+\makeatother
+\begin{document}
+\songcolumns{2}
+\begin{songs}{}
+\beginsong{Repeat Break Test}
+  \beginverse
+    \beginrep
+      \beginrep
+      Repeat line 01.
+      Repeat line 02.
+      Repeat line 03.
+      Repeat line 04.
+      Repeat line 05.
+      Repeat line 06.
+      Repeat line 07.
+      Repeat line 08.
+      Repeat line 09.
+      Repeat line 10.
+      Repeat line 11.
+      Repeat line 12.
+      Repeat line 13.
+      Repeat line 14.
+      Repeat line 15.
+      Repeat line 16.
+      Repeat line 17.
+      Repeat line 18.
+      Repeat line 19.
+      Repeat line 20.
+      Repeat line 21.
+      Repeat line 22.
+      Repeat line 23.
+      Repeat line 24.
+      Repeat line 25.
+      Repeat line 26.
+      Repeat line 27.
+      Repeat line 28.
+      Repeat line 29.
+      Repeat line 30.
+      Repeat line 31.
+      Repeat line 32.
+      Repeat line 33.
+      Repeat line 34.
+      Repeat line 35.
+      Repeat line 36.
+      Repeat line 37.
+      Repeat line 38.
+      Repeat line 39.
+      Repeat line 40.
+      Repeat line 41.
+      Repeat line 42.
+      Repeat line 43.
+      Repeat line 44.
+      Repeat line 45.
+      Repeat line 46.
+      Repeat line 47.
+      Repeat line 48.
+      Repeat line 49.
+      Repeat line 50.
+      Repeat line 51.
+      Repeat line 52.
+      Repeat line 53.
+      Repeat line 54.
+      Repeat line 55.
+      Repeat line 56.
+      Repeat line 57.
+      Repeat line 58.
+      Repeat line 59.
+      Repeat line 60.
+      \endrep
+    \endrep
+  \endverse
+\endsong
+\end{songs}
+\end{document}

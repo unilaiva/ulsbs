@@ -25,6 +25,7 @@ ulsbs-compile = "ulsbs.cli:main"
 ulsbs-bookmeta = "ulsbs.tools.bookmeta:main"
 ulsbs-midi2audio = "ulsbs.tools.midi2audio:main"
 ulsbs-ly2tex = "ulsbs.tools.ly2tex:main"
+ulsbs-test = "ulsbs.testing:main"
 
 [project.urls]
 Homepage = "https://github.com/unilaiva/unilaiva-songbook"
