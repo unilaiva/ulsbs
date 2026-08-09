@@ -4099,6 +4099,13 @@
 \newdimen\repbardepthdimen\repbardepthdimen=.5pt
 \newdimen\repbarheightadjwithchordsdimen\repbarheightadjwithchordsdimen=-2.5pt
 \newdimen\repbarheightadjnochordsdimen\repbarheightadjnochordsdimen=.5pt
+% At a page/column break, add two short vertical dashes beyond each end of the
+% solid bar. These dimensions control dash length and the gaps between the
+% solid bar and dashes, and between the two dashes.
+\newdimen\repbarcontinuationdashlengthdimen
+\repbarcontinuationdashlengthdimen=2pt
+\newdimen\repbarcontinuationdashgapdimen
+\repbarcontinuationdashgapdimen=1.25pt
 % How much extra upward reach continuation lines get to bridge interline glue
 % when having multiline repeat bars.
 \newcommand{\repbarcontinuingoverlap}{\the\dimexpr .7\baselineskip\relax}
@@ -4112,12 +4119,284 @@
 % State: Current line repeat bar's nesting depth.
 % Updated by \beginrep and \endrep.
 \newcount\UL@rep@level\UL@rep@level=0\relax%
+% Give every repeat occurrence its own id. On LuaTeX the id is attached to
+% its rule fragments, which are coalesced into one rule at shipout.
+\newcount\UL@rep@serial\UL@rep@serial=0\relax%
+
+% LuaTeX can alter the final node list after songs has split it into physical
+% pages and columns. Group tagged fragments by repeat id and absolute x
+% position, retain the uppermost rule, and extend it through the lowest one.
+% A repeat crossing a page or column boundary is therefore represented by one
+% rule in each resulting segment. Other engines keep the fragment fallback.
+\ifdefined\directlua
+  \directlua{
+    --[[ Attributes survive boxing and page/column splitting. The primary
+    attribute identifies a repeat occurrence; the others carry semantic
+    endpoint and unsplit line-height information to the shipout callback. ]]
+    local attribute = luatexbase.new_attribute("ulsbs.repeatbar")
+    local start_attribute = luatexbase.new_attribute("ulsbs.repeatbar.start")
+    local end_attribute = luatexbase.new_attribute("ulsbs.repeatbar.end")
+    local height_attribute = luatexbase.new_attribute("ulsbs.repeatbar.height")
+    token.set_macro("UL@rep@attribute", tostring(attribute), "global")
+    token.set_macro("UL@rep@startattribute", tostring(start_attribute), "global")
+    token.set_macro("UL@rep@endattribute", tostring(end_attribute), "global")
+    token.set_macro("UL@rep@heightattribute", tostring(height_attribute), "global")
+
+    local hlist_id = node.id("hlist")
+    local vlist_id = node.id("vlist")
+    local rule_id = node.id("rule")
+    local glue_id = node.id("glue")
+    local kern_id = node.id("kern")
+
+    --[[ Return a glue node's actual size after its containing box has applied
+    stretch or shrink. The fallback supports older LuaTeX node libraries. ]]
+    local function effective_glue(n, parent)
+      if node.effective_glue then
+        return node.effective_glue(n, parent)
+      end
+      return n.width
+    end
+
+    --[[ Add one tagged rule fragment to its physical segment. A segment key is
+    the repeat occurrence plus absolute horizontal position, so the same
+    repeat split into two columns on one page forms two independent groups.
+    Keep both the geometric union and the uppermost rule: that rule becomes
+    the single solid PDF rectangle emitted for this segment. ]]
+    local function collect_rule(context, n, x, baseline, parent)
+      local repeat_id = node.has_attribute(n, attribute)
+      if not repeat_id then
+        return
+      end
+      context.sequence = context.sequence + 1
+      local key = tostring(repeat_id) .. ":" .. tostring(x)
+      local group = context.groups[key]
+      local top = baseline - n.height
+      local bottom = baseline + n.depth
+      local normal_height = node.has_attribute(n, height_attribute) or n.height
+      if not group then
+        group = { top = top, bottom = bottom, first = n,
+                  first_parent = parent, baseline = baseline, rules = {},
+                  normal_height = normal_height,
+                  repeat_id = repeat_id, last_sequence = context.sequence,
+                  has_start = false, has_end = false }
+        context.groups[key] = group
+      else
+        if top < group.top then
+          group.top = top
+          group.first = n
+          group.first_parent = parent
+          group.baseline = baseline
+          group.normal_height = normal_height
+        end
+        if bottom > group.bottom then
+          group.bottom = bottom
+        end
+        group.last_sequence = context.sequence
+      end
+      if node.has_attribute(n, start_attribute) then
+        group.has_start = true
+      end
+      table.insert(group.rules, n)
+    end
+
+    --[[ Record a semantic end-repeat marker in traversal order. Its physical
+    group is resolved after traversal because the zero-size marker has no
+    useful horizontal coordinate of its own. ]]
+    local function collect_end_marker(context, n)
+      local repeat_id = node.has_attribute(n, attribute)
+      if repeat_id and node.has_attribute(n, end_attribute) then
+        context.sequence = context.sequence + 1
+        table.insert(context.end_markers,
+                     { repeat_id = repeat_id, sequence = context.sequence })
+      end
+    end
+
+    local walk_box
+
+    --[[ Traverse a horizontal list while tracking the absolute x coordinate
+    and baseline. Nested boxes are visited recursively; glue must use its final
+    stretched or shrunk width to keep column positions exact. ]]
+    local function walk_hlist(list, x, baseline, parent, context)
+      local cursor = x
+      for n in node.traverse(list) do
+        if n.id == rule_id then
+          collect_rule(context, n, cursor, baseline, parent)
+        elseif n.id == hlist_id or n.id == vlist_id then
+          walk_box(n, cursor, baseline + n.shift, context)
+        elseif n.id == kern_id then
+          collect_end_marker(context, n)
+        end
+        if n.id == glue_id then
+          cursor = cursor + effective_glue(n, parent)
+        elseif n.id == kern_id then
+          cursor = cursor + n.kern
+        elseif n.width then
+          cursor = cursor + n.width
+        end
+      end
+    end
+
+    --[[ Traverse a vertical list from its absolute top edge. Box heights,
+    depths, shifts, glue, and kerns advance the physical y position used to
+    calculate each rule fragment's top, bottom, and baseline. ]]
+    local function walk_vlist(list, x, top, parent, context)
+      local cursor = top
+      for n in node.traverse(list) do
+        if n.id == rule_id then
+          collect_rule(context, n, x, cursor + n.height, parent)
+          cursor = cursor + n.height + n.depth
+        elseif n.id == hlist_id or n.id == vlist_id then
+          walk_box(n, x + n.shift, cursor + n.height, context)
+          cursor = cursor + n.height + n.depth
+        elseif n.id == glue_id then
+          cursor = cursor + effective_glue(n, parent)
+        elseif n.id == kern_id then
+          collect_end_marker(context, n)
+          cursor = cursor + n.kern
+        end
+      end
+    end
+
+    --[[ Dispatch traversal using the reference-point convention of each box
+    type. Horizontal boxes receive a baseline; vertical boxes receive a
+    baseline and convert it to their top edge before walking their list. ]]
+    walk_box = function(box, x, baseline, context)
+      if box.id == hlist_id then
+        walk_hlist(box.list, x, baseline, box, context)
+      elseif box.id == vlist_id then
+        walk_vlist(box.list, x, baseline - box.height, box, context)
+      end
+    end
+
+    --[[ Insert one zero-width overlay box immediately before the retained
+    solid rule. Its copied rule inherits width, color state, direction, and
+    other backend properties, while the wrapper shift positions the short dash
+    at the requested vertical interval without affecting TeX layout. ]]
+    local function add_dash(group, top, bottom)
+      local dash = node.copy(group.first)
+      dash.height = bottom - top
+      dash.depth = 0
+      local wrapper = node.new(hlist_id)
+      wrapper.width = 0
+      wrapper.height = 0
+      wrapper.depth = 0
+      wrapper.dir = group.first_parent.dir
+      wrapper.shift = bottom - group.baseline
+      wrapper.list = dash
+      group.first_parent.list = node.insert_before(
+        group.first_parent.list, group.first, wrapper)
+    end
+
+    --[[ Associate each semantic end marker with the latest preceding physical
+    segment of the same repeat on this shipped page. Earlier segments lack an
+    end marker and are therefore known to continue on another column or page.
+    Traversal order disambiguates multiple columns at the same repeat nesting
+    level. ]]
+    local function mark_ended_groups(context)
+      for _, marker in ipairs(context.end_markers) do
+        local candidate = nil
+        for _, group in pairs(context.groups) do
+          if group.repeat_id == marker.repeat_id
+             and group.last_sequence < marker.sequence
+             and (not candidate
+                  or group.last_sequence > candidate.last_sequence) then
+            candidate = group
+          end
+        end
+        if candidate then
+          candidate.has_end = true
+        end
+      end
+    end
+
+    --[[ Add two outward-facing dashes only at split boundaries. On an incoming
+    segment, reset the solid rule to the normal first-line height and place the
+    dashes above it. On an outgoing segment, preserve the normal bottom and
+    place the dashes below it. Genuine repeat endpoints stay solid and receive
+    no continuation marks. ]]
+    local function add_continuation_dashes(group)
+      local dash = tex.dimen.repbarcontinuationdashlengthdimen
+      local gap = tex.dimen.repbarcontinuationdashgapdimen
+      if not group.has_start then
+        local normal_top = group.baseline - group.normal_height
+        group.top = normal_top
+        add_dash(group, normal_top - 2 * dash - 2 * gap,
+                        normal_top - dash - 2 * gap)
+        add_dash(group, normal_top - dash - gap, normal_top - gap)
+      end
+      if not group.has_end then
+        local normal_bottom = group.bottom
+        add_dash(group, normal_bottom + gap,
+                        normal_bottom + dash + gap)
+        add_dash(group, normal_bottom + dash + 2 * gap,
+                        normal_bottom + 2 * dash + 2 * gap)
+      end
+    end
+
+    --[[ Shipout entry point: discover physical repeat segments, resolve their
+    semantic endpoints, add continuation cues, then enlarge one fragment to
+    cover the whole segment and zero all remaining fragments. LuaTeX omits
+    zero-sized rules, leaving one solid PDF rectangle plus any break dashes. ]]
+    local function coalesce_repeat_bars(head)
+      local context = { groups = {}, end_markers = {}, sequence = 0 }
+      walk_box(head, 0, head.height, context)
+      mark_ended_groups(context)
+      for _, group in pairs(context.groups) do
+        add_continuation_dashes(group)
+        group.first.height = group.baseline - group.top
+        group.first.depth = group.bottom - group.baseline
+        for _, rule in ipairs(group.rules) do
+          if not (rule == group.first) then
+            rule.width = 0
+            rule.height = 0
+            rule.depth = 0
+          end
+        end
+      end
+      return true
+    end
+
+    luatexbase.add_to_callback(
+      "pre_shipout_filter", coalesce_repeat_bars, "ulsbs.repeatbars")
+  }
+  \def\UL@rep@tagrule#1#2#3#4{%
+    \begingroup%
+      \attribute\UL@rep@attribute=\csname UL@rep@id@#1\endcsname\relax%
+      \attribute\UL@rep@heightattribute=\number#3\relax%
+      \ifnum#2=1\relax%
+        \attribute\UL@rep@startattribute=1\relax%
+      \fi%
+      #4%
+    \endgroup%
+  }
+  \def\UL@rep@endmarker{%
+    \begingroup%
+      \attribute\UL@rep@attribute=\csname UL@rep@id@\the\UL@rep@level\endcsname\relax%
+      \attribute\UL@rep@endattribute=1\relax%
+      \kern0pt%
+    \endgroup%
+    % Prevent this zero kern from introducing an interline breakpoint. If the
+    % repeat ends the verse, SB@endverse removes this guard penalty as usual.
+    \penalty\@M%
+  }
+\else
+  % XeTeX and other non-Lua engines cannot inspect and rewrite the final node
+  % list after songs has split it into pages and columns. Preserve the original
+  % behavior: draw overlapping rule fragments on every lyric line. Layout,
+  % nesting, and repeat bars still work, but the PDF contains multiple touching
+  % rectangles and page/column continuation dashes are not available.
+  \PackageInfo{ulsbs}{Non-Lua engine: repeat bars use per-line fragments;^^J%
+    single-object bars and break continuation dashes require LuaTeX}%
+  \def\UL@rep@tagrule#1#2#3#4{#4}%
+  \let\UL@rep@endmarker\relax
+\fi
 
 % Scratch registers:
 \newlength\tmp@UL@rep@allbarswidth
 \newcount\tmp@UL@rep@prevlinestoreach
 \newlength\tmp@UL@rep@maxtextheight
 \newdimen\tmp@UL@rep@barhtbase
+\newdimen\tmp@UL@rep@normalbarhtbase
 
 % Define \beginrep and \endrep safely (LaTeX forbids \newcommand\end...)
 \expandafter\def\csname beginrep\endcsname{%
@@ -4127,6 +4406,9 @@
   \ifhmode\par\fi%
   % Advance the level of nested repeats
   \global\advance\UL@rep@level 1\relax%
+  \global\advance\UL@rep@serial 1\relax%
+  \expandafter\xdef\csname UL@rep@id@\the\UL@rep@level\endcsname{%
+    \the\UL@rep@serial}%
   \BoolSetFalse{g_repcont_prop}{\the\UL@rep@level}%
   \SB@inchorustrue% songs: disallows interline column/page break
   \UL@gobblepar%
@@ -4147,6 +4429,7 @@
       \UL@rep@drawbars%
     }%
   \fi%
+  \UL@rep@endmarker%
   % end block: ensure next block doesn't connect
   \BoolSetFalse{g_repcont_prop}{\the\UL@rep@level}%
   \global\advance\UL@rep@level -1\relax%
@@ -4180,18 +4463,18 @@
          \dimexpr \baselineskip * \numexpr\tmp@UL@rep@prevlinestoreach\relax\relax%
       \fi%
       % Draw the repeat bar with smash to take no vertical space
-      \smash{%
+      \UL@rep@tagrule{#1}{0}{\tmp@UL@rep@normalbarhtbase}{\smash{%
         \vrule\@width\cbarwidth%
               \@height\tmp@UL@rep@barhtbase%
               \@depth\repbardepthdimen%
-      }%
+      }}%
     }{%
       % We are on the first line of the repeat: smash or no?
-      \smash{%
+      \UL@rep@tagrule{#1}{1}{\tmp@UL@rep@normalbarhtbase}{\smash{%
         \vrule\@width\cbarwidth%
               \@height\tmp@UL@rep@barhtbase%
               \@depth\repbardepthdimen%
-      }%
+      }}%
     }%
     \BoolSetTrue{g_repcont_prop}{#1}% The bar at this nesting level has been started
   }%
@@ -4218,6 +4501,7 @@
   {% block to contain color
     \color{repetitionsigncolor}%
     \UL@rep@setbarhtbase%
+    \tmp@UL@rep@normalbarhtbase=\tmp@UL@rep@barhtbase%
     \setlength{\tmp@UL@rep@allbarswidth}{0pt}%
     % Call \UL@rep@drawbars@iter for each repeat level
     \repeattimes{\UL@rep@level}{\UL@rep@drawbars@iter}%
