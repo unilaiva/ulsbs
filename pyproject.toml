@@ -1,6 +1,6 @@
 [project]
 name = "ulsbs"
-version = "0.1.2"
+version = "0.2.0"
 description = "Unilaiva Songbook System (ULSBS) compiler and utilities"
 readme = "README.md"
 authors = [
