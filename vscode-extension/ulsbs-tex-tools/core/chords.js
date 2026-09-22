@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 /**
- * Decorations for ULSBS chord markup inside verse lines (e.g. `\\[Am]`).
- * Also styles melody macro args (\\mn*, \\ma*) in italics.
+ * Decorations for ULSBS chord markup and melody blocks inside verse lines.
  * @module
  */
 
@@ -68,6 +67,8 @@ function parseBalancedGroup(text, startIndex, openChar, closeChar) {
 function getDecorationRangesInBracketContent(content, baseOffsetInLine) {
   const chordRanges = [];
   const melodyRanges = [];
+  const melodyDelimiterRanges = [];
+  const unclosedMelodyRanges = [];
 
   let chordStart = null;
 
@@ -82,22 +83,58 @@ function getDecorationRangesInBracketContent(content, baseOffsetInLine) {
     chordStart = null;
   }
 
-  function pushMelodyArgRange(groupStart, groupEndExclusive) {
-    // groupStart points at '{', groupEndExclusive points after matching '}'
-    const innerStart = groupStart + 1;
-    const innerEnd = groupEndExclusive - 1;
+  function pushMelodyTokenRanges(blockStart, blockEndExclusive) {
+    const block = content.slice(blockStart + 1, blockEndExclusive - 1);
+    const offsetIndex = block.indexOf("@");
+    const sequences = offsetIndex === -1 ? block : block.slice(0, offsetIndex);
+    // Whitespace is optional: decorate each pitch or marker separately.
+    const tokenPattern = /[A-G](?:[#&])?|[_*/]/g;
+    let match;
 
-    if (innerEnd <= innerStart) return;
-
-    melodyRanges.push({
-      start: baseOffsetInLine + innerStart,
-      end: baseOffsetInLine + innerEnd
-    });
+    while ((match = tokenPattern.exec(sequences))) {
+      melodyRanges.push({
+        start: baseOffsetInLine + blockStart + 1 + match.index,
+        end: baseOffsetInLine + blockStart + 1 + match.index + match[0].length
+      });
+    }
   }
 
+  const melodyBlockStart = content.startsWith("^<") ? 1 : content.startsWith("<") ? 0 : -1;
   let i = 0;
   while (i < content.length) {
     const ch = content[i];
+
+    if (i === 0 && melodyBlockStart === 1) {
+      // A leading caret belongs to the annotation, not the chord remainder.
+      i += 1;
+      continue;
+    }
+
+    if (ch === "<" && i === melodyBlockStart) {
+      flushChord(i);
+      const blockEnd = content.indexOf(">", i + 1);
+      if (content[i + 1] === "!") {
+        melodyDelimiterRanges.push({
+          start: baseOffsetInLine + i + 1,
+          end: baseOffsetInLine + i + 2
+        });
+      }
+      if (blockEnd === -1) {
+        unclosedMelodyRanges.push({
+          start: baseOffsetInLine + i,
+          end: baseOffsetInLine + i + 1
+        });
+        pushMelodyTokenRanges(i, content.length + 1);
+        break;
+      }
+      melodyDelimiterRanges.push(
+        { start: baseOffsetInLine + i, end: baseOffsetInLine + i + 1 },
+        { start: baseOffsetInLine + blockEnd, end: baseOffsetInLine + blockEnd + 1 }
+      );
+      pushMelodyTokenRanges(i, blockEnd + 1);
+      i = blockEnd + 1;
+      continue;
+    }
 
     if (ch === "\\") {
       flushChord(i);
@@ -120,22 +157,15 @@ function getDecorationRangesInBracketContent(content, baseOffsetInLine) {
         i += 1;
       }
 
-      const isMelodyMacro =
-        name.startsWith("mn") || name.startsWith("ma") || name.startsWith("mnc");
-
       // Optional args: [ ... ] (skip, do not treat as chord)
       while (i < content.length && content[i] === "[") {
         const parsed = parseBalancedGroup(content, i, "[", "]");
         i = parsed.endIndex;
       }
 
-      // Mandatory args: { ... } (skip; for melody macros, italicize the arg content)
+      // Mandatory args: { ... } (skip; do not treat as chord content)
       while (i < content.length && content[i] === "{") {
-        const groupStart = i;
         const parsed = parseBalancedGroup(content, i, "{", "}");
-        if (isMelodyMacro) {
-          pushMelodyArgRange(groupStart, parsed.endIndex);
-        }
         i = parsed.endIndex;
       }
 
@@ -165,7 +195,7 @@ function getDecorationRangesInBracketContent(content, baseOffsetInLine) {
   }
 
   flushChord(content.length);
-  return { chordRanges, melodyRanges };
+  return { chordRanges, melodyRanges, melodyDelimiterRanges, unclosedMelodyRanges };
 }
 
 function findBracketSegments(line) {
@@ -204,6 +234,13 @@ function registerChordDecorations(vscode, context) {
   const melodyDecorationType = vscode.window.createTextEditorDecorationType({
     fontStyle: "italic"
   });
+  const melodyDelimiterDecorationType = vscode.window.createTextEditorDecorationType({
+    color: new vscode.ThemeColor("editorCodeLens.foreground")
+  });
+  const unclosedMelodyDecorationType = vscode.window.createTextEditorDecorationType({
+    color: new vscode.ThemeColor("editorError.foreground"),
+    textDecoration: "underline wavy"
+  });
 
   async function updateEditor(editor) {
     if (!editor) {
@@ -214,6 +251,8 @@ function registerChordDecorations(vscode, context) {
     if (!shouldProcessDocument(vscode, document)) {
       editor.setDecorations(chordDecorationType, []);
       editor.setDecorations(melodyDecorationType, []);
+      editor.setDecorations(melodyDelimiterDecorationType, []);
+      editor.setDecorations(unclosedMelodyDecorationType, []);
       return;
     }
 
@@ -221,6 +260,8 @@ function registerChordDecorations(vscode, context) {
 
     const chordRanges = [];
     const melodyRanges = [];
+    const melodyDelimiterRanges = [];
+    const unclosedMelodyRanges = [];
 
     let inVerse = false;
 
@@ -259,6 +300,24 @@ function registerChordDecorations(vscode, context) {
               )
             );
           }
+
+          for (const r of ranges.melodyDelimiterRanges) {
+            melodyDelimiterRanges.push(
+              new vscode.Range(
+                new vscode.Position(lineIndex, r.start),
+                new vscode.Position(lineIndex, r.end)
+              )
+            );
+          }
+
+          for (const r of ranges.unclosedMelodyRanges) {
+            unclosedMelodyRanges.push(
+              new vscode.Range(
+                new vscode.Position(lineIndex, r.start),
+                new vscode.Position(lineIndex, r.end)
+              )
+            );
+          }
         }
       }
 
@@ -267,9 +326,16 @@ function registerChordDecorations(vscode, context) {
 
     editor.setDecorations(chordDecorationType, chordRanges);
     editor.setDecorations(melodyDecorationType, melodyRanges);
+    editor.setDecorations(melodyDelimiterDecorationType, melodyDelimiterRanges);
+    editor.setDecorations(unclosedMelodyDecorationType, unclosedMelodyRanges);
   }
 
-  context.subscriptions.push(chordDecorationType, melodyDecorationType);
+  context.subscriptions.push(
+    chordDecorationType,
+    melodyDecorationType,
+    melodyDelimiterDecorationType,
+    unclosedMelodyDecorationType
+  );
 
   const updater = registerActiveEditorUpdater(vscode, context, updateEditor);
 

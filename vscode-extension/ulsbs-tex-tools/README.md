@@ -7,6 +7,7 @@ It is meant to be used with the **ULSBS (Unilaiva Songbook System)** package:
 
 - ULSBS repository: <https://github.com/unilaiva/ulsbs>
 - ULSBS documentation: <https://github.com/unilaiva/ulsbs/blob/main/README.md>
+- Extension changelog: [CHANGELOG.md](CHANGELOG.md)
 
 The extension is useful in songbook workspaces that contain `ulsbs-config.toml`
 and either:
@@ -20,6 +21,9 @@ The extension adds ULSBS-aware editing support for LaTeX files, including:
 
 - snippets for common ULSBS song structures
 - completion suggestions for common ULSBS environments (including `explanation`, `passage`, `feeler`, `intersong`)
+- melody-block pitch and marker completions inside `\[ ... ]`
+- a LaTeX grammar injection that scopes same-line chord annotations as `meta.ulsbs.chord.latex`
+- scoped `\melodyPrimaryPosition{normal|low}`, `\melodySecondaryPosition{above|below|same}`, and `\melodyStyleMapping{normal|swapped}` completions
 - indentation and folding for song environments
 - Outline / breadcrumb structure for songs and related blocks
 - parsing and warnings for common structural issues
@@ -42,6 +46,34 @@ It understands ULSBS-specific structures such as:
 \begin{intersong} ... \end{intersong}
 \[ ... ]
 ```
+
+### Melody blocks
+
+Inside a chord definition, write melody content as:
+
+```tex
+\[<[!] PRIMARY-NOTES[;SECONDARY-NOTES][ @ horizontal-offset]>Chord]
+\[^<[!] PRIMARY-NOTES[;SECONDARY-NOTES][ @ horizontal-offset]>Chord]
+```
+
+For example:
+
+```tex
+\[<C>Am]Love
+\[<C D E;E F G>F]Two melodies
+\[^<*A/_C;EF_G@.2em>Am]Marked phrase
+\[<!C>]
+\[<!*>]
+\[<!C@1em>Am]
+```
+
+The melody block must begin immediately after `\[` or after one leading `^`; it is not recognized elsewhere in the annotation. The chord, if present, follows the closing `>`. Use uppercase note names so transposition works. Spaces between items are optional: pitches are `A` through `G` with an optional `#` or `&`; `_` is an empty slot, `/` is a circled unpitched marker, and `*` is a beat mark. Beat marks are valid only inside the angle brackets. The optional leading `!` renders melody layers normally but gives them zero advance and disables that annotation's minimum whitespace; a chord after `>` keeps its natural width. The optional secondary sequence follows `;`; `@` adjusts the whole block. Configure the lanes with `\melodyPrimaryPosition{normal|low}` (default: `normal`) and `\melodySecondaryPosition{above|below|same}`. With a normal primary, secondary `above`, `same`, and `below` use the high, normal, and low lanes. With a low primary, they use the normal, low, and below-low lanes; below-low may intentionally overlap lyrics. Configure visual styles independently with `\melodyStyleMapping{normal|swapped}`. `same` overlays the secondary melody on the primary lane and is useful when migrating baseline alternate-only notes.
+
+Only one melody block is supported in an annotation. To combine blocks at the same anchor, use adjacent annotations with a zero-advance block first, for example `\[<!C>]\[<D>Am]`.
+
+A leading caret, as in `\[^<C>Am]`, excludes the complete annotation from chord memorization. A bare caret in lyric text replays the next full saved annotation.
+
+The opening and closing melody delimiters, `<` and `>`, and the leading `!` modifier have a distinct subtle editor decoration. When a valid opening `<` has no closing `>` before the annotation's `]`, the opening delimiter is marked as incomplete; TeX remains responsible for reporting the malformed melody block when compiled.
 
 ## Installation
 
@@ -135,6 +167,8 @@ loaded.
 Quick cheat sheet:
 
 - snippets (static templates): `snippets/latex.json`
+- injected LaTeX grammar: `syntaxes/ulsbs-chord.injection.tmLanguage.json`
+- grammar fixture check: `npm run test:grammar`
 - completions (context-aware suggestions + some block snippets): `core/completions.js`
 - indentation / folding: `language-configuration.json`
 - tokenizer for structural macros/environments: `core/songsyntax.js`

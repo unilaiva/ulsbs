@@ -2,7 +2,43 @@
   "Chord definition (ULSBS)": {
     "prefix": "\\[",
     "body": "\\[${1}]",
-    "description": "Insert \\[ ... ] (ULSBS). Place chord names within this."
+    "description": "Insert \\[ ... ] (ULSBS). Place chord names and melody blocks within this."
+  },
+
+  "Chord definition with melody block (ULSBS)": {
+    "prefix": "melodychord",
+    "body": "\\[<${1:C}>${2:Chord}]$0",
+    "description": "Insert a chord definition with a melody block: primary[;secondary][ @ offset]."
+  },
+
+  "Zero-advance chord definition with melody block (ULSBS)": {
+    "prefix": "melodychordzero",
+    "body": "\\[<!${1:C}>${2:Chord}]$0",
+    "description": "Insert melody layers with zero advance; a following chord keeps its natural width."
+  },
+
+  "Unmemorized chord definition with melody block (ULSBS)": {
+    "prefix": "melodychordskip",
+    "body": "\\[^<${1:C}>${2:Chord}]$0",
+    "description": "Insert a melody block excluded from chord memorization."
+  },
+
+  "Secondary melody position (ULSBS)": {
+    "prefix": "melodySecondaryPosition",
+    "body": "\\melodySecondaryPosition{${1|above,below,same|}}",
+    "description": "Set the secondary melody position in the current TeX scope; same overlays the primary lane."
+  },
+
+  "Primary melody position (ULSBS)": {
+    "prefix": "melodyPrimaryPosition",
+    "body": "\\melodyPrimaryPosition{${1|normal,low|}}",
+    "description": "Set the primary melody position in the current TeX scope; normal is the default."
+  },
+
+  "Melody style mapping (ULSBS)": {
+    "prefix": "melodyStyleMapping",
+    "body": "\\melodyStyleMapping{${1|normal,swapped|}}",
+    "description": "Set the primary/secondary visual style mapping in the current TeX scope."
   },
 
   "begin{songs} ... end{songs} (ULSBS)": {

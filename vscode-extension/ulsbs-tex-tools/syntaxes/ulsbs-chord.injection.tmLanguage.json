@@ -1,0 +1,10 @@
+{
+  "scopeName": "ulsbs.chord.injection.latex",
+  "injectionSelector": "L:text.tex.latex",
+  "patterns": [
+    {
+      "name": "meta.ulsbs.chord.latex",
+      "match": "\\\\\\[[^\\]\\r\\n]*\\]"
+    }
+  ]
+}

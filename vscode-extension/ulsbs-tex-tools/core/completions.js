@@ -232,6 +232,37 @@ function getMacroCompletionContext(linePrefix) {
 }
 
 /**
+ * Determine whether the cursor is inside an unfinished melody block in a
+ * chord definition, and return the current token replacement range.
+ * @param {string} linePrefix
+ */
+function getMelodyBlockCompletionContext(linePrefix) {
+  const chordStart = linePrefix.lastIndexOf("\\[");
+  if (chordStart === -1) {
+    return null;
+  }
+
+  const chordContent = linePrefix.slice(chordStart + 2);
+  const melodyStart = chordContent.startsWith("^<") ? 1 : chordContent.startsWith("<") ? 0 : -1;
+  if (melodyStart === -1 || chordContent.indexOf(">", melodyStart) !== -1) {
+    return null;
+  }
+
+  const content = chordContent.slice(melodyStart + 1);
+  const tokenMatch = /[_*/]$/.test(content) ? null : content.match(/[A-G](?:[#&])?$/);
+  const typed = tokenMatch ? tokenMatch[0] : "";
+
+  return {
+    typed,
+    replaceStart: linePrefix.length - typed.length,
+    canAddZeroAdvance: content.length === 0,
+    hasSecondary: content.includes(";"),
+    hasOffset: content.includes("@"),
+    inOffset: /@[^@]*$/.test(content)
+  };
+}
+
+/**
  * @param {import('vscode')} vscode
  * @param {string} title
  * @param {string} body
@@ -268,114 +299,44 @@ function registerCompletionProvider(vscode, context) {
 
           // Chordline-specific completions (inside \[ ... ])
           if (completionCtx.inChordLine) {
-            const macroCtx = getMacroCompletionContext(linePrefix);
-            if (!macroCtx) {
+            const melodyCtx = getMelodyBlockCompletionContext(linePrefix);
+            if (!melodyCtx) {
               return undefined;
             }
 
-            const nextChar = lineText[position.character] ?? "";
-            const needsSpaceAfterBareMacro = nextChar !== "]" && nextChar !== "\\";
-
-            /** @type {{name: string, argCount: number, title: string, doc: string}[]} */
-            const chordMacros = [
-              {
-                name: "bm",
-                argCount: 0,
-                title: "Beat mark (ULSBS)",
-                doc: "Beat mark that takes horizontal space."
-              },
-              {
-                name: "bmc",
-                argCount: 0,
-                title: "Beat mark (ULSBS)",
-                doc: "Beat mark that takes no horizontal space (can be stacked with chords and melody notes)."
-              },
-              {
-                name: "bmadj",
-                argCount: 1,
-                title: "Beat mark, adjusted (ULSBS)",
-                doc: "Beat mark that is adjusted horizontally and takes horizontal space."
-              },
-              {
-                name: "bmcadj",
-                argCount: 1,
-                title: "Beat mark, adjusted (ULSBS)",
-                doc: "Beat mark that is adjusted horizontally, but takes no horizontal space (can be stacked with chords and melody notes)"
-              },
-
-              { name: "mn", argCount: 1, title: "Melody note (ULSBS)", doc: "Melody note that takes horizontal space." },
-              { name: "mnc", argCount: 1, title: "Melody note (ULSBS)", doc: "Melody note that does not take horizontal space (can be stacked with beat marks and chords)." },
-              { name: "mncadj", argCount: 1, title: "Melody note, adjusted (ULSBS)", doc: "Horizontally adjusted melody note that does not take horizontal space (can be stacked with beat marks and chords)." },
-              { name: "mnd", argCount: 1, title: "Melody note, low (ULSBS)", doc: "Melody note that takes horizontal space. Placed below normal melody note position." },
-
-              { name: "mncii", argCount: 2, title: "2 melody notes (ULSBS)", doc: "2 melody notes that do not take horizontal space (can be stacked with beat marks and chords)." },
-              { name: "mnciii", argCount: 3, title: "3 melody notes (ULSBS)", doc: "3 melody notes that do not take horizontal space (can be stacked with beat marks and chords)." },
-              { name: "mnciv", argCount: 4, title: "4 melody notes (ULSBS)", doc: "4 melody notes that do not take horizontal space (can be stacked with beat marks and chords)." },
-              { name: "mncv", argCount: 5, title: "5 melody notes (ULSBS)", doc: "5 melody notes that do not take horizontal space (can be stacked with beat marks and chords)." },
-              { name: "mncvi", argCount: 6, title: "6 melody notes (ULSBS)", doc: "6 melody notes that do not take horizontal space (can be stacked with beat marks and chords)." },
-
-              { name: "ma", argCount: 1, title: "Alt. melody note (ULSBS)", doc: "Alternatively colored melody note that takes horizontal space." },
-              { name: "mac", argCount: 1, title: "Alt. melody note (ULSBS)", doc: "Alternatively colored melody note that does not take horizontal space (can be stacked with beat marks and chords)." },
-              { name: "mau", argCount: 1, title: "Alt. melody note (ULSBS)", doc: "Alternatively colored melody note that takes horizontal space. Placed above normal melody note position." },
-              { name: "mauc", argCount: 1, title: "Alt. melody note (ULSBS)", doc: "Alternatively colored melody note that does not take horizontal space (can be stacked with beat marks and chords). Placed above normal melody note line." },
-              { name: "mad", argCount: 1, title: "Alt. melody note (ULSBS)", doc: "Alternatively colored melody note that takes horizontal space. Placed below normal melody note position." },
-
-              { name: "mauii", argCount: 2, title: "Alt. + normal melody note (ULSBS)", doc: "Alternatively colored melody note placed high + normal melody note stacked; together they take horizontal space." },
-              { name: "mauiic", argCount: 2, title: "Alt. + normal melody note (ULSBS)", doc: "Alternatively colored melody note placed high + normal melody note stacked; they don't take horizontal space (can be stacked with beat marks and chords)." },
-              { name: "madii", argCount: 2, title: "Alt. + normal melody note (ULSBS)", doc: "Alternatively colored melody note placed low + normal melody note stacked; together they take horizontal space." },
-              { name: "mncii", argCount: 2, title: "Alt. + normal melody note (ULSBS)", doc: "Alternatively colored melody note placed low + normal melody note stacked; they don't take horizontal space (can be stacked with beat marks and chords)." },
-            ];
-
-            const typed = macroCtx.typed.toLowerCase();
-
-            const startPos = new vscode.Position(position.line, macroCtx.replaceStart);
+            const startPos = new vscode.Position(position.line, melodyCtx.replaceStart);
             const replaceRange = new vscode.Range(startPos, position);
+            const items = [];
+            const addItem = (label, detail, doc, insertText = label, code = insertText) => {
+              if (!label.toLowerCase().startsWith(melodyCtx.typed.toLowerCase())) return;
+              const item = new vscode.CompletionItem(label, vscode.CompletionItemKind.Value);
+              item.detail = detail;
+              item.sortText = `ulsbs_melody_${label}`;
+              item.range = replaceRange;
+              item.insertText = insertText;
+              item.documentation = makeCompletionDoc(vscode, detail, doc, `<${code}>`);
+              items.push(item);
+            };
 
-            return chordMacros
-              .filter((m) => m.name.toLowerCase().startsWith(typed))
-              .map((m) => {
-                const item = new vscode.CompletionItem(
-                  m.name,
-                  vscode.CompletionItemKind.Snippet
-                );
+            if (!melodyCtx.inOffset) {
+              if (melodyCtx.canAddZeroAdvance) {
+                addItem("!", "Zero-advance melody block (ULSBS)", "Render melody layers without width or minimum whitespace. A chord after the block keeps its natural width.");
+              }
+              for (const pitch of ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B", "D&", "E&", "G&", "A&", "B&"]) {
+                addItem(pitch, "Melody pitch (ULSBS)", "A pitch in the current primary or secondary melody sequence.");
+              }
+              addItem("_", "Melody gap (ULSBS)", "An empty melody slot that advances the sequence.");
+              addItem("/", "Unpitched melody marker (ULSBS)", "A circled unpitched marker that advances the melody sequence by one slot.");
+              addItem("*", "Beat mark (ULSBS)", "A beat mark at the current sequence position; it does not advance a slot.");
+              if (!melodyCtx.hasSecondary) {
+                addItem(";", "Secondary melody separator (ULSBS)", "Begin the optional secondary melody sequence.");
+              }
+              if (!melodyCtx.hasOffset) {
+                addItem("@", "Melody block offset (ULSBS)", "Adjust the complete melody block horizontally.", new vscode.SnippetString("@ ${1:.3em}"), "@ .3em");
+              }
+            }
 
-                item.detail = `${m.title} (${m.argCount} args)`;
-                item.sortText = `ulsbs_chord_${m.name}`;
-                item.range = replaceRange;
-
-                const parts = [`\\${m.name}`];
-
-                if (m.argCount === 0) {
-                  item.insertText =
-                    m.name +
-                    (needsSpaceAfterBareMacro && (m.name === "bm" || m.name === "bmc")
-                      ? " "
-                      : "");
-
-                  item.documentation = makeCompletionDoc(
-                    vscode,
-                    m.title,
-                    m.doc,
-                    parts[0]
-                  );
-
-                  return item;
-                }
-
-                for (let i = 1; i <= m.argCount; i++) {
-                  parts.push(`{$${i}}`);
-                }
-
-                item.insertText = new vscode.SnippetString([m.name, ...parts.slice(1)].join(""));
-                item.documentation = makeCompletionDoc(
-                  vscode,
-                  m.title,
-                  m.doc,
-                  parts.join("")
-                );
-
-                return item;
-              });
+            return items.length ? items : undefined;
           }
 
           // (1) \begin{...} / \end{...} environment name completion
@@ -539,6 +500,27 @@ function registerCompletionProvider(vscode, context) {
               doc: "Insert a `\\beginrep` ... `\\endrep` block (only inside a verse or translation).",
               snippet: "beginrep\n\t$0\n\\endrep",
               isAllowed: (ctx) => ctx.inVerse || ctx.inTranslation
+            },
+            {
+              name: "melodyPrimaryPosition",
+              title: "Primary melody position (ULSBS)",
+              doc: "Place the primary melody on its normal or low lane in the current TeX scope. The default is `normal`.",
+              snippet: "melodyPrimaryPosition{${1|normal,low|}}",
+              isAllowed: () => true
+            },
+            {
+              name: "melodySecondaryPosition",
+              title: "Secondary melody position (ULSBS)",
+              doc: "Place the semantic secondary melody above, below, or on the primary lane in the current TeX scope. Use `same` for migrated baseline alternate-only notes.",
+              snippet: "melodySecondaryPosition{${1|above,below,same|}}",
+              isAllowed: () => true
+            },
+            {
+              name: "melodyStyleMapping",
+              title: "Melody style mapping (ULSBS)",
+              doc: "Map primary and secondary melodies to their normal or swapped visual styles in the current TeX scope.",
+              snippet: "melodyStyleMapping{${1|normal,swapped|}}",
+              isAllowed: () => true
             }
           ];
 
@@ -654,7 +636,13 @@ function registerCompletionProvider(vscode, context) {
       }
     },
     "{",
-    "\\"
+    "\\",
+    "<",
+    "*",
+    "_",
+    "/",
+    "!",
+    ";"
   );
 
   context.subscriptions.push(provider);

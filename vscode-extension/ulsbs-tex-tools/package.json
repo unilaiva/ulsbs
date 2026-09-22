@@ -46,6 +46,15 @@
         "path": "./snippets/latex.json"
       }
     ],
+    "grammars": [
+      {
+        "scopeName": "ulsbs.chord.injection.latex",
+        "path": "./syntaxes/ulsbs-chord.injection.tmLanguage.json",
+        "injectTo": [
+          "text.tex.latex"
+        ]
+      }
+    ],
     "commands": [
       {
         "command": "ulsbsTexTools.compileCurrentContext",
@@ -216,6 +225,7 @@
   "scripts": {
     "compile-web": "node esbuild.web.mjs",
     "watch-web": "node esbuild.web.mjs --watch",
+    "test:grammar": "node test/grammar-fixtures.js",
     "package": "npm run compile-web && vsce package"
   },
   "devDependencies": {
