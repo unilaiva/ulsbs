@@ -8,6 +8,7 @@ It provides:
 - the `ulsbs-compile` CLI for compiling songbooks
 - the base LaTeX classes and styles used by songbook documents
 - helper tools such as `ulsbs-bookmeta`, `ulsbs-midi2audio`, and `ulsbs-ly2tex`
+- `ulsbs-migrate-melody-syntax` for safe legacy melody-hint migration
 - a VS Code extension for editing ULSBS song files
 
 ULSBS is intended to be used not only by the Unilaiva Songbook repository, but
@@ -23,50 +24,43 @@ For a real-world example of a repository using ULSBS, see:
 
 ---
 
-- [ULSBS](#ulsbs)
-  - [Status and compatibility](#status-and-compatibility)
-  - [Quick start](#quick-start)
-    - [Recommended setup: use ULSBS as a git submodule](#recommended-setup-use-ulsbs-as-a-git-submodule)
-    - [Use ULSBS with an arbitrary local songbook directory](#use-ulsbs-with-an-arbitrary-local-songbook-directory)
-    - [Use a pip-installed engine](#use-a-pip-installed-engine)
-  - [Minimal songbook project](#minimal-songbook-project)
-    - [Minimal main document](#minimal-main-document)
-    - [Minimal `ulsbs-config.toml`](#minimal-ulsbs-configtoml)
-  - [Compiling songbooks](#compiling-songbooks)
-    - [Main document filename conventions](#main-document-filename-conventions)
-    - [Output locations](#output-locations)
-  - [Requirements](#requirements)
-    - [Recommended: container build](#recommended-container-build)
-    - [Host build (`--no-container`)](#host-build---no-container)
-    - [Platform-specific setup examples](#platform-specific-setup-examples)
-      - [Ubuntu or Debian with Docker](#ubuntu-or-debian-with-docker)
-      - [macOS with Docker Desktop](#macos-with-docker-desktop)
-      - [Windows with WSL2 and Docker Desktop](#windows-with-wsl2-and-docker-desktop)
-      - [Ubuntu 24.04 host build (`--no-container`)](#ubuntu-2404-host-build---no-container)
-  - [Configuration](#configuration)
-  - [Writing songbooks](#writing-songbooks)
-    - [General structure](#general-structure)
-    - [`ulsbs-songbook` document class options](#ulsbs-songbook-document-class-options)
-    - [Preamble configuration after loading the class](#preamble-configuration-after-loading-the-class)
-    - [Page and line breaks](#page-and-line-breaks)
-    - [Repeats](#repeats)
-    - [Measure bars](#measure-bars)
-    - [Chords, melody hints, and beat marks inside `\[ ... ]`](#chords-melody-hints-and-beat-marks-inside---)
-    - [Full melodies with Lilypond](#full-melodies-with-lilypond)
-    - [Converting lyrics from Lilypond to songbook format](#converting-lyrics-from-lilypond-to-songbook-format)
-    - [Melody hints on the chord line](#melody-hints-on-the-chord-line)
-    - [Beat marks](#beat-marks)
-    - [Tags](#tags)
-    - [Extra variants](#extra-variants)
-    - [Creating song selections](#creating-song-selections)
-  - [Utilities](#utilities)
-    - [`ulsbs-bookmeta`](#ulsbs-bookmeta)
-    - [`ulsbs-midi2audio`](#ulsbs-midi2audio)
-    - [`ulsbs-ly2tex`](#ulsbs-ly2tex)
-  - [Editor support](#editor-support)
-  - [Testing](#testing)
-  - [More information](#more-information)
-  - [License](#license)
+- [Status and compatibility](#status-and-compatibility)
+- [Quick start](#quick-start)
+  - [Recommended setup: use ULSBS as a git submodule](#recommended-setup-use-ulsbs-as-a-git-submodule)
+  - [Use ULSBS with an arbitrary local songbook directory](#use-ulsbs-with-an-arbitrary-local-songbook-directory)
+  - [Use a pip-installed engine](#use-a-pip-installed-engine)
+- [Minimal songbook project](#minimal-songbook-project)
+  - [Minimal main document](#minimal-main-document)
+  - [Minimal `ulsbs-config.toml`](#minimal-ulsbs-configtoml)
+- [Compiling songbooks](#compiling-songbooks)
+  - [Main document filename conventions](#main-document-filename-conventions)
+  - [Output locations](#output-locations)
+- [Requirements](#requirements)
+  - [Recommended: container build](#recommended-container-build)
+  - [Host build (`--no-container`)](#host-build---no-container)
+  - [Platform-specific setup examples](#platform-specific-setup-examples)
+- [Configuration](#configuration)
+- [Writing songbooks](#writing-songbooks)
+  - [General structure](#general-structure)
+  - [`ulsbs-songbook` document class options](#ulsbs-songbook-document-class-options)
+  - [Preamble configuration after loading the class](#preamble-configuration-after-loading-the-class)
+  - [Page and line breaks](#page-and-line-breaks)
+  - [Repeats](#repeats)
+  - [Measure bars](#measure-bars)
+  - [Chords and melody blocks inside `\[ ... ]`](#chords-and-melody-blocks-inside---)
+  - [Full melodies with Lilypond](#full-melodies-with-lilypond)
+  - [Tags](#tags)
+  - [Extra variants](#extra-variants)
+  - [Creating song selections](#creating-song-selections)
+- [Utilities](#utilities)
+  - [`ulsbs-bookmeta`](#ulsbs-bookmeta)
+  - [`ulsbs-midi2audio`](#ulsbs-midi2audio)
+  - [`ulsbs-ly2tex`](#ulsbs-ly2tex)
+  - [`ulsbs-migrate-melody-syntax`](#ulsbs-migrate-melody-syntax)
+- [Editor support](#editor-support)
+- [Testing](#testing)
+- [More information](#more-information)
+- [License](#license)
 
 ---
 
@@ -80,6 +74,9 @@ your songbook sources when upgrading ULSBS.
 
 A stable 1.0 release is planned, after which backward-compatibility guarantees
 will follow semantic versioning.
+
+See the [changelog](CHANGELOG.md) for notable changes, breaking migrations, and
+release notes.
 
 ## Quick start
 
@@ -617,7 +614,6 @@ for each one.
 | `\upcasesectiontitleinheadertrue` / `\upcasesectiontitleinheaderfalse` | `false` | uppercase section titles in headers |
 | `\upcasebooktitleinheadertrue` / `\upcasebooktitleinheaderfalse` | `true` | uppercase the book title in headers |
 | `\usechaptercolorstrue` / `\usechaptercolorsfalse` | `true` | enable colored chapter corner marks |
-| `\usealtmnstyletrue` / `\usealtmnstylefalse` | `false` | swap normal and alternate melody-note styling |
 | `\adjustchordcharstrue` / `\adjustchordcharsfalse` | `true` | apply chord-character adjustments such as smaller raised parentheses |
 
 Other useful preamble settings include:
@@ -630,6 +626,8 @@ Other useful preamble settings include:
   - default lyric font
 - `\renewcommand{\ulChordFont}{...}`
   - default chord font
+- `\renewcommand{\ulChordWhitespaceMinimumWidth}{...}`
+  - minimum advance for a visible chord-line annotation followed by source whitespace; default `.8ex` in the lyric font, or `0pt` to disable
 - `\renewcommand{\translationfont}{...}`
   - translation block font
 - `\renewcommand{\explanationfont}{...}`
@@ -726,76 +724,97 @@ So the rule of thumb is:
 
 To hide measure bars in the final document, use `\measuresoff`.
 
-### Chords, melody hints, and beat marks inside `\[ ... ]`
+### Chords and melody blocks inside `\[ ... ]`
 
-Chords are written inside `\[ ... ]` markup inline with lyrics:
+Write chords inline with lyrics, for example `\[C]`, `\[Am]`, or `\[G7]`; the
+chord is placed above the following lyric text. Add melody hints and beat marks
+in one leading melody block:
 
-- `\[C]`
-- `\[Am]`
-- `\[G7]`
-
-The chord is placed above the first lyric text immediately following it.
-
-The same `\[ ... ]` block is also where melody-note hints and beat marks are
-supposed to go. So one `\[ ... ]` block can contain any combination of:
-
-- a chord
-- a melody-note macro
-- a beat-mark macro
-
-Example:
+Use `\ac{<repetition>}{<chord>}` for an alternate chord associated with a
+numbered repetition. For example, `\[\ac{1}{Em} \ac{2}{E}]` prints two
+alternatives with superscript repetition numbers. Balanced brace arguments are
+required; the former `\ac<1>{Em}` syntax is removed because its angle brackets
+conflict with melody blocks.
 
 ```tex
-\[\bmc\mnc{A}C]lyric
+\[<[!]primary[;secondary][ @offset]>chord]lyric
+\[^<[!]primary[;secondary][ @offset]>chord]lyric
 ```
 
-This puts, at the same horizontal spot above the word `lyric`:
+The block must begin immediately after `\[` or after its one optional leading
+`^`. `\[<C>Am]Love`, `\[<C D E>F]move`, and `\[<C;E>Am]two voices` overlay
+their melody content and chord at one anchor. The chord is optional, so
+`\[<C>]Love` is a melody-only annotation.
 
-- a beat mark
-- melody note `A`
-- chord `C`
+#### Sequences and offsets
 
-The important rule is this:
+The first sequence is primary. It may be empty for a secondary-only block; use
+`;` before the optional secondary sequence. Pitches are uppercase and may use
+`#` or `&` accidentals. Tokens are:
 
-- macros whose name contains `c` are the **zero-width / stacking** variants
-- macros without that `c` usually take horizontal space and therefore appear
-  beside the following material instead of exactly on top of it
+| Token | Meaning |
+|---|---|
+| `C`, `D#`, `B&` | one transposition-aware pitched slot |
+| `_` | one empty slot with normal slot advance |
+| `*` | beat mark attached at the current sequence position; no slot advance of its own |
+| `/` | circled, unpitched one-slot marker |
 
-So, for example:
+Whitespace is optional between tokens and around `;` and `@`, so
+`\[<*A_/C;EF_G>Am]` equals `\[<* A _ / C;E F _ G>Am]`. Use `@` with a TeX
+dimension to offset the complete block, for example `\[<CD@-.25em>Am]`.
+Relative units such as `em` and `ex` are evaluated in the lyric font.
 
-- `\mnc{A}`
-  - zero-width melody note, meant to stack with a chord in the same `\[ ... ]`
-- `\mn{A}`
-  - normal-width melody note, meant to stand on its own
-- `\bmc`
-  - zero-width beat mark, meant to stack with a chord and/or melody note
-- `\bm`
-  - normal-width beat mark, meant to stand on its own
-
-A good way to think about it:
-
-- use the `c` variants when you want items to share one anchor position inside a
-  single chord annotation
-- use the non-`c` variants when you want the item to consume its own horizontal
-  space
-
-When stacking several things in one `\[ ... ]`, the recommended order is:
-
-1. beat mark
-2. melody note
-3. chord
-
-So this is the normal stacked pattern:
+An optional leading `!` makes the melody block zero-advance. Its notes and beats
+still render, but the melody contributes no width and the whitespace minimum is
+disabled for that annotation. A chord in the same annotation keeps its natural
+width:
 
 ```tex
-\[\bmc\mnc{A}C]lyric
+\[<!C>]          % visible note, zero advance
+\[<!*>]          % visible beat, zero advance
+\[<!C@1em>Am]    % shifted zero-advance melody; Am keeps its width
 ```
 
-while this is a non-stacked pattern where the melody note takes its own width:
+#### Replay, advance, and whitespace
 
-```tex
-\[\mn{A}C]lyric
-```
+The leading `^` retains its `songs` replay meaning. `\[^<C>Am]` is excluded
+from chord memorization; a bare `^` in lyric text later replays the next saved
+annotation, including its chord, melody, and beats. Note and beat visibility is
+evaluated at replay time.
+
+Layers in one annotation overlay. Its advance is the widest rendered layer: a
+chord can determine it, and a melody-only block reserves its own width. Negative
+offsets can draw left of the anchor without reducing normal advance; positive
+offsets reserve their added extent. Consecutive annotations remain sequential:
+`\[Am]\[<*>]` puts the beat after the chord, whereas `\[<*>Am]` overlays them.
+Only one melody block is accepted per annotation. Use adjacent annotations for
+multiple blocks; a zero-advance first block shares the next block's anchor:
+`\[<!A>]\[<B>Am]`.
+
+When a visible chord-line annotation or replay is followed by literal source
+whitespace, it advances by at least `\ulChordWhitespaceMinimumWidth` (default
+`.8ex` in the lyric font). Wider annotations are unchanged; hidden chords,
+notes, and beats do not trigger the minimum. Set it to `0pt` to disable this.
+
+#### Placement, style, and visibility
+
+Primary and secondary are semantic roles. Scoped
+`\melodyPrimaryPosition{normal}` or `low` selects the primary lane (default:
+`normal`); `\melodySecondaryPosition{above}`, `below`, or `same` selects the
+secondary lane relative to it (default: `above`). `same` is the primary lane.
+With a low primary, `above` is the normal lane and `below` may overlap lyrics.
+
+Set styles independently with `\melodyStyleMapping{normal}` (primary uses the
+normal style) or `\melodyStyleMapping{swapped}` (primary uses the alternate
+style). Neither setting changes which sequence is primary.
+
+`\shownotesfalse` and `\notesoff` hide melody notes; `\showbeatsfalse` and
+`\beatsoff` hide beats. `\noteson` and `\beatson` restore them. Use
+`\mnbeginverse` for looser spacing when a verse has melody hints throughout;
+ordinary `\beginverse` is suitable when they occur only on its first line.
+
+Legacy `\mn*`, `\ma*`, `\bm*`, and `\usealtmnstyle...` authoring commands are
+removed. Do not use them in new sources.
 
 ### Full melodies with Lilypond
 
@@ -807,7 +826,7 @@ This allows ULSBS to generate sheet music and MIDI output.
 If you use ULSBS-specific Lilypond lyric helpers such as `theLyricsOne`, the
 `ulsbs-ly2tex` helper can help convert lyrics into the songbook text format.
 
-### Converting lyrics from Lilypond to songbook format
+#### Converting lyrics from Lilypond to songbook format
 
 When converting Lilypond lyrics manually, these replacements are often useful,
 in this order:
@@ -826,108 +845,6 @@ in this order:
 12. `\altcol ` -> ``
 
 Be careful with whitespace.
-
-### Melody hints on the chord line
-
-The `\mn*` macros place encircled melody note hints above the chord line, and
-they are meant to be used **inside** `\[ ... ]` chord annotations.
-
-Common variants:
-
-- `\mn{<note>}`
-  - normal-width note hint, typically for the first line of a verse when not
-    stacked on top of a chord
-- `\mnc{<note>}`
-  - zero-width note hint, meant to be stacked with a chord in the same
-    `\[ ... ]`
-- `\mncadj{<dim>}{<note>}`
-  - like `\mnc`, but with horizontal adjustment
-- `\mncii{<note>}{<note>}`
-  - two zero-width note hints stacked at one chord position
-- `\mnciii{<note>}{<note>}{<note>}`
-  - three zero-width note hints stacked at one chord position
-- `\mnciv{...}`, `\mncv{...}`, `\mncvi{...}`
-  - larger stacked groups at one chord position
-- `\mnd{<note>}`
-  - lower-position note hint, useful on later lines where first-line note height
-    would be too high
-
-Notes must be written in uppercase for transposition logic.
-
-Important spacing rule:
-
-- `c` variants such as `\mnc` do **not** take horizontal space
-- non-`c` variants such as `\mn` do take horizontal space
-
-So:
-
-```tex
-\[\mnc{A}C]lyric
-```
-
-stacks note `A` and chord `C` at the same spot, while:
-
-```tex
-\[\mn{A}C]lyric
-```
-
-lets the note take its own width before the chord.
-
-Useful controls:
-
-- `\shownotesfalse`
-  - disable notes for the whole document
-- `\notesoff`
-  - disable notes for later verses in the current song
-- `\noteson`
-  - re-enable them later in the current song
-- `\mnbeginverse`
-  - start a verse with spacing suitable for melody-note hints throughout the
-    verse
-
-There are also alternate-color `\ma*` variants such as `\ma`, `\mac`,
-`\mau`, `\mauc`, `\mad`, `\madii`, `\mauii`, and `\mauiic`.
-
-### Beat marks
-
-Beat marks also belong inside `\[ ... ]` chord markup.
-
-Useful variants:
-
-- `\bm`
-  - standalone beat mark, takes horizontal space
-- `\bmc`
-  - zero-width beat mark, meant to stack with melody note and/or chord
-- `\bmadj{<dim>}`
-  - standalone beat mark with horizontal adjustment
-- `\bmcadj{<dim>}`
-  - zero-width stacked beat mark with horizontal adjustment
-
-Again, the important distinction is:
-
-- `\bmc` and `\bmcadj` are stacking variants with no horizontal advance
-- `\bm` and `\bmadj` consume horizontal space
-
-Example of stacked use:
-
-```tex
-\[\bmc\mnc{A}C]lyric
-```
-
-Example of a standalone beat mark:
-
-```tex
-\[\bm]lyric
-```
-
-Useful controls:
-
-- `\showbeatsfalse`
-  - disable beat marks for the whole document
-- `\beatsoff`
-  - disable beat marks for later verses in the current song
-- `\beatson`
-  - re-enable them for later verses
 
 ### Tags
 
@@ -986,6 +903,39 @@ Convert MIDI files to audio using `ffmpeg` and `fluidsynth`.
 ### `ulsbs-ly2tex`
 
 Helper for converting ULSBS-style Lilypond lyric output into songbook text.
+
+### `ulsbs-migrate-melody-syntax`
+
+Migrate legacy `\mn*`, `\ma*`, beat-mark, and `\ac<n>{Chord}` syntax to the
+new melody-block and `\ac{n}{Chord}` forms. Run it against a `.tex` file or a
+directory tree:
+
+```sh
+ulsbs-migrate-melody-syntax --check content/
+ulsbs-migrate-melody-syntax --diff content/songs.tex
+ulsbs-migrate-melody-syntax --write content/
+```
+
+`--check` never writes and exits nonzero while legacy syntax remains. `--diff`
+and `--write` are file-atomic: they process only files with no diagnostics,
+although `--write` may still change other safe files in a directory. `--diff`
+prints only safe conversions. Comments and verbatim-like regions are ignored.
+The tool reports
+malformed arguments, compound pitches, incompatible offsets, ambiguous secondary
+placement, and low `\mnd`/`\mad` forms. Use `--normalize-low` only after review;
+it normalizes those slots but never changes verse environments. The migrator does
+not infer missing secondary-note slots. Baseline alternate-only `\ma`/`\mac`
+forms become secondary notes under `\melodySecondaryPosition{same}`. A uniform
+verse receives one scoped setting; mixed placement receives a local TeX group.
+
+The melody-block grammar also accepts `/` as a rendered, one-slot unpitched
+marker. This preserves the legacy circled `/` marker; it is deliberately not
+converted to `_`, which is an empty slot. Legacy commands are migrated only from
+the leading melody/beat layer. A leading replay caret is preserved before the
+generated block, for example `\[^\mnc{C}]` becomes `\[^<C>]`. Alternate chords
+remain after it while their selector syntax is converted, for example
+`\ac<1>{Em}` becomes `\ac{1}{Em}`. A legacy melody command after chord content
+is reported instead of being hoisted across that content.
 
 ## Editor support
 

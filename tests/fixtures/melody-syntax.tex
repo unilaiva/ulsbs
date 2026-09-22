@@ -1,0 +1,137 @@
+\pdfvariable compresslevel=0
+\pdfvariable objcompresslevel=0
+\documentclass[paper={a5paper},maintitle={Melody Syntax Test}]{ulsbs-songbook}
+\begin{document}
+\begin{songs}{}
+\beginsong{Melody Syntax}[key={C}]
+  \mnbeginverse
+    \[<C>]one \[<C D E>Am]two \[<;E>]three \[<C;E>Am]four
+    \[<C D;E F>G]five \[<C @ .3em>]six \[<C @ -.3em>Am]seven
+    \[<C D;E F @ .3em>]eight \[<A _ C;E _ G>]gaps \[</>Am]unpitched \[<A / C;E _ G>]slash slot \[<* A _ * C>Am]beats
+    \[<A B C;E * G>Am]secondary beat \[<* @ 1em>]beat-only offset
+    \[<C# D& F;A C>Am]accidentals
+    \[<*A_C;E*G@.2em>Am]compact
+    \[<!C>]zero-advance note \[<!*>]zero-advance beat \[<!ABC@1em>Am]zero-advance adjusted melody with chord
+  \mnendverse
+  {\melodySecondaryPosition{below}\melodyStyleMapping{swapped}
+    \mnbeginverse
+      \[<C;E>Am]policy \[<C D;E F @ -.4em>G]offset \[<C D @ -.4em>]negative no chord
+    \mnendverse}
+  {\melodySecondaryPosition{same}
+    \mnbeginverse
+      \[<;E>Am]secondary normal lane \[<C;E>Am]explicit overlay
+    \mnendverse}
+  {\melodyPrimaryPosition{low}
+    \beginverse
+      {\melodySecondaryPosition{above}\[<C;E>Am]low/above}
+      {\melodySecondaryPosition{same}\[<C;E>Am]low/same}
+      {\melodySecondaryPosition{below}\[<C;E>Am]low/below}
+    \endverse}
+  \notesoff
+  \mnbeginverse
+    \[<C D;E F>Am]hidden notes \[<* C>G]visible beat
+  \mnendverse
+  \noteson\beatsoff
+  \mnbeginverse
+    \[<* C>Am]hidden beat
+  \mnendverse
+  \beatson\transpose{2}
+  \mnbeginverse
+    \[<C D# E& /;A C>Am]transposed
+  \mnendverse
+\endsong
+\end{songs}
+\makeatletter
+\melodyStyleMapping{normal}\UL@melodystyle{primary}
+\ifUL@altmnstyle\PackageError{melody-syntax}{normal primary style was alternate}{}\fi
+\UL@melodystyle{secondary}
+\ifUL@altmnstyle\else\PackageError{melody-syntax}{normal secondary style was primary}{}\fi
+\melodyStyleMapping{swapped}\UL@melodystyle{primary}
+\ifUL@altmnstyle\else\PackageError{melody-syntax}{swapped primary style was not alternate}{}\fi
+\UL@melodystyle{secondary}
+\ifUL@altmnstyle\PackageError{melody-syntax}{swapped secondary style was not primary}{}\fi
+\melodyStyleMapping{normal}
+\newdimen\ULtestslot
+\newdimen\ULtestexpected
+\newcount\ULtestassertion
+\newsavebox\ULtestminwidthbox
+\def\ULtestassert#1#2{\advance\ULtestassertion by 1\ifdim#1=#2\else\errmessage{melody dimension assertion \the\ULtestassertion failed}\fi}
+\def\ULtestposition#1#2#3#4{%
+  \melodyPrimaryPosition{#1}\melodySecondaryPosition{#2}%
+  \setbox\SB@chordbox\hbox{}\UL@melodyparse{C;E}\UL@melodyrender
+  \begingroup\ulChordFont
+    \ULtestexpected=#3ex\relax\ULtestassert{\UL@primaryheight}{\ULtestexpected}%
+    \ULtestexpected=#4ex\relax\ULtestassert{\UL@secondaryheight}{\ULtestexpected}%
+  \endgroup
+}
+\ULtestposition{normal}{above}{\mnnormalheightfactor}{\mnhighheightfactor}
+\ULtestposition{normal}{same}{\mnnormalheightfactor}{\mnnormalheightfactor}
+\ULtestposition{normal}{below}{\mnnormalheightfactor}{\mnlowheightfactor}
+\ULtestposition{low}{above}{\mnlowheightfactor}{\mnnormalheightfactor}
+\ULtestposition{low}{same}{\mnlowheightfactor}{\mnlowheightfactor}
+\ULtestposition{low}{below}{\mnlowheightfactor}{\mnlowestheightfactor}
+\melodyPrimaryPosition{normal}\melodySecondaryPosition{above}
+\sbox\ULtestminwidthbox{{\lyricfont\hspace{\ulChordWhitespaceMinimumWidth}}}
+\setbox\SB@chordbox\hbox{\kern.1pt}\UL@annotationcurrentwidth=\wd\SB@chordbox\UL@annotationvisibletrue\UL@annotationapplyminwidth
+\ULtestassert{\wd\SB@chordbox}{\wd\ULtestminwidthbox}
+\ULtestexpected=\wd\ULtestminwidthbox\multiply\ULtestexpected by 2
+\setbox\SB@chordbox\hbox{\kern\ULtestexpected}\UL@annotationcurrentwidth=\wd\SB@chordbox\UL@annotationvisibletrue\UL@annotationapplyminwidth
+\ULtestassert{\wd\SB@chordbox}{\ULtestexpected}
+\setbox\SB@chordbox\hbox{\kern.1pt}\UL@annotationcurrentwidth=\wd\SB@chordbox\UL@annotationvisiblefalse\UL@annotationapplyminwidth
+\ULtestassert{\wd\SB@chordbox}{.1pt}
+{\renewcommand{\ulChordWhitespaceMinimumWidth}{0pt}%
+ \setbox\SB@chordbox\hbox{\kern.1pt}\UL@annotationcurrentwidth=\wd\SB@chordbox\UL@annotationvisibletrue\UL@annotationapplyminwidth
+ \ULtestassert{\wd\SB@chordbox}{.1pt}}
+\setbox\SB@chordbox\hbox{}\UL@annotationvisiblefalse\UL@melodyparse{*}\UL@melodyrender
+\ifUL@annotationvisible\else\errmessage{visible beat was not marked visible}\fi
+\beatsoff\setbox\SB@chordbox\hbox{}\UL@annotationvisiblefalse\UL@melodyparse{*}\UL@melodyrender
+\ifUL@annotationvisible\errmessage{hidden beat was marked visible}\fi
+\ULtestassert{\wd\SB@chordbox}{0pt}\beatson
+\notesoff\setbox\SB@chordbox\hbox{}\UL@annotationvisiblefalse\UL@melodyparse{C}\UL@melodyrender
+\ifUL@annotationvisible\errmessage{hidden note was marked visible}\fi
+\ULtestassert{\wd\SB@chordbox}{0pt}\noteson
+\setbox\SB@chordbox\hbox{}\UL@melodyparse{!ABC}\UL@melodyrender
+\ULtestassert{\wd\SB@chordbox}{0pt}
+\ifUL@annotationminimumdisabled\else\errmessage{zero-advance melody did not disable whitespace minimum}\fi
+\UL@annotationcurrentwidth=\wd\SB@chordbox\UL@annotationvisibletrue\UL@annotationapplyminwidth
+\ULtestassert{\wd\SB@chordbox}{0pt}
+\setbox\SB@chordbox\hbox{\kern2em}\ULtestexpected=\wd\SB@chordbox
+\UL@melodyparse{!ABC}\UL@melodyrender
+\ULtestassert{\wd\SB@chordbox}{\ULtestexpected}
+\setbox\SB@chordbox\hbox{}\UL@melodyparse{A _ C}\UL@melodyrender
+\ULtestslot=\UL@melodyslotwidth
+\ULtestexpected=\ULtestslot\multiply\ULtestexpected by 3
+\ULtestassert{\wd\SB@chordbox}{\ULtestexpected}
+\ULtestassert{\wd\UL@melodyprimarybox}{\ULtestexpected}
+\setbox\SB@chordbox\hbox{}\UL@melodyparse{A B C;E _ G}\UL@melodyrender
+\ULtestassert{\wd\UL@melodysecondarybox}{\ULtestexpected}
+\setbox\SB@chordbox\hbox{}\UL@melodyparse{*A_C;E*G}\UL@melodyrender
+\ULtestassert{\wd\UL@melodyprimarybox}{\ULtestexpected}
+\ULtestexpected=\ULtestslot\multiply\ULtestexpected by 2
+\ULtestassert{\wd\UL@melodysecondarybox}{\ULtestexpected}
+\ULtestexpected=\ULtestslot\advance\ULtestexpected by \UL@melodybeatwidth
+\ULtestassert{\UL@melodybeatextent}{\ULtestexpected}
+\setbox\SB@chordbox\hbox{}\UL@melodyparse{A * C;E _ G}\UL@melodyrender
+\ULtestexpected=\ULtestslot\advance\ULtestexpected by \UL@melodybeatwidth
+\ULtestassert{\UL@melodybeatextent}{\ULtestexpected}
+\ULtestexpected=\ULtestslot\multiply\ULtestexpected by 4
+\setbox\SB@chordbox\hbox to\ULtestexpected{}\UL@melodyparse{A}\UL@melodyrender
+\ULtestassert{\wd\SB@chordbox}{\ULtestexpected}
+\begingroup\catcode`\@=12
+\gdef\ULtestoffsetcases{%
+  \setbox\csname SB@chordbox\endcsname\hbox{}%
+  \csname UL@melodyparse\endcsname{A @ 1em}%
+  \csname UL@melodyrender\endcsname
+  \ULtestexpected=\ULtestslot\advance\ULtestexpected by 1em%
+  \ULtestassert{\wd\csname SB@chordbox\endcsname}{\ULtestexpected}%
+  \setbox\csname SB@chordbox\endcsname\hbox{}%
+  \csname UL@melodyparse\endcsname{A @ -1em}%
+  \csname UL@melodyrender\endcsname
+  \ULtestassert{\wd\csname SB@chordbox\endcsname}{\ULtestslot}%
+}
+\endgroup
+{\lyricfont\ULtestoffsetcases}
+\ifcsname mn\endcsname\errmessage{legacy melody macro still defined}\fi
+\ifcsname bm\endcsname\errmessage{legacy beat macro still defined}\fi
+\makeatother
+\end{document}

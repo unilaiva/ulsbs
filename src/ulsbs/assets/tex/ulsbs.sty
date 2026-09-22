@@ -734,12 +734,9 @@
 % Toggle use of chapter colors in page corners
 \newif\ifusechaptercolors\usechaptercolorstrue
 
-% Toggle the use of alternate melody note style (color and optional tag).
-% This converts the normal melody notes defined with \mn* to appear in alternate
-% style and the alternate melody notes defined with \mna* to appear in the
-% normal style. Use this only for special cases: normally it is better to use
-% the specific \mn* and \ma* macros for differently styled melody notes.
-\newif\ifusealtmnstyle\usealtmnstylefalse
+% Internal current-style switch.  \melodyStyleMapping resolves semantic roles
+% to these two existing configurable visual styles.
+\newif\ifUL@altmnstyle\UL@altmnstylefalse
 
 % If true, some characters on chord line are adjusted: currently parenthesis
 % are scaled down and moved slightly upwards to avoid collision with lyrics.
@@ -2112,11 +2109,11 @@
 }
 
 \ExplSyntaxOn
-% To be used to print an alternate chord for another repetition
-\NewDocumentCommand{\ac}{s d<> m}{%
+% Print an alternate chord for a numbered repetition.
+% Usage: \ac{<repetition>}{<chord>}, for example \ac{2}{Am}.
+\NewDocumentCommand{\ac}{m m}{%
   {% local group to keep color changes local
-    \IfValueT{#2}{
-      \str_case:nnF { #2 }
+    \str_case:nnF { #1 }
         { % for [1], use current color:
           {1}{\colorlet{accolor}{.}}
         }
@@ -2128,14 +2125,13 @@
           {\colorlet{accolor}{altinlinechordcolor}}
           \color{accolor}
         }
-      \textsuperscript{#2}%
-    }%
+    \textsuperscript{#1}%
     \bool_if:NTF \l__in_altchords_bool
       { % if in altchords, only change to mixed color, no font change nor transpose
-        \color{accolor}#3
+        \color{accolor}#2
       }
       { % for normal verse chords, set chord font, change color and transpose
-        \ulChordFont\color{accolor}\transposehere{#3}%
+        \ulChordFont\color{accolor}\transposehere{#2}%
       }
   }%
 }
@@ -2876,103 +2872,25 @@
 % END IMAGES (IN-SONG AND OUT)
 
 
-% BEGIN MELODY NOTES
+% BEGIN MELODY BLOCK
 
-% MELODY NOTES feature
+% BEGIN MELODY BLOCK / MELODY NOTES
+
+% Melody blocks display transposition-aware encircled note hints in a songs
+% chord definition: \[<C D;E F @ .3em>Am].  Pitches must be uppercase for
+% songs' transposition mechanism.  `_` advances one empty note slot, `/`
+% renders an unpitched circled slash and advances one slot, and `*` marks the
+% current slot with a beat.  Negative offsets may protrude left of the shared
+% anchor but intentionally never reduce the annotation's rightward advance.
+% A leading `!` inside the block renders normally but makes the melody layers
+% zero-advance and disables the whitespace minimum for that annotation.
 %
-% The \mn??? commands display an encircled note name hint above the chord
-% line. They are meant to display (sung) melody notes above the lyrics. The
-% commands must be called from within a chord definition \[]. The note name must
-% be written as upper case for transposing to work, even though the result
-% is actually presented in lower case.
-%
-% To disable showing of the notes for the whole document, set \shownotesfalse
-% in the main document preamble (after including this package).
-%
-% Call \notesoff command between verses to disable showing of notes in the
-% following verses of the song.
-%
-% The recommended use for this feature is to display at least the first sung
-% non-unison melody interval of each song, preferably for the whole first line
-% of lyrics. So just specify the first melody notes and use \notesoff after
-% the first verse. If chord replaying feature is used, it is possible to define
-% notes not paired with a chord with ^ to not include them in the chord
-% memorization, thus negating the need to put ^ for that note in later verses
-% where chords are replayed. Example: \[^\mn{C}]
-%
-% Choose the correct command:
-%
-%   \mn{<note>}                     : normal note, don't use with a chord
-%   \mnc{<note>}                    : can be used with a chord
-%   \mncadj{<hadj>}{<note>}         : normal note with adjusted horiz. position,
-%                                     can be used with a chord
-%   \mncii{<note>}{<note>}          : 2 notes horizontally, can be used with a
-%                                     chord
-%   \mnciii{<note>}{<note>}{<note>} : 3 notes horizontally, can be used with a
-%                                     chord
-%   \mnciv{<note>}{<note>}{<note>}{<note>}
-%                                   : 4 notes horizontally, can be used with a
-%                                     chord
-%   \mncv{<note>}{<note>}{<note>}{<note>}{<note}
-%                                   : 5 notes horizontally, can be used with a
-%                                     chord
-%   \mnd{<note>}                    : note positioned below the normal note
-%                                     line, on same height with chords, don't
-%                                     use with a chord
-%   \ma{<note}                      : alternatively colored note, don't use with
-%                                     a chord
-%   \mac{<note}                     : alternatively colored note, can be used
-%                                     with a chord
-%   \mad{<note>}                    : alternatively colored note, positioned
-%                                     below the normal note line, on same height
-%                                     with chords, don't use with a chord
-%   \madii{<note>}{<note>}          : two notes vertically, the first one in alt
-%                                     color below the normal note line, do not
-%                                     use with a chord
-%   \mau{<note}                     : alternatively colored note above the
-%                                     normal note line, don't use with a chord
-%   \mauc{<note}                    : alternatively colored note above the
-%                                     normal note line, can be used with a chord
-%   \mauii{<note}{<note}            : two notes vertically, the first one in alt
-%                                     color, don't use with a chord
-%   \mauiic{<note}{<note}           : two notes vertically, the first one in alt
-%                                     color, can be used with a chord
-%
-% Use \mn, \mnc, \mncii or \mnciii to display notes on the first line of lyrics
-% or in verses or choruses defined with \mn<begin|end><verse|chorus> pair rather
-% than the ordinary \<begin|end><verse|chorus>. Elsewhere they would overlap
-% the lyrics on the line above. Use \mn if the note is not to be displayed at
-% the exact same horizontal spot as a chord, and use \mnc to display a note and
-% a chord on top of each other: in that case you must put the chord immediately
-% after the \mnc command within the same chord definition brackets.
-%
-% \mncii and \mnciii are really two and three note extensions of \mnc: with
-% them one can put two or three notes on top of one chord. They are also meant
-% to be used only on the first line of lyrics in a verse or verses defined with
-% \mn* macros.
-%
-% Any of the above commands with 'c' in them does not take any horizontal
-% space, thus they can be placed above chords. All the others take horizontal
-% space.
-%
-% \mnd doesn't put the note so high above the chord line, so use it on other
-% than the first line of lyrics with the caveat, that chords and notes are put
-% beside each other.
-%
-% Set \usealtmnstyletrue to use alternate color on all normal notes and normal
-% color on alternate notes set with \ma* commands.
-%
-% If one whishes to use
-%
-% Example usage:
-%
-%   \[\mnc{A}Am]Love is \[\mn{E}]great
-%   and \[\mnd{D#}]food tastes \[\mnd{A}]good
-%
-%   \[\mnciii{C}{A}{F}Fmaj7]Tralalaa
-%
-% NOTE: this system requires rewrites of the verse begin / end machinery, that
-%       comes later.
+% \melodyPrimaryPosition{normal|low},
+% \melodySecondaryPosition{above|below|same}, and
+% \melodyStyleMapping{normal|swapped} are scoped policies.  \shownotes,
+% \noteson/\notesoff, \showbeats, and \beatson/\beatsoff remain in effect.
+
+% --- Public melody appearance and layout configuration ---
 
 % Setup the style for the melody note name "text". Renew this macro in the
 % beginning of your document to set custom style. This will be called each
@@ -3010,19 +2928,59 @@
 % Factor for the height of the low melody note variant from chord baseline.
 % This is relative to 1 ex of the current font: \ulChordFont when called from
 % within chord definition as it is meant to.
-% Used in \mnd and \mad* macros.
+% Used by the scoped low melody lanes.
 \providecommand{\mnlowheightfactor}{.3}
 
 % Factor for the height of the high melody note variant from chord baseline.
 % This is relative to 1 ex of the current font: \ulChordFont when called from
 % within chord definition as it is meant to.
-% Used in \mau* macros.
+% Used by the high secondary melody lane.
 \providecommand{\mnhighheightfactor}{3.4}
 
+% Factor for the lane below the low/chord-level melody lane. With the default
+% values this continues the same 1.55ex separation used by high/normal/low.
+% Selecting primary=low and secondary=below may intentionally overlap lyrics.
+\providecommand{\mnlowestheightfactor}{-1.25}
 
-% Toggles the media note style between normal and alternate
-\newcommand{\@togglemnstyle}{%
-  \ifusealtmnstyle\usealtmnstylefalse\else\usealtmnstyletrue\fi%
+% If a visible chord-line annotation is followed by a literal source space,
+% reserve at least this much horizontal advance. Wider annotations are
+% unchanged. Relative units are evaluated in \lyricfont; set to 0pt to disable.
+\providecommand{\ulChordWhitespaceMinimumWidth}{.8ex}
+
+
+% Melody blocks keep musical roles separate from their visual placement and
+% styling.  These assignments are deliberately local, like ordinary TeX font
+% and color changes, so a verse or explicit group can override them.  `same`
+% places secondary on the primary lane; paired voices intentionally overlap.
+\newif\ifUL@melodyprimarylow\UL@melodyprimarylowfalse
+\newif\ifUL@melodysecondarybelow\UL@melodysecondarybelowfalse
+\newif\ifUL@melodysecondarysame\UL@melodysecondarysamefalse
+\newif\ifUL@melodyswapped\UL@melodyswappedfalse
+\newcommand{\melodyPrimaryPosition}[1]{%
+  \ifstrequal{#1}{normal}{\UL@melodyprimarylowfalse}{%
+    \ifstrequal{#1}{low}{\UL@melodyprimarylowtrue}{%
+      \PackageError{ulsbs}{Invalid melody primary position `#1'}%
+        {Use \string\melodyPrimaryPosition\{normal\} or \{low\}.}%
+    }%
+  }%
+}
+\newcommand{\melodySecondaryPosition}[1]{%
+  \ifstrequal{#1}{above}{\UL@melodysecondarybelowfalse\UL@melodysecondarysamefalse}{%
+    \ifstrequal{#1}{below}{\UL@melodysecondarybelowtrue\UL@melodysecondarysamefalse}{%
+      \ifstrequal{#1}{same}{\UL@melodysecondarybelowfalse\UL@melodysecondarysametrue}{%
+        \PackageError{ulsbs}{Invalid melody secondary position `#1'}%
+          {Use \string\melodySecondaryPosition\{above\}, \{below\}, or \{same\}.}%
+      }%
+    }%
+  }%
+}
+\newcommand{\melodyStyleMapping}[1]{%
+  \ifstrequal{#1}{normal}{\UL@melodyswappedfalse}{%
+    \ifstrequal{#1}{swapped}{\UL@melodyswappedtrue}{%
+      \PackageError{ulsbs}{Invalid melody style mapping `#1'}%
+        {Use \string\melodyStyleMapping\{normal\} or \{swapped\}.}%
+    }%
+  }%
 }
 
 % Prints the pretag for melody note circle, if one exists
@@ -3030,7 +2988,7 @@
   \begingroup%
     \hspace{\dimexpr\mntaghorizadjfactor ex\relax}%
     \raisebox{\dimexpr\mntagvertadjfactor ex\relax}{%
-      \llap{\mntagstyle\ifusealtmnstyle\mnalttagtext\else\mntagtext\fi}%
+        \llap{\mntagstyle\ifUL@altmnstyle\mnalttagtext\else\mntagtext\fi}%
     }%
   \endgroup%
 }
@@ -3038,7 +2996,7 @@
 % Base style for the melody note name symbol, appended with \mnsymbolstyle:
 \newcommand{\@mnsymbolstyle}{%
   \scriptsize\mdseries\sansheavyfont%
-  \ifusealtmnstyle%
+  \ifUL@altmnstyle%
     \color{melodynotealtcolor}%
   \else%
     \color{melodynotecolor}%
@@ -3071,156 +3029,395 @@
         \@mnsymbolstyle% Set the style
         % Make the tag, if it exists, on the left of the note circle
         \makebox[0pt][l]{\@mntag}%
-        % Show the note transposed and encircled
-        \circled{\transposehere{#2}}%
+        % `/` is an intentional unpitched marker, not a transposable pitch.
+        \ifstrequal{#2}{/}{\circled{/}}{\circled{\transposehere{#2}}}%
       }%
       \endgroup%
     \fi%
   \fi%
 }
 
-% Displays a melody note, to be used on the first line of lyrics.
-% See above for usage information.
-\newcommand*{\mn}[1]{%
-  \@note{#1}%
+% --- Melody-block parser state ---
+%
+% The syntax is parsed only after songs has collected one \[...] argument.
+% Angle brackets retain their ordinary catcode and have no meaning elsewhere.
+% Parsed primary and secondary items are stored as expl3 sequences so renderer
+% layout is independent of the textual spelling (compact or space-separated).
+% The one-token `!` modifier is dispatched separately below to avoid expanding
+% active accidental tokens before they reach this content parser.
+\newsavebox{\UL@melodyprimarybox}
+\newsavebox{\UL@melodysecondarybox}
+\newsavebox{\UL@melodybeatbox}
+\newsavebox{\UL@melodylayerbox}
+\newsavebox{\UL@melodypreviouschordbox}
+\newdimen\UL@melodyslotwidth
+\newdimen\UL@melodyoffset
+\newdimen\UL@melodywidth
+\newdimen\UL@melodybeatwidth
+\newdimen\UL@melodybeatextent
+\newdimen\UL@melodycurrentextent
+\newdimen\UL@annotationcurrentwidth
+\newif\ifUL@annotationvisible
+\newif\ifUL@annotationpending
+\newif\ifUL@annotationminimumdisabled
+\newif\ifUL@melodyzeroadvance
+
+\ExplSyntaxOn
+\tl_new:N \l_UL_melody_primary_tl
+\tl_new:N \l_UL_melody_secondary_tl
+\tl_new:N \l_UL_melody_offset_tl
+\tl_new:N \l_UL_melody_at_tl
+\seq_new:N \l_UL_melody_parts_seq
+\seq_new:N \l_UL_melody_primary_seq
+\seq_new:N \l_UL_melody_secondary_seq
+\seq_new:N \l_UL_melody_lex_seq
+\cs_generate_variant:Nn \seq_set_split:Nnn { NVn, NVV }
+\cs_generate_variant:Nn \str_case:nnF { en }
+\cs_generate_variant:Nn \regex_match:nnT { nV }
+% Report parser errors with the complete original block for useful diagnostics.
+\cs_new_protected:Npn \UL_melody_error:n #1
+  { \PackageError{ulsbs}{Malformed~melody~block~`\tl_use:N\l_UL_melody_raw_tl'}{#1} }
+\tl_new:N \l_UL_melody_raw_tl
+\tl_new:N \l_UL_melody_content_tl
+% Parse separators first: one optional @ dimension and one optional ; voice
+% separator. The remaining voice fields are then tokenized independently.
+\cs_new_protected:Npn \UL_melody_parse:n #1
+ {
+  \tl_set:Nn \l_UL_melody_raw_tl {#1}
+  \tl_set:Nn \l_UL_melody_content_tl {#1}
+  \tl_trim_spaces:N \l_UL_melody_content_tl
+  \regex_match:nVT { @ \s* \Z } \l_UL_melody_content_tl
+   {\UL_melody_error:n {The~@~separator~must~be~followed~by~a~TeX~dimension.}}
+  \regex_match:nVT { @ .* @ } \l_UL_melody_content_tl
+   {\UL_melody_error:n {A~melody~block~may~contain~only~one~@~offset.}}
+  \tl_set:Nx \l_UL_melody_at_tl {\char_generate:nn {64} {12}}
+  \seq_set_split:NVV \l_UL_melody_parts_seq \l_UL_melody_at_tl \l_UL_melody_content_tl
+  \int_compare:nNnTF {\seq_count:N \l_UL_melody_parts_seq} > {2}
+   {\UL_melody_error:n {A~melody~block~may~contain~only~one~@~offset.}}
+   {
+    \seq_pop_left:NN \l_UL_melody_parts_seq \l_UL_melody_primary_tl
+    \tl_trim_spaces:N \l_UL_melody_primary_tl
+    \tl_clear:N \l_UL_melody_offset_tl
+    \seq_if_empty:NTF \l_UL_melody_parts_seq
+     {\tl_if_in:VnT \l_UL_melody_raw_tl {@}
+       {\UL_melody_error:n {The~@~separator~must~be~followed~by~a~TeX~dimension.}}}
+     { \seq_pop_left:NN \l_UL_melody_parts_seq \l_UL_melody_offset_tl
+       \tl_trim_spaces:N \l_UL_melody_offset_tl
+       \tl_if_empty:NT \l_UL_melody_offset_tl
+        {\UL_melody_error:n {The~@~separator~must~be~followed~by~a~TeX~dimension.}} }
+    \seq_set_split:NnV \l_UL_melody_parts_seq {;} \l_UL_melody_primary_tl
+    \int_compare:nNnTF {\seq_count:N \l_UL_melody_parts_seq} > {2}
+     {\UL_melody_error:n {A~melody~block~may~contain~only~one~;~separator.}}
+     { \seq_pop_left:NN \l_UL_melody_parts_seq \l_UL_melody_primary_tl
+       \tl_trim_spaces:N \l_UL_melody_primary_tl
+       \tl_clear:N \l_UL_melody_secondary_tl
+       \seq_if_empty:NF \l_UL_melody_parts_seq
+        {\seq_pop_left:NN \l_UL_melody_parts_seq \l_UL_melody_secondary_tl
+         \tl_trim_spaces:N \l_UL_melody_secondary_tl}
+       \seq_clear:N \l_UL_melody_primary_seq
+       \seq_clear:N \l_UL_melody_secondary_seq
+       \UL_melody_lex:NV \l_UL_melody_primary_seq \l_UL_melody_primary_tl
+       \UL_melody_lex:NV \l_UL_melody_secondary_seq \l_UL_melody_secondary_tl
+       \UL@melodyoffset=0pt\relax
+       \tl_if_empty:NF \l_UL_melody_offset_tl
+        {\UL@melodyoffset=\dimexpr\l_UL_melody_offset_tl\relax}
+     }
+   }
+ }
+% The lexer ignores spaces and recognizes pitches one character at a time.
+% Accidentals are appended to the pending pitch without stringifying their
+% active tokens, which keeps the songs transposition mechanism intact.
+\tl_new:N \l_UL_melody_pending_tl
+\cs_new_protected:Npn \UL_melody_lex_commit:
+ {\tl_if_empty:NF \l_UL_melody_pending_tl
+   {\seq_put_right:NV \l_UL_melody_lex_seq \l_UL_melody_pending_tl\tl_clear:N \l_UL_melody_pending_tl}}
+\cs_new_protected:Npn \UL_melody_lex_token:n #1
+ {\str_if_eq:eeTF {\tl_to_str:n {#1}} {\c_space_tl} {}
+   {\str_if_eq:eeTF {\tl_to_str:n {#1}} {\c_hash_str}
+      {\tl_if_empty:NTF \l_UL_melody_pending_tl
+        {\UL_melody_error:n {An~accidental~must~immediately~follow~a~pitch.}}
+        {\tl_put_right:Nn \l_UL_melody_pending_tl {#1}\UL_melody_lex_commit:}}
+      {\str_if_eq:eeTF {\tl_to_str:n {#1}} {&}
+        {\tl_if_empty:NTF \l_UL_melody_pending_tl
+          {\UL_melody_error:n {An~accidental~must~immediately~follow~a~pitch.}}
+          {\tl_put_right:Nn \l_UL_melody_pending_tl {#1}\UL_melody_lex_commit:}}
+        {\UL_melody_lex_commit:
+         \str_case:enF {\tl_to_str:n {#1}}
+          {{A}{\tl_set:Nn \l_UL_melody_pending_tl {#1}}{B}{\tl_set:Nn \l_UL_melody_pending_tl {#1}}{C}{\tl_set:Nn \l_UL_melody_pending_tl {#1}}{D}{\tl_set:Nn \l_UL_melody_pending_tl {#1}}{E}{\tl_set:Nn \l_UL_melody_pending_tl {#1}}{F}{\tl_set:Nn \l_UL_melody_pending_tl {#1}}{G}{\tl_set:Nn \l_UL_melody_pending_tl {#1}}{_}{\seq_put_right:Nn \l_UL_melody_lex_seq {#1}}{*}{\seq_put_right:Nn \l_UL_melody_lex_seq {#1}}{/}{\seq_put_right:Nn \l_UL_melody_lex_seq {#1}}}
+          {\UL_melody_error:n {Each~item~must~be~A--G~with~optional~sharp/flat,~_,~*,~or~/.}}}}}}
+\cs_new_protected:Npn \UL_melody_lex:Nn #1#2
+ {\seq_clear:N \l_UL_melody_lex_seq\tl_clear:N \l_UL_melody_pending_tl
+  \tl_map_function:nN {#2} \UL_melody_lex_token:n
+  \UL_melody_lex_commit:\seq_set_eq:NN #1 \l_UL_melody_lex_seq}
+\cs_generate_variant:Nn \UL_melody_lex:Nn { NV }
+\cs_new_eq:NN \UL@melodyparsecontent \UL_melody_parse:n
+\ExplSyntaxOff
+
+% Dispatch the optional leading ! without expanding the remaining token list.
+% Keeping this one-token modifier parser outside expl3 preserves active
+% accidental tokens verbatim for the content lexer and songs transposition.
+\def\UL@melodyparse#1{%
+  \expandafter\UL@melodyparsemodifier#1\UL@melodyend%
+}
+\def\UL@melodyparsemodifier{%
+  \@ifnextchar!\UL@melodyparsezero\UL@melodyparsenormal%
+}
+\def\UL@melodyparsezero!#1\UL@melodyend{%
+  \UL@melodyzeroadvancetrue
+  \UL@annotationminimumdisabledfalse
+  \UL@melodyparsecontent{#1}%
+}
+\def\UL@melodyparsenormal#1\UL@melodyend{%
+  \UL@melodyzeroadvancefalse
+  \UL@annotationminimumdisabledfalse
+  \UL@melodyparsecontent{#1}%
 }
 
-% Displays a melody note above a chord, to be used on the first line of lyrics.
-% See above for usage information.
-\newcommand*{\mnc}[1]{%
-  \makebox[0pt][l]{\@note{#1}}%
-}
-
-% Displays a melody note above a chord, with its position adjusted horizontally,
-% to be used on the first line of lyrics. See above for usage information.
-\newcommand*{\mncadj}[2]{%
-  \hspace{#1}%
-  \makebox[0pt][l]{\@note{#2}}%
-  \hspace{-#1}%
-}
-
-% Displays two melody notes above a chord, to be used on the first line of
-% lyrics. See above for usage information.
-\newcommand*{\mncii}[2]{%
-  \ifshownotes%
-    \ifdefined\@melodynotesdisabled%
-    \else%
-      \makebox[0pt][l]{\@note{#1}\@note{#2}}%
-    \fi%
+% Resolve the semantic primary/secondary role to the currently selected visual
+% style immediately before drawing each note.
+\newcommand{\UL@melodystyle}[1]{%
+  \ifUL@melodyswapped%
+    \ifstrequal{#1}{primary}{\UL@altmnstyletrue}{\UL@altmnstylefalse}%
+  \else%
+    \ifstrequal{#1}{primary}{\UL@altmnstylefalse}{\UL@altmnstyletrue}%
   \fi%
 }
-
-% Displays three melody notes above a chord, to be used on the first line of
-% lyrics. See above for usage information.
-\newcommand*{\mnciii}[3]{%
-  \ifshownotes%
-    \ifdefined\@melodynotesdisabled%
+\ExplSyntaxOn
+% Beat drawing is visibility-aware. The legacy .30ex lead is visual only: it
+% shifts the glyph but is deliberately excluded from reserved layer width.
+\newcommand{\UL@melodybeatdraw}{%
+  \ifshowbeats\ifdefined\@beatsdisabled\else%
+    {\lyricfont\kern\@bmleadspace}\@bmdraw%
+  \fi\fi%
+}
+\cs_new_protected:Npn \UL_melody_sequence:Nnn #1#2#3
+ { \seq_map_inline:Nn #1
+   { \str_if_eq:eeF {\tl_to_str:n {##1}} {*} { \str_if_eq:eeTF {\tl_to_str:n {##1}} {_}
+       {\makebox[\UL@melodyslotwidth][c]{}}
+       {\makebox[\UL@melodyslotwidth][c]{#2\@note[#3]{##1}}} } } }
+\cs_new_protected:Npn \UL_melody_beats:N #1
+ { \seq_map_inline:Nn #1
+   { \str_if_eq:eeTF {\tl_to_str:n {##1}} {*} {\hbox~to~0pt{\UL@melodybeatdraw\hss}}
+       {\hskip\UL@melodyslotwidth} } }
+\cs_new_protected:Npn \UL_melody_beat_extent:N #1
+ {
+  \UL@melodycurrentextent=0pt\relax
+  \seq_map_inline:Nn #1
+   { \str_if_eq:eeTF {\tl_to_str:n {##1}} {*}
+      {\@tempdima=\dimexpr\UL@melodycurrentextent+\UL@melodybeatwidth\relax
+       \ifdim\@tempdima>\UL@melodybeatextent\UL@melodybeatextent=\@tempdima\fi}
+      {\advance\UL@melodycurrentextent by \UL@melodyslotwidth\relax} }
+ }
+\cs_new_protected:Npn \UL_melody_mark_note_visible:N #1
+ {
+  \seq_map_inline:Nn #1
+   {
+    \str_if_eq:eeF {\tl_to_str:n {##1}} {*}
+     {
+      \str_if_eq:eeF {\tl_to_str:n {##1}} {_}
+       {\UL@annotationvisibletrue\seq_map_break:}
+     }
+   }
+ }
+% Build four independent layers (chord, primary, secondary, beats) at one
+% anchor. Their maximum rightward extent becomes this annotation's width.
+% Negative offsets may protrude left but never reduce the unadjusted advance.
+\cs_new_protected:Npn \UL_melody_render:
+ {
+    \sbox\UL@melodylayerbox{{\ulChordFont\UL@melodystyle{primary}\@note{C}}}%
+    \UL@melodyslotwidth=\wd\UL@melodylayerbox\relax
+    \ifUL@melodyprimarylow%
+      \def\UL@primaryheight{\dimexpr\mnlowheightfactor ex\relax}%
+      \ifUL@melodysecondarybelow%
+        \def\UL@secondaryheight{\dimexpr\mnlowestheightfactor ex\relax}%
+      \else%
+        \ifUL@melodysecondarysame%
+          \def\UL@secondaryheight{\dimexpr\mnlowheightfactor ex\relax}%
+        \else\def\UL@secondaryheight{\dimexpr\mnnormalheightfactor ex\relax}%
+        \fi%
+      \fi%
     \else%
-      \makebox[0pt][l]{\@note{#1}\@note{#2}\@note{#3}}%
+      \def\UL@primaryheight{\dimexpr\mnnormalheightfactor ex\relax}%
+      \ifUL@melodysecondarybelow%
+        \def\UL@secondaryheight{\dimexpr\mnlowheightfactor ex\relax}%
+      \else%
+        \ifUL@melodysecondarysame%
+          \def\UL@secondaryheight{\dimexpr\mnnormalheightfactor ex\relax}%
+        \else\def\UL@secondaryheight{\dimexpr\mnhighheightfactor ex\relax}%
+        \fi%
+      \fi%
     \fi%
-  \fi%
+    \sbox\UL@melodyprimarybox{\ulChordFont\UL_melody_sequence:Nnn \l_UL_melody_primary_seq {\UL@melodystyle{primary}} {\UL@primaryheight}}%
+    \sbox\UL@melodysecondarybox{\ulChordFont\UL_melody_sequence:Nnn \l_UL_melody_secondary_seq {\UL@melodystyle{secondary}} {\UL@secondaryheight}}%
+    \ifshownotes\ifdefined\@melodynotesdisabled\else
+      \UL_melody_mark_note_visible:N \l_UL_melody_primary_seq
+      \UL_melody_mark_note_visible:N \l_UL_melody_secondary_seq
+    \fi\fi
+    \sbox\UL@melodylayerbox{\@bmdraw}%
+    \UL@melodybeatwidth=\wd\UL@melodylayerbox\relax
+    \UL@melodybeatextent=0pt\relax
+    \ifshowbeats\ifdefined\@beatsdisabled\else
+      \UL_melody_beat_extent:N \l_UL_melody_primary_seq
+      \UL_melody_beat_extent:N \l_UL_melody_secondary_seq
+      \ifdim\UL@melodybeatextent>0pt\UL@annotationvisibletrue\fi
+    \fi\fi
+    \sbox\UL@melodybeatbox{%
+      \rlap{\UL_melody_beats:N \l_UL_melody_primary_seq}%
+      \rlap{\UL_melody_beats:N \l_UL_melody_secondary_seq}%
+    }%
+    \UL@melodywidth=\wd\SB@chordbox\relax
+    % In zero-advance mode only the chord contributes width. Melody layers are
+    % still emitted by the rlaps below, including any requested offset.
+    \ifUL@melodyzeroadvance
+      \UL@annotationminimumdisabledtrue
+    \else
+      \@tempdima=\wd\UL@melodyprimarybox
+      \ifdim\UL@melodyoffset>0pt\advance\@tempdima by \UL@melodyoffset\fi%
+      \ifdim\@tempdima>\UL@melodywidth\UL@melodywidth=\@tempdima\fi%
+      \@tempdima=\wd\UL@melodysecondarybox
+      \ifdim\UL@melodyoffset>0pt\advance\@tempdima by \UL@melodyoffset\fi%
+      \ifdim\@tempdima>\UL@melodywidth\UL@melodywidth=\@tempdima\fi%
+      \@tempdima=\UL@melodybeatextent
+      \ifdim\UL@melodyoffset>0pt\advance\@tempdima by \UL@melodyoffset\fi%
+      \ifdim\@tempdima>\UL@melodywidth\UL@melodywidth=\@tempdima\fi%
+    \fi
+    \ifdim\UL@melodywidth<0pt\UL@melodywidth=0pt\fi%
+    % Keep the chord box naturally sized: songs later unboxes it into a
+    % paragraph, where an \hss from \hbox to would leak infinite glue.
+    \setbox\SB@chordbox\hbox{%
+      \rlap{\copy\SB@chordbox}%
+      \rlap{\kern\UL@melodyoffset\copy\UL@melodyprimarybox}%
+      \rlap{\kern\UL@melodyoffset\copy\UL@melodysecondarybox}%
+      \rlap{\kern\UL@melodyoffset\copy\UL@melodybeatbox}%
+      \kern\UL@melodywidth}%
 }
+\cs_new_eq:NN \UL@melodyrender \UL_melody_render:
+\ExplSyntaxOff
 
-% Displays four melody notes above a chord, to be used on the first line of
-% lyrics. See above for usage information.
-\newcommand*{\mnciv}[4]{%
-  \ifshownotes%
-    \ifdefined\@melodynotesdisabled%
-    \else%
-      \makebox[0pt][l]{\@note{#1}\@note{#2}\@note{#3}\@note{#4}}%
+% --- Integration with songs chord memorization and replay ---
+%
+% A zero-output payload is stored in songs' chord register beside the ordinary
+% chord tokens. On replay it recovers the raw melody block, which is parsed and
+% rendered again under the replay location's visibility, placement and style.
+\newif\ifUL@melodypayloadempty
+\newif\ifUL@melodyhadpayload
+\global\let\UL@melodyreplayraw\@empty
+% #1 = raw block; #2 = 1 when this annotation has no chord remainder.
+\def\UL@melodyreplaypayload#1#2{%
+  \global\UL@melodyhadpayloadtrue
+  \global\def\UL@melodyreplayraw{#1}%
+  \ifnum#2=1 \global\UL@melodypayloademptytrue\else\global\UL@melodypayloademptyfalse\fi%
+}
+\let\UL@songs@setchord\SB@setchord
+% Wrap songs' low-level chord builder without modifying the vendored package:
+%   1. save boxes accumulated by immediately preceding \[...] annotations;
+%   2. build this annotation in isolation;
+%   3. recover and render a melody payload when present;
+%   4. append the completed annotation after the preceding boxes.
+% This makes \[Am]\[<*>] sequential while \[<*>Am] remains overlaid.
+\def\SB@setchord#1{%
+  \UL@annotationvisiblefalse
+  \UL@annotationpendingfalse
+  \UL@annotationminimumdisabledfalse
+  \setbox\UL@melodypreviouschordbox\copy\SB@chordbox
+  % Compose this annotation independently. Consecutive \[...] annotations are
+  % appended afterwards; only layers within this annotation share an anchor.
+  \setbox\SB@chordbox\box\voidb@x
+  \global\UL@melodyhadpayloadfalse
+  \global\let\UL@melodyreplayraw\@empty%
+  \UL@songs@setchord{#1}%
+  \ifx\UL@melodyreplayraw\@empty\else%
+    \ifUL@melodypayloadempty
+      \setbox\SB@chordbox\box\voidb@x
     \fi%
+    \expandafter\UL@melodyparse\expandafter{\UL@melodyreplayraw}%
+    \UL@melodyrender%
+    \global\let\UL@melodyreplayraw\@empty%
   \fi%
+  \ifUL@melodyhadpayload
+    \ifUL@melodypayloadempty\else
+      \ifdim\wd\SB@chordbox>0pt\UL@annotationvisibletrue\fi
+    \fi
+  \else
+    \def\UL@setchordargument{#1}%
+    \ifx\UL@setchordargument\@empty\else
+      \ifdim\wd\SB@chordbox>0pt\UL@annotationvisibletrue\fi
+    \fi
+  \fi
+  \setbox\UL@melodylayerbox\box\SB@chordbox
+  \UL@annotationcurrentwidth=\wd\UL@melodylayerbox
+  \setbox\SB@chordbox\hbox{%
+    \box\UL@melodypreviouschordbox\box\UL@melodylayerbox}%
+  \UL@annotationpendingtrue
 }
-
-% Displays five melody notes above a chord, to be used on the first line of
-% lyrics. See above for usage information.
-\newcommand*{\mncv}[5]{%
-  \ifshownotes%
-    \ifdefined\@melodynotesdisabled%
-    \else%
-      \makebox[0pt][l]{\@note{#1}\@note{#2}\@note{#3}\@note{#4}\@note{#5}}%
-    \fi%
+\let\UL@songs@chscan\SB@chscan
+% songs begins scanning the following lyric immediately after SB@setchord.
+% Intercept only that first scan so a literal following space can apply the
+% configurable minimum to the current annotation (not the accumulated run).
+\def\SB@chscan{%
+  \ifUL@annotationpending
+    \UL@annotationpendingfalse
+    \let\UL@annotationnextstep\UL@annotationcheckminwidth
+  \else
+    \let\UL@annotationnextstep\UL@songs@chscan
+  \fi
+  \UL@annotationnextstep
+}
+\def\UL@annotationcheckminwidth{\futurelet\UL@annotationnext\UL@annotationmaybeminwidth}
+\def\UL@annotationmaybeminwidth{%
+  \ifcat\noexpand\UL@annotationnext\@sptoken
+    \UL@annotationapplyminwidth
+  \fi
+  \UL@songs@chscan
+}
+\def\UL@annotationapplyminwidth{%
+  \ifUL@annotationminimumdisabled\else
+  \ifUL@annotationvisible
+    \sbox\UL@melodylayerbox{{\lyricfont\hspace{\ulChordWhitespaceMinimumWidth}}}%
+    \ifdim\UL@annotationcurrentwidth<\wd\UL@melodylayerbox
+      \@tempdima=\wd\UL@melodylayerbox
+      \advance\@tempdima by -\UL@annotationcurrentwidth
+      \setbox\SB@chordbox\hbox{\unhbox\SB@chordbox\kern\@tempdima}%
+    \fi
+  \fi\fi
+}
+\let\UL@songs@@chord\SB@@chord
+% Localized entry parser. Accepted forms are \[<...>chord] and
+% \[^<...>chord]. A leading ^ stays outside the melody block so songs can use
+% it for its original do-not-memorize/replay behavior. All other annotations
+% are delegated unchanged to the original songs parser.
+\begingroup\catcode`\^=\active\global\let\UL@melodyactivehat=^\endgroup
+\def\SB@@chord#1]{%
+  \def\UL@melodyargument{#1}%
+  \expandafter\UL@melodymaybepresent\UL@melodyargument\UL@melodyend%
+}
+\def\UL@melodymaybepresent{\@ifnextchar<\UL@melodyextract\UL@melodymaybehat}
+\def\UL@melodymaybehat{\futurelet\UL@melodynext\UL@melodymaybehat@i}
+\def\UL@melodymaybehat@i{\ifx\UL@melodynext\UL@melodyactivehat\let\UL@melodynext\UL@melodyconsumehat\else\let\UL@melodynext\UL@melodyplain\fi\UL@melodynext}
+\def\UL@melodyplain#1\UL@melodyend{\UL@songs@@chord#1]}
+\def\UL@melodyconsumehat#1{\@ifnextchar<{\UL@melodyextracthat{#1}}{\UL@melodyplainhat{#1}}}
+\def\UL@melodyplainhat#1#2\UL@melodyend{\UL@songs@@chord#1#2]}
+\def\UL@melodyextracthat#1<#2>#3\UL@melodyend{\UL@melodyextract<#2>#1#3\UL@melodyend}
+\def\UL@melodyextract<#1>#2\UL@melodyend{%
+  \SB@endcname%
+  \UL@melodyparse{#1}%
+  \in@{<}{#2}%
+  \ifin@
+    \PackageError{ulsbs}{Malformed melody block: multiple blocks in one chord annotation}%
+      {Use adjacent annotations; prefix an earlier block with ! when it should share the next anchor.}%
+  \fi
+  \ifSB@firstchord%
+    \setbox\SB@lyricbox\hbox{\kern\SB@tabindent}%
+    \global\SB@tabindent\z@ \SB@lyric{}\SB@numhyps\z@ \SB@spcinit%
+    \setbox\SB@chordbox\box\voidb@x%
   \fi%
-}
-
-% Displays six melody notes above a chord, to be used on the first line of
-% lyrics. See above for usage information.
-\newcommand*{\mncvi}[6]{%
-  \ifshownotes%
-    \ifdefined\@melodynotesdisabled%
-    \else%
-      \makebox[0pt][l]{\@note{#1}\@note{#2}\@note{#3}\@note{#4}\@note{#5}\@note{#6}}%
-    \fi%
+  \def\UL@melodychord{#2}%
+  \ifx\UL@melodychord\@empty%
+    \SB@setchord{\UL@melodyreplaypayload{#1}{1}#2}%
+  \else%
+    \SB@setchord{\UL@melodyreplaypayload{#1}{0}#2}%
   \fi%
-}
-
-% Displays a melody note below the normal note line, at the same height as
-% chords. See above for usage information.
-\newcommand*{\mnd}[1]{%
-  \@note[\dimexpr\mnlowheightfactor ex\relax]{#1}%
-}
-
-% Alternatively colored note on normal note line, takes horiz. space.
-\newcommand*{\ma}[1]{%
-  {% alternate color note on normal note line, takes horizontal space
-    \@togglemnstyle%
-    \@note{#1}%
-  }%
-}
-
-% Alternatively colored note on normal note line, takes no horiz. space.
-% Use with chords.
-\newcommand*{\mac}[1]{%
-  \makebox[0pt][l]{\ma{#1}}% boxed to take no h. space
-}
-
-% Alternatively colored note above normal note line, takes horiz. space.
-\newcommand*{\mau}[1]{%
-  {%
-    \@togglemnstyle%
-    \@note[\dimexpr\mnhighheightfactor ex\relax]{#1}%
-  }%
-}
-
-% Alternatively colored note above normal note line, takes no horiz. space.
-% Use with chords.
-\newcommand*{\mauc}[1]{%
-  \makebox[0pt][l]{\mau{#1}}% boxed to take no h. space
-}
-
-% Alternatively colored note (#1) above normal note line, normal note (#2)
-% at normal note line. Takes horiz. space.
-\newcommand*{\mauii}[2]{%
-  % alternate color note above normal note line
-  \mauc{#1}%
-  % normal note at normal note line
-  \@note{#2}%
-}
-
-% Alternatively colored note (#1) above normal note line, normal note (#2)
-% at normal note line. Takes no horiz. space. Use with chords.
-\newcommand*{\mauiic}[2]{%
-  % alternate color note above normal note line
-  \mauc{#1}%
-  % normal note at normal note line, boxed to take no h. space
-  \makebox[0pt][l]{\@note{#2}}%
-}
-
-% Alternatively colored note below the normal note line, at the same height as
-% chords. Takes horiz. space.
-\newcommand*{\mad}[1]{%
-  {% alternate color note above normal note line, takes horizontal space
-    \@togglemnstyle%
-    \@note[\dimexpr\mnlowheightfactor ex\relax]{#1}%
-  }%
-}
-
-% Alternatively colored note (#1) below the normal note line, normal note (#2)
-% at normal note line. Takes horiz. space.
-\newcommand*{\madii}[2]{%
-  % normal note at normal note line, boxed to take no h. space
-  \makebox[0pt][l]{\@note{#2}}%
-  \mad{#1}% takes horiz. space
+  \SB@firstchordfalse\let\SB@dothis\SB@chstart\SB@chscan%
 }
 
 
@@ -3261,29 +3458,15 @@
   \fi\fi%
 }
 
-% END MELODY NOTES
+% END MELDOY BLOCK / MELODY NOTES
 
-
-% BEGIN BEAT MARKS
+% BEGIN MELODY BLOCK / BEAT MARKS
 
 % BEAT MARKS feature
 %
-% The \bm??? commands are used within chord definitions \[] to mark spots where
-% beats appear. They appear as small dots in chord color just below the
-% baseline of the chords.
-%
-% Use \bm, when the beat mark is by itself (without chord or melody note).
-%
-% Use \bmc when you want to put the mark at the same horizontal space, on top of
-% each other, with a melody note and/or a chord. In such a case \bmc should
-% always be before the chord. and the recommended order is: beat mark, melody
-% note, chord. If \bm or \bmc is followed immediately by a chord, there must be
-% a space in between of them.
-%
-% \bmadj and \bmcadj{} are variations which take one mandatory parameter in
-% curly braces: a horizontal adjustment of the mark position as a dimension.
-% \bmadj{-.5ex} moves the mark about half a character width left from where it
-% would appear without adjustment, and \bmadj{.5ex} moves it to the right.
+% Beat marks are written as `*` in a melody block, for example \[<* C>Am].
+% They are small dots just below the chord baseline and share the block's
+% horizontal offset and annotation width calculation.
 %
 % To disable showing of the beats for the whole document, set \showbeatsfalse
 % in the main document preamble (after including this package).
@@ -3291,13 +3474,6 @@
 % Call \beatsoff command between verses to disable showing of notes in the
 % following verses of the song. \beatson puts them back for the next verses
 % (unless \showbeatsfalse is set in the main doc).
-%
-% Example usage:
-%
-%   |\[\bmc Am]Love \[\bm]is |\[\bm]great \[\bm]
-%   and |\[\bm]food \[\bm]tastes |\[\bm]good \[\bm]
-%
-%   \[\bmc\mnc{C}C]Trallallaaa
 %
 
 % Configuration (absolute, font-independent)
@@ -3326,42 +3502,6 @@
   \endgroup%
 }
 
-% Displays a beat mark. See above for usage information. Takes horizontal space.
-\newcommand{\bm}{%
-  \ifshowbeats\ifdefined\@beatsdisabled\else%
-    {\lyricfont\hspace{\@bmleadspace}}%
-    \@bmdraw%
-  \fi\fi%
-}
-
-% Displays a beat mark. See above for usage information. No horizontal advance.
-\newcommand{\bmc}{%
-  \ifshowbeats\ifdefined\@beatsdisabled\else%
-    {\lyricfont\hspace{\@bmleadspace}}%
-    \rlap{\@bmdraw}%
-    {\lyricfont\hspace{-\@bmleadspace}}%
-  \fi\fi%
-}
-
-% Displays a beat mark with horizontal adjustment. See above for usage
-% information. Takes horizontal space.
-\newcommand{\bmadj}[1]{%
-  \ifshowbeats\ifdefined\@beatsdisabled\else%
-    {\lyricfont\hspace{#1}}%
-    \bm%
-  \fi\fi%
-}
-
-% Displays a beat mark with horizontal adjustment. See above for usage
-% information. No horizontal advance.
-\newcommand{\bmcadj}[1]{%
-  \ifshowbeats\ifdefined\@beatsdisabled\else%
-    {\lyricfont\hspace{#1}}%
-    \bmc%
-    {\lyricfont\hspace{-#1}}%
-  \fi\fi%
-}
-
 % \beatson and \beatsoff commands can be used between verses to turn displaying
 % the beat marks on or off for the remaining of the current song or until
 % another call to either of the macros. The notes are never displayed, if
@@ -3369,7 +3509,10 @@
 \newcommand{\beatsoff}{\def\@beatsdisabled{}}
 \newcommand{\beatson}{\let\@beatsdisabled\undefined}
 
-% END BEAT MARKS
+% END MELODY BLOCK / BEAT MARKS
+
+% END MELODY BLOCK
+
 
 % BEGIN SONGID
 

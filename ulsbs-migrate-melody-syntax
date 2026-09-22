@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+#
+# SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Migrate legacy ULSBS melody-note syntax in TeX sources.
+
+set -euo pipefail
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "ERROR: python3 is not installed or not found in PATH." >&2
+  echo "Please install Python 3.11+ and ensure 'python3' is on your PATH." >&2
+  exit 1
+fi
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+export PYTHONPATH="$SCRIPT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m ulsbs.tools.migrate_melody_syntax "$@"

@@ -1,0 +1,48 @@
+\documentclass[paper={a5paper},maintitle={Melody Replay Test}]{ulsbs-songbook}
+\makeatletter
+\newcount\ULtestbeatdraws
+\let\ULtestoriginalbeatdraw\UL@melodybeatdraw
+\def\UL@melodybeatdraw{%
+  \ifshowbeats\ifdefined\@beatsdisabled\else
+    \global\advance\ULtestbeatdraws by 1\relax
+  \fi\fi
+  \ULtestoriginalbeatdraw
+}
+\makeatother
+\begin{document}
+\begin{songs}{}
+\beginsong{Melody Replay}
+  \newchords{melodyreplay}
+  \memorize[melodyreplay]
+  \beginverse
+    \[<C>]note-only \[G]chord \[<D>]note-only \[Am]chord
+  \endverse
+  \replay[melodyreplay]
+  \beginverse
+    \[^<E>]note-only \[^]chord \[^<F>]note-only \[^]chord
+  \endverse
+  \newchords{melodyexclude}
+  \mnbeginverse\memorize[melodyexclude]
+    \[<!C*>G]stored one \[^<D*>Am]excluded \[<E*>C]stored two
+  \mnendverse
+  \ExplSyntaxOn
+  \tl_set:No \l_tmpa_tl {\the\cs:w SB@cr@melodyexclude\cs_end:}
+  \typeout{ULSBS-REGISTER-BEGIN:\tl_to_str:V \l_tmpa_tl :ULSBS-REGISTER-END}
+  \ExplSyntaxOff
+  \global\ULtestbeatdraws=0
+  \notesoff
+  \beginverse\replay[melodyexclude]
+    stored one ^then stored two ^done
+  \endverse
+  \typeout{ULSBS-REPLAY-BEAT-DRAWS:\the\ULtestbeatdraws}
+  \global\ULtestbeatdraws=0
+  \beatsoff
+  \beginverse\replay[melodyexclude]
+    hidden beat one ^then hidden beat two ^done
+  \endverse
+  \typeout{ULSBS-HIDDEN-BEAT-DRAWS:\the\ULtestbeatdraws}
+  \beatson
+  \noteson
+\endsong
+\end{songs}
+\end{document}

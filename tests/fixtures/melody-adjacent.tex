@@ -1,0 +1,49 @@
+\documentclass[paper={a5paper},maintitle={Adjacent Melody Test}]{ulsbs-songbook}
+\begin{document}
+\begin{songs}{}
+\beginsong{Adjacent Melody}
+  \newchords{adjacent}
+  \memorize[adjacent]
+  \mnbeginverse
+    \[Am]\[<*>]adjacent chord and beat \[<C>]\[<*>]\[<D>]\[G]adjacent melody and beat annotations
+  \mnendverse
+  \replay[adjacent]
+  \mnbeginverse
+    \[<E>^]\[<*>^]\[<F>^]\[^]adjacent replay annotations
+  \mnendverse
+\endsong
+\end{songs}
+\makeatletter
+\newdimen\ULtestpreviouschordwidth
+\newdimen\ULtestexpectedwidth
+\setbox\SB@chordbox\hbox{{\printchord{Am}}}
+\ULtestpreviouschordwidth=\wd\SB@chordbox
+\SB@firstchordfalse
+\SB@setchord{\UL@melodyreplaypayload{*}{1}}
+\ULtestexpectedwidth=\ULtestpreviouschordwidth
+\advance\ULtestexpectedwidth by \UL@melodybeatwidth
+\ifdim\wd\SB@chordbox=\ULtestexpectedwidth\else
+  \errmessage{consecutive chord and beat annotations did not advance sequentially}
+\fi
+\sbox\UL@melodylayerbox{{\lyricfont\hspace{\ulChordWhitespaceMinimumWidth}}}
+\ifdim\wd\UL@melodylayerbox>\UL@annotationcurrentwidth
+  \ULtestexpectedwidth=\ULtestpreviouschordwidth
+  \advance\ULtestexpectedwidth by \wd\UL@melodylayerbox
+  \UL@annotationapplyminwidth
+  \ifdim\wd\SB@chordbox=\ULtestexpectedwidth\else
+    \errmessage{minimum width was not applied to the latter consecutive annotation}
+  \fi
+\fi
+\setbox\SB@chordbox\box\voidb@x
+\SB@firstchordtrue
+\SB@setchord{\UL@melodyreplaypayload{*}{0}Am}
+\setbox\UL@melodylayerbox\hbox{{\printchord{Am}\kern.2em}}
+\ULtestexpectedwidth=\wd\UL@melodylayerbox
+\ifdim\UL@melodybeatwidth>\ULtestexpectedwidth
+  \ULtestexpectedwidth=\UL@melodybeatwidth
+\fi
+\ifdim\wd\SB@chordbox=\ULtestexpectedwidth\else
+  \errmessage{beat and chord in one annotation did not overlay}
+\fi
+\makeatother
+\end{document}
