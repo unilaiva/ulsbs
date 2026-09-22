@@ -3,7 +3,10 @@
 Changes accumulate under Unreleased and move to a dated version heading when
 the extension is released.
 
-## Unreleased
+## [Unreleased]
+
+## [0.2.0] - 2026-09-23
+
 
 ### Added
 
