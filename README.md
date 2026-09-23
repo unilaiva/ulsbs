@@ -994,6 +994,9 @@ The main wrapper scripts are:
 - `ulsbs-ly2tex`
 - `ulsbs-test`
 
+Release steps for the repository maintainer are documented in
+[`MAINTAINERS.md`](MAINTAINERS.md).
+
 
 ## License
 
