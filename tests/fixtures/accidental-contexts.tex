@@ -1,0 +1,26 @@
+\pdfvariable compresslevel=0
+\pdfvariable objcompresslevel=0
+\documentclass[paper={a5paper},maintitle={Accidental Context Test}]{ulsbs-songbook}
+\makeatletter
+\newcount\ULtesttransposes
+\renewcommand\trchordformat[2]{%
+  \global\advance\ULtesttransposes by 1%
+  \typeout{ULSBS-TRANSPOSED-\the\ULtesttransposes:\detokenize{#2}}%
+  #2%
+}
+\makeatother
+\begin{document}
+\begin{songs}{}
+\beginsong{Accidental Contexts}[key={C#},gk={B&m, C#--D&m}]
+  \audio[key={F#m}]{https://example.test/watch?v=1\&list=2}
+  \beginverse
+    Default \altchords{\id[1]{alt. (C#)}|C# |\ac{2}{B&} |\notrans{D#}}
+  \endverse
+  \transpose{2}\transposealtchordstrue
+  \beginverse
+    Enabled \altchords{\id[1]{alt. (C)}|C |\ac{2}{D} |\notrans{E}}
+  \endverse
+\endsong
+\end{songs}
+\typeout{ULSBS-ALT-TRANSPOSE-COUNT:\the\ULtesttransposes}
+\end{document}

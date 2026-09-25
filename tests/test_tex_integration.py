@@ -128,5 +128,20 @@ class MelodySyntaxIntegrationTests(unittest.TestCase):
                 self.assertIn("Malformed melod", output)
 
 
+class AccidentalContextIntegrationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        if shutil.which("lualatex") is None:
+            raise unittest.SkipTest("lualatex is not installed")
+
+    def test_contextual_accidentals_and_optional_alt_transposition_compile(self) -> None:
+        output, pdf = compile_fixture("accidental-contexts")
+        self.assertIn("ULSBS-ALT-TRANSPOSE-COUNT:3", output)
+        # One pass handles the plain body, then the opaque \id and \ac
+        # arguments each get their own pass. \notrans deliberately adds none.
+        self.assertEqual(output.count("ULSBS-TRANSPOSED-"), 3)
+        self.assertTrue(pdf.startswith(b"%PDF"))
+
+
 if __name__ == "__main__":
     unittest.main()

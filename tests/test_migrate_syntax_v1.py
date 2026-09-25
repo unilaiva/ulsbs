@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import unittest
 
-from ulsbs.tools.migrate_melody_syntax import migrate_text
+from ulsbs.tools.migrate_syntax_v1 import migrate_text
 
 
-class MigrateMelodySyntaxTests(unittest.TestCase):
+class MigrateSyntaxV1Tests(unittest.TestCase):
     def test_primary_sequences_beats_offsets_and_chord_remainder(self) -> None:
         result = migrate_text(r"\[^\bmc\mnc{C}\bm\mncii{D}{E}Am]")
         self.assertTrue(result.safe)
@@ -155,6 +155,46 @@ class MigrateMelodySyntaxTests(unittest.TestCase):
         result = migrate_text(source)
         self.assertTrue(result.safe)
         self.assertEqual(result.text, "% \\ac<1>{C}\n\\[\\ac{2}{D}]")
+
+    def test_accidentals_migrate_only_in_supported_musical_contexts(self) -> None:
+        source = (
+            r"\beginsong{C\shrp{} title}"
+            r"[by={A\&B},key={C\shrp{}m},gk={B\flt{}m, C\shrp{}--D\flt{}m}]"
+            "\n"
+            r"\audio[title={C\shrp{} version},key=F\shrp{}m]{https://example.test/a\&b}"
+            "\n"
+            r"line \altchords{\id{alt. (C\shrp{})}|F\shrp{}m "
+            r"|\ac{2}{B\flt{}7} |\notrans{D\shrp{}}}"
+            "\n"
+            r"outside C\shrp{} and B\flt{}"
+        )
+        result = migrate_text(source)
+        self.assertTrue(result.safe)
+        self.assertEqual(
+            result.text,
+            r"\beginsong{C\shrp{} title}"
+            r"[by={A\&B},key={C#m},gk={B&m, C#--D&m}]"
+            "\n"
+            r"\audio[title={C\shrp{} version},key=F#m]{https://example.test/a\&b}"
+            "\n"
+            r"line \altchords{\id{alt. (C#)}|F#m |\ac{2}{B&7} |\notrans{D#}}"
+            "\n"
+            r"outside C\shrp{} and B\flt{}",
+        )
+        self.assertEqual(result.converted["shrp"], 6)
+        self.assertEqual(result.converted["flt"], 3)
+
+    def test_audio_options_after_url_and_bare_accidental_macros_migrate(self) -> None:
+        source = r"\audio{url}[key={E\flt m}] \altchords{|A\flt |G\shrp{m}}"
+        result = migrate_text(source)
+        self.assertTrue(result.safe)
+        self.assertEqual(result.text, r"\audio{url}[key={E& m}] \altchords{|A& |G#{m}}")
+
+    def test_accidental_migration_skips_comments_and_is_idempotent(self) -> None:
+        source = "% \\altchords{|C\\shrp{}}\n\\altchords{|C# |B&}"
+        result = migrate_text(source)
+        self.assertTrue(result.safe)
+        self.assertEqual(result.text, source)
 
     def test_already_migrated_text_is_idempotent(self) -> None:
         source = r"\[<C D;E F @ -.2em>\ac{1}{Am}]"

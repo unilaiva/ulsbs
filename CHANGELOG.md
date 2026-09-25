@@ -5,6 +5,23 @@ the extension is released.
 
 ## [Unreleased]
 
+### Added
+
+- `#` and `&` accidental shorthand in alternate chords and musical key
+  metadata, while retaining `\shrp` and `\flt`.
+- Default-off `\iftransposealtchords` control for transposing `\altchords`,
+  including nested `\id` and `\ac` content and `\notrans` exclusions.
+  Transposable alternate chords must use `#` and `&` for accidentals rather
+  than `\shrp` and `\flt`.
+
+### Changed
+
+- Renamed the expanded migration tool and its module to
+  `ulsbs-migrate-syntax-v1`; `ulsbs-migrate-melody-syntax` remains available as
+  a compatibility alias.
+- `ulsbs-migrate-syntax-v1` now also migrates explicit accidental macros to the
+  shorthand within the newly supported contexts.
+
 ## [0.2.0] - 2026-09-23
 
 > [!IMPORTANT]

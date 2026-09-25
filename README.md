@@ -8,7 +8,7 @@ It provides:
 - the `ulsbs-compile` CLI for compiling songbooks
 - the base LaTeX classes and styles used by songbook documents
 - helper tools such as `ulsbs-bookmeta`, `ulsbs-midi2audio`, and `ulsbs-ly2tex`
-- `ulsbs-migrate-melody-syntax` for safe legacy melody-hint migration
+- `ulsbs-migrate-syntax-v1` for safe legacy song-source migration
 - a VS Code extension for editing ULSBS song files
 
 ULSBS is intended to be used not only by the Unilaiva Songbook repository, but
@@ -47,6 +47,7 @@ For a real-world example of a repository using ULSBS, see:
   - [Page and line breaks](#page-and-line-breaks)
   - [Repeats](#repeats)
   - [Measure bars](#measure-bars)
+  - [Accidentals and alternate chords](#accidentals-and-alternate-chords)
   - [Chords and melody blocks inside `\[ ... ]`](#chords-and-melody-blocks-inside---)
   - [Full melodies with Lilypond](#full-melodies-with-lilypond)
   - [Tags](#tags)
@@ -56,7 +57,7 @@ For a real-world example of a repository using ULSBS, see:
   - [`ulsbs-bookmeta`](#ulsbs-bookmeta)
   - [`ulsbs-midi2audio`](#ulsbs-midi2audio)
   - [`ulsbs-ly2tex`](#ulsbs-ly2tex)
-  - [`ulsbs-migrate-melody-syntax`](#ulsbs-migrate-melody-syntax)
+  - [`ulsbs-migrate-syntax-v1`](#ulsbs-migrate-syntax-v1)
 - [Editor support](#editor-support)
 - [Testing](#testing)
 - [More information](#more-information)
@@ -724,6 +725,45 @@ So the rule of thumb is:
 
 To hide measure bars in the final document, use `\measuresoff`.
 
+### Accidentals and alternate chords
+
+Write a sharp as `#` and a flat as `&` in musical contexts. The shorthand is
+supported in ordinary `\[ ... ]` chords and melody blocks, in `\altchords`, in
+the `key` and `gk` values of `\beginsong`, and in the `key` value of `\audio`:
+
+```tex
+\beginsong{Example}[key={C#m},gk={B&m, Am--C#m}]
+  \audio[key={F#m}]{https://example.test/recording}
+  \beginverse
+    |\[C#m]Example line \altchords{\id[1]{alt. (B&m)}|B&m |F#7}
+  \endverse
+\endsong
+```
+
+Outside these musical contexts, use `\shrp` and `\flt` to print sharp and flat
+symbols. Use `\#` and `\&` only when the text calls for a literal hash sign or
+ampersand rather than a musical accidental.
+
+Alternate chords do not follow `\transpose` by default. Enable this explicitly
+with `\transposealtchordstrue`; restore the default with
+`\transposealtchordsfalse`. When enabled, plain chords and chord-like content
+inside `\id` and `\ac` are transposed by the current interval. Write
+accidentals in transposable alternate chords with `#` and `&`; `\shrp` and
+`\flt` are not part of the supported transposable `\altchords` syntax. Use
+`\notrans{...}` around content that must remain unchanged:
+
+```tex
+\transpose{2}
+\transposealtchordstrue
+\altchords{\id[1]{alt. (C)}|C |\ac{2}{D} |\notrans{E}}
+```
+
+Here the alternate `C` and `D`, including the key in `\id`, follow the
+two-semitone transposition; `E` remains unchanged. Keep descriptive text in an
+`\id` label inside `\notrans{...}` when an uppercase `A`--`G` could be read as
+a note. Do not put ordinary `\[ ... ]` chord blocks inside `\altchords`, because
+they participate in chord placement, memorization, and replay.
+
 ### Chords and melody blocks inside `\[ ... ]`
 
 Write chords inline with lyrics, for example `\[C]`, `\[Am]`, or `\[G7]`; the
@@ -904,17 +944,23 @@ Convert MIDI files to audio using `ffmpeg` and `fluidsynth`.
 
 Helper for converting ULSBS-style Lilypond lyric output into songbook text.
 
-### `ulsbs-migrate-melody-syntax`
+### `ulsbs-migrate-syntax-v1`
 
 Migrate legacy `\mn*`, `\ma*`, beat-mark, and `\ac<n>{Chord}` syntax to the
-new melody-block and `\ac{n}{Chord}` forms. Run it against a `.tex` file or a
-directory tree:
+new melody-block and `\ac{n}{Chord}` forms. The same migration also replaces
+`\shrp` and `\flt` with `#` and `&`, but only inside `\altchords`,
+`\beginsong`'s `key`/`gk` values, and `\audio`'s `key` value. Explicit
+accidental macros elsewhere remain unchanged. Run it against a `.tex` file or
+a directory tree:
 
 ```sh
-ulsbs-migrate-melody-syntax --check content/
-ulsbs-migrate-melody-syntax --diff content/songs.tex
-ulsbs-migrate-melody-syntax --write content/
+ulsbs-migrate-syntax-v1 --check content/
+ulsbs-migrate-syntax-v1 --diff content/songs.tex
+ulsbs-migrate-syntax-v1 --write content/
 ```
+
+The version identifies the destination syntax. The former
+`ulsbs-migrate-melody-syntax` command is retained as a compatibility alias.
 
 `--check` never writes and exits nonzero while legacy syntax remains. `--diff`
 and `--write` are file-atomic: they process only files with no diagnostics,
@@ -992,6 +1038,7 @@ The main wrapper scripts are:
 - `ulsbs-bookmeta`
 - `ulsbs-midi2audio`
 - `ulsbs-ly2tex`
+- `ulsbs-migrate-syntax-v1`
 - `ulsbs-test`
 
 Release steps for the repository maintainer are documented in

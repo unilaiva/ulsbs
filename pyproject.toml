@@ -25,7 +25,8 @@ ulsbs-compile = "ulsbs.cli:main"
 ulsbs-bookmeta = "ulsbs.tools.bookmeta:main"
 ulsbs-midi2audio = "ulsbs.tools.midi2audio:main"
 ulsbs-ly2tex = "ulsbs.tools.ly2tex:main"
-ulsbs-migrate-melody-syntax = "ulsbs.tools.migrate_melody_syntax:main"
+ulsbs-migrate-syntax-v1 = "ulsbs.tools.migrate_syntax_v1:main"
+ulsbs-migrate-melody-syntax = "ulsbs.tools.migrate_syntax_v1:main"
 ulsbs-test = "ulsbs.testing:main"
 
 [project.urls]

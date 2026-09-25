@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Safely migrate legacy ULSBS melody commands inside ``\\[ ... ]``."""
+"""Safely migrate legacy ULSBS melody and accidental syntax."""
 
 from __future__ import annotations
 
@@ -187,6 +187,132 @@ def _migrate_alternate_chords(text: str, converted: Counter[str]) -> tuple[str, 
     for start, end, replacement in reversed(replacements):
         text = text[:start] + replacement + text[end:]
     return text, []
+
+
+def _keyval_value_spans(
+    text: str, start: int, end: int, keys: set[str]
+) -> list[tuple[int, int]]:
+    """Return absolute value spans for selected keys in a key-value list."""
+    spans: list[tuple[int, int]] = []
+    pos = start
+    while pos < end:
+        while pos < end and (text[pos].isspace() or text[pos] == ","):
+            pos += 1
+        if pos >= end:
+            break
+        if text[pos] == "%" and (pos == 0 or text[pos - 1] != "\\"):
+            newline = text.find("\n", pos, end)
+            pos = end if newline == -1 else newline + 1
+            continue
+        key_match = re.match(r"[A-Za-z0-9_*]+", text[pos:end])
+        if key_match is None:
+            comma = text.find(",", pos, end)
+            pos = end if comma == -1 else comma + 1
+            continue
+        key = key_match.group(0)
+        pos += len(key)
+        while pos < end and text[pos].isspace():
+            pos += 1
+        if pos >= end or text[pos] != "=":
+            continue
+        pos += 1
+        while pos < end and text[pos].isspace():
+            pos += 1
+        if pos < end and text[pos] == "{":
+            value = _balanced(text, pos)
+            if value is None or value[1] > end:
+                break
+            _, value_end = value
+            if key in keys:
+                spans.append((pos + 1, value_end - 1))
+            pos = value_end
+            continue
+        value_start = pos
+        depth = 0
+        while pos < end:
+            if text[pos] == "\\":
+                pos += 2
+                continue
+            if text[pos] == "{":
+                depth += 1
+            elif text[pos] == "}" and depth:
+                depth -= 1
+            elif text[pos] == "," and not depth:
+                break
+            pos += 1
+        if key in keys:
+            spans.append((value_start, pos))
+    return spans
+
+
+def _accidental_context_spans(text: str) -> list[tuple[int, int]]:
+    """Locate altchords and musical key-value fields that accept # and &."""
+    protected = _protected_ranges(text)
+    spans: list[tuple[int, int]] = []
+
+    for match in re.finditer(r"\\altchords\b", text):
+        if _inside(protected, match.start()):
+            continue
+        argument = _argument(text, match.end())
+        if argument is not None:
+            _, argument_end = argument
+            argument_start = _skip_space_comments(text, match.end())
+            spans.append((argument_start + 1, argument_end - 1))
+
+    for match in re.finditer(r"\\beginsong\b", text):
+        if _inside(protected, match.start()):
+            continue
+        title = _argument(text, match.end())
+        if title is None:
+            continue
+        pos = _skip_space_comments(text, title[1])
+        options = _balanced(text, pos, "[", "]")
+        if options is not None:
+            _, options_end = options
+            spans.extend(_keyval_value_spans(text, pos + 1, options_end - 1, {"key", "gk"}))
+
+    for match in re.finditer(r"\\audio\b", text):
+        if _inside(protected, match.start()):
+            continue
+        pos = _skip_space_comments(text, match.end())
+        options_start: int | None = None
+        options_end: int | None = None
+        if pos < len(text) and text[pos] == "[":
+            options = _balanced(text, pos, "[", "]")
+            if options is not None:
+                _, options_end = options
+                options_start = pos + 1
+        elif pos < len(text) and text[pos] == "{":
+            url = _balanced(text, pos)
+            if url is not None:
+                pos = _skip_space_comments(text, url[1])
+                options = _balanced(text, pos, "[", "]")
+                if options is not None:
+                    _, options_end = options
+                    options_start = pos + 1
+        if options_start is not None and options_end is not None:
+            spans.extend(_keyval_value_spans(text, options_start, options_end - 1, {"key"}))
+    return spans
+
+
+def _migrate_accidentals(text: str, converted: Counter[str]) -> str:
+    """Use # and & shorthand only in contexts whose grammar defines notes."""
+    protected = _protected_ranges(text)
+    replacements: list[tuple[int, int, str]] = []
+    for start, end in _accidental_context_spans(text):
+        for match in re.finditer(r"\\(shrp|flt)(?![A-Za-z])", text[start:end]):
+            absolute_start = start + match.start()
+            if _inside(protected, absolute_start):
+                continue
+            absolute_end = start + match.end()
+            if text.startswith("{}", absolute_end) and absolute_end + 2 <= end:
+                absolute_end += 2
+            name = match.group(1)
+            replacements.append((absolute_start, absolute_end, "#" if name == "shrp" else "&"))
+            converted[name] += 1
+    for start, end, replacement in reversed(sorted(set(replacements))):
+        text = text[:start] + replacement + text[end:]
+    return text
 
 
 def _convert_annotation(body: str, source: str, body_start: int, allow_low: bool) -> tuple[str, Counter[str], list[Diagnostic], str | None]:
@@ -406,6 +532,7 @@ def migrate_text(text: str, *, normalize_low: bool = False) -> Result:
     text, ac_diagnostics = _migrate_alternate_chords(text, converted)
     if ac_diagnostics:
         return Result(original_text, converted, ac_diagnostics)
+    text = _migrate_accidentals(text, converted)
     return Result(text, converted, [])
 
 

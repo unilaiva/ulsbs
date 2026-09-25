@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Compatibility wrapper for the former migration command name.
+# Migrate legacy ULSBS song sources to syntax version 1.
 
 set -euo pipefail
 
