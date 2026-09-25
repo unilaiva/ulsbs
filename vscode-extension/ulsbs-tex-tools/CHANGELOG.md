@@ -5,6 +5,13 @@ the extension is released.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-26
+
+### Changed
+
+- Synchronized the extension version with ULSBS 0.2.1. This release contains
+  no extension functionality changes.
+
 ## [0.2.0] - 2026-09-23
 
 

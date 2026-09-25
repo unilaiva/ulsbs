@@ -2,7 +2,7 @@
   "name": "ulsbs-tex-tools",
   "displayName": "ULSBS TeX Tools",
   "description": "Custom LaTeX support for ULSBS song macros",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "ulsbs",
   "license": "GPL-3.0-or-later",
   "author": {
@@ -178,7 +178,11 @@
       "properties": {
         "ulsbsTexTools.enable": {
           "type": "string",
-          "enum": ["auto", "on", "off"],
+          "enum": [
+            "auto",
+            "on",
+            "off"
+          ],
           "default": "auto",
           "description": "Enable ULSBS-specific features. 'auto' enables them only when a ULSBS workspace is detected."
         },

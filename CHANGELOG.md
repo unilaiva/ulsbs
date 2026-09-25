@@ -5,6 +5,8 @@ the extension is released.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-26
+
 ### Added
 
 - `#` and `&` accidental shorthand in alternate chords and musical key
