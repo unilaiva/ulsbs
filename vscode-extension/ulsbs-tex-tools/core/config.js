@@ -11,6 +11,7 @@
  * @property {"auto"|"on"|"off"} enable Feature toggle.
  * @property {string} fileGlob Workspace file glob for TeX-like sources.
  * @property {string[]} excludeGlob Glob(s) excluded from indexing.
+ * @property {string[]} songbookExcludeGlob Glob(s) excluded only from songbook discovery.
  * @property {string} compileCommand Path to `ulsbs-compile` (relative to workspace root).
  * @property {boolean} askProfileOnCompile Ask for profile on compile.
  * @property {string} defaultProfile Default profile when not asking.
@@ -22,6 +23,20 @@ const INTERNAL_EXCLUDE_GLOBS = [
   "**/ulsbs-tex-tools/assets/**",
   "**/vscode-extension/ulsbs-tex-tools/assets/**"
 ];
+
+/** Globs always excluded from songbook discovery. */
+const DEFAULT_SONGBOOK_EXCLUDE_GLOBS = [
+  "**/.*/**",
+  "**/ulsbs/tests/**",
+  "**/tests/fixtures/**"
+];
+
+function normalizeGlobs(value) {
+  if (Array.isArray(value)) {
+    return value.filter((item) => typeof item === "string" && item.trim());
+  }
+  return typeof value === "string" && value.trim() ? [value] : [];
+}
 
 /** @param {import('vscode')} vscode */
 function getConfiguration(vscode) {
@@ -38,21 +53,21 @@ function getSettings(vscode) {
 
   // Note: VS Code already applies defaults from `package.json` (contributes.configuration).
   // We only keep runtime fallbacks here and *always* append internal excludes.
-  const userExclude = cfg.get("excludeGlob");
-  const excludeGlobs = Array.isArray(userExclude)
-    ? userExclude
-    : typeof userExclude === "string" && userExclude.trim()
-      ? [userExclude]
-      : [];
-
   const excludeGlob = Array.from(
-    new Set([...excludeGlobs, ...INTERNAL_EXCLUDE_GLOBS])
+    new Set([...normalizeGlobs(cfg.get("excludeGlob")), ...INTERNAL_EXCLUDE_GLOBS])
+  );
+  const songbookExcludeGlob = Array.from(
+    new Set([
+      ...normalizeGlobs(cfg.get("songbookExcludeGlob")),
+      ...DEFAULT_SONGBOOK_EXCLUDE_GLOBS
+    ])
   );
 
   return {
     enable: cfg.get("enable") ?? "auto",
     fileGlob: cfg.get("fileGlob") ?? "**/*.*tex",
     excludeGlob,
+    songbookExcludeGlob,
     compileCommand: cfg.get("compileCommand") ?? "ulsbs/ulsbs-compile",
     askProfileOnCompile: cfg.get("askProfileOnCompile") ?? true,
     defaultProfile: cfg.get("defaultProfile") ?? "default",

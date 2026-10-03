@@ -32,6 +32,19 @@ function relativePath(vscode, uri) {
   return vscode.workspace.asRelativePath(uri, false);
 }
 
+function isInHiddenDirectory(vscode, uri) {
+  const path = relativePath(vscode, uri).replace(/\\/g, "/");
+  const segments = path.split("/");
+  return segments.slice(0, -1).some((segment) => segment.startsWith("."));
+}
+
+function isSongbookDiscoveryExcludedUri(vscode, uri, excludeGlobs) {
+  return (
+    isInHiddenDirectory(vscode, uri) ||
+    isExcludedUri(vscode, uri, excludeGlobs)
+  );
+}
+
 function baseName(uri) {
   const path = uri.path;
   return path.substring(path.lastIndexOf("/") + 1);
@@ -175,12 +188,15 @@ class SongbookService {
   async buildIndexForFolder(folder) {
     const settings = getSettings(this.vscode);
     const includePattern = new this.vscode.RelativePattern(folder, settings.fileGlob);
+    const excludeGlobs = Array.from(
+      new Set([...settings.excludeGlob, ...settings.songbookExcludeGlob])
+    );
 
     let excludePattern;
-    if (Array.isArray(settings.excludeGlob) && settings.excludeGlob.length > 0) {
-      excludePattern = `{${settings.excludeGlob.join(",")}}`;
+    if (excludeGlobs.length > 0) {
+      excludePattern = `{${excludeGlobs.join(",")}}`;
     } else {
-      excludePattern = settings.excludeGlob || undefined;
+      excludePattern = undefined;
     }
 
     const uris = await this.vscode.workspace.findFiles(includePattern, excludePattern);
@@ -189,7 +205,7 @@ class SongbookService {
 
     for (const uri of uris) {
       try {
-        if (isExcludedUri(this.vscode, uri, settings.excludeGlob)) {
+        if (isSongbookDiscoveryExcludedUri(this.vscode, uri, excludeGlobs)) {
           continue;
         }
 
@@ -347,5 +363,6 @@ function createSongbookService(vscode) {
 }
 
 module.exports = {
-  createSongbookService
+  createSongbookService,
+  isSongbookDiscoveryExcludedUri
 };

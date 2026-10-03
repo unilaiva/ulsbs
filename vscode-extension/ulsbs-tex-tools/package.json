@@ -203,6 +203,14 @@
           ],
           "description": "Glob patterns for files and folders to exclude from ULSBS workspace scanning."
         },
+        "ulsbsTexTools.songbookExcludeGlob": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional glob patterns to exclude from Songbooks view discovery. These are merged with the built-in exclusions for hidden directories, ulsbs/tests, and tests/fixtures, and do not disable editing features in matching files."
+        },
         "ulsbsTexTools.compileCommand": {
           "type": "string",
           "default": "ulsbs/ulsbs-compile",
@@ -230,6 +238,7 @@
     "compile-web": "node esbuild.web.mjs",
     "watch-web": "node esbuild.web.mjs --watch",
     "test:grammar": "node test/grammar-fixtures.js",
+    "test:songbooks": "node test/songbook-exclusions.js",
     "test:verse": "node test/verse.js",
     "package": "npm run compile-web && vsce package"
   },

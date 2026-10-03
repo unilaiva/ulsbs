@@ -9,11 +9,16 @@ the extension is released.
 
 - Editing support for every canonical `\beginverse` modifier combination,
   including unnumbered `*`, melody-spacing `+`, and `[n]` indentation.
+- A `ulsbsTexTools.songbookExcludeGlob` setting for adding Songbooks view
+  discovery exclusions without disabling editing features in matching files.
 
 ### Changed
 
 - Unified verse parsing, outlines, completions, region tracking, folding, and
   indentation around `\beginverse...\endverse` as the sole verse construct.
+- Songbook discovery now always skips hidden directories, `ulsbs/tests`, and
+  `tests/fixtures`; configured Songbooks exclusions are merged with these
+  defaults.
 
 ### Removed
 

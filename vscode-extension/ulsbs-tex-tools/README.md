@@ -153,7 +153,15 @@ Available settings include:
 - `ulsbsTexTools.autoRefreshDiagnostics`
   - refresh diagnostics automatically on edits and saves
 - `ulsbsTexTools.fileGlob`, `ulsbsTexTools.excludeGlob`
-  - control which files are scanned
+  - control which files are scanned for all extension features
+- `ulsbsTexTools.songbookExcludeGlob`
+  - adds glob patterns to the Songbooks view denylist without disabling editing
+    features for matching files
+
+Songbook discovery always skips files inside hidden directories (directories
+whose names begin with `.`), `ulsbs/tests`, and `tests/fixtures`. Patterns from
+`ulsbsTexTools.songbookExcludeGlob` are added to these built-in exclusions
+rather than replacing them.
 
 If your project uses a root-level wrapper script instead of
 `ulsbs/ulsbs-compile`, change `ulsbsTexTools.compileCommand` accordingly, for
