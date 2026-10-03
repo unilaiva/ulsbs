@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from ulsbs.tools.migrate_syntax_v1 import migrate_text
+from ulsbs.tools.migrate_syntax_v1 import main, migrate_text
 
 
 class MigrateSyntaxV1Tests(unittest.TestCase):
@@ -95,10 +99,10 @@ class MigrateSyntaxV1Tests(unittest.TestCase):
 
     def test_low_normalization_never_changes_verse_spacing(self) -> None:
         self.assertEqual(migrate_text(r"\[\mnd{C}]", normalize_low=True).text, r"\[<C>]")
-        source = "\\mnbeginverse*[2]\n\\[\\mnd{C}]\n\\endverse"
+        source = "\\beginverse*+[2]\n\\[\\mnd{C}]\n\\endverse"
         result = migrate_text(source, normalize_low=True)
         self.assertTrue(result.safe)
-        self.assertEqual(result.text, "\\mnbeginverse*[2]\n\\[<C>]\n\\endverse")
+        self.assertEqual(result.text, "\\beginverse*+[2]\n\\[<C>]\n\\endverse")
 
     def test_unsafe_cases_leave_original_unchanged(self) -> None:
         source = r"\[\mnc{C#7}\mnc{D}]"
@@ -126,13 +130,91 @@ class MigrateSyntaxV1Tests(unittest.TestCase):
         )
 
     def test_same_position_uses_existing_melody_aware_verse_scope(self) -> None:
-        source = "\\mnbeginverse*[2]\n\\[\\ma{E}]\n\\endverse"
+        source = "\\beginverse*+[2]\n\\[\\ma{E}]\n\\endverse"
         result = migrate_text(source)
         self.assertTrue(result.safe)
         self.assertEqual(
             result.text,
-            "\\mnbeginverse*[2]\n\\melodySecondaryPosition{same}\n\\[<;E>]\n\\endverse",
+            "\\beginverse*+[2]\n\\melodySecondaryPosition{same}\n\\[<;E>]\n\\endverse",
         )
+
+    def test_legacy_verse_start_variants_and_independent_endings(self) -> None:
+        for suffix, expected in (("", "+"), ("*", "*+"), ("[2]", "+[2]"), ("*[2]", "*+[2]")):
+            for ending in (r"\mnendverse", r"\endverse"):
+                with self.subTest(suffix=suffix, ending=ending):
+                    source = rf"\mnbeginverse{suffix} words {ending}"
+                    result = migrate_text(source)
+                    self.assertTrue(result.safe)
+                    self.assertEqual(result.text, rf"\beginverse{expected} words \endverse")
+                    self.assertEqual(result.converted["mnbeginverse"], 1)
+                    self.assertEqual(result.converted["mnendverse"], int(ending == r"\mnendverse"))
+        result = migrate_text(r"\beginverse words \mnendverse")
+        self.assertTrue(result.safe)
+        self.assertEqual(result.text, r"\beginverse words \endverse")
+
+    def test_adjacent_commands_and_scope_after_verse_conversion(self) -> None:
+        source = "\\mnbeginverse*[2]\\[\\ma{E}]\\mnendverse\\glueverses\\beginverse+\\[\\madii{F}{C}]\\endverse"
+        result = migrate_text(source)
+        self.assertTrue(result.safe)
+        self.assertEqual(result.text, "\\beginverse*+[2]\n\\melodySecondaryPosition{same}\\[<;E>]\\endverse\\glueverses\\beginverse+\n\\melodySecondaryPosition{below}\\[<C;F>]\\endverse")
+
+    def test_verse_migration_protects_comments_and_verbatim(self) -> None:
+        source = ("% \\mnbeginverse \\mnendverse\n"
+                  "\\verb|\\mnbeginverse*[2]\\mnendverse|\n"
+                  "\\begin{verbatim}\\mnbeginverse\\mnendverse\\end{verbatim}\n"
+                  "\\mnbeginverse\\mnendverse")
+        result = migrate_text(source)
+        self.assertTrue(result.safe)
+        self.assertEqual(result.text, source.replace("\n\\mnbeginverse\\mnendverse", "\n\\beginverse+\\endverse"))
+        self.assertEqual(result.converted["mnbeginverse"], 1)
+        self.assertEqual(result.converted["mnendverse"], 1)
+
+    def test_malformed_verse_modifiers_are_transactional(self) -> None:
+        for source in (r"\mnbeginverse**", r"\mnbeginverse+[2]", r"\mnbeginverse[2]*",
+                       r"\mnbeginverse[bad]", r"\mnbeginverse[2", r"\mnendverse[2]",
+                       r"\mnendverse*"):
+            with self.subTest(source=source):
+                original = source + r" \[\mnc{C}] \mnendverse"
+                result = migrate_text(original)
+                self.assertFalse(result.safe)
+                self.assertEqual(result.text, original)
+                self.assertIn("malformed", result.diagnostics[0].message)
+
+    def test_verse_migration_is_idempotent(self) -> None:
+        first = migrate_text(r"\mnbeginverse*[2]\mnendverse")
+        second = migrate_text(first.text)
+        self.assertTrue(first.safe)
+        self.assertTrue(second.safe)
+        self.assertEqual(second.text, first.text)
+        self.assertFalse(second.converted)
+
+    def test_spaced_numeric_option_remains_in_verse_scope(self) -> None:
+        source = "\\mnbeginverse* [2]\n\\[\\ma{E}]\n\\mnendverse"
+        result = migrate_text(source)
+        self.assertTrue(result.safe)
+        self.assertEqual(result.text, "\\beginverse*+ [2]\n\\melodySecondaryPosition{same}\n\\[<;E>]\n\\endverse")
+
+    def test_verse_rewrites_roll_back_on_other_migration_failure(self) -> None:
+        source = r"\mnbeginverse\[\mnc{C#7}]\mnendverse"
+        result = migrate_text(source)
+        self.assertFalse(result.safe)
+        self.assertEqual(result.text, source)
+
+    def test_cli_verse_counts_and_second_write_is_noop(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "song.tex"
+            path.write_text(r"\mnbeginverse*\mnendverse", encoding="utf-8")
+            output = StringIO()
+            with redirect_stderr(output):
+                self.assertEqual(main(["--write", str(path)]), 0)
+            self.assertEqual(path.read_text(encoding="utf-8"), r"\beginverse*+\endverse")
+            self.assertIn("1 would change", output.getvalue())
+            self.assertIn(r"\mnbeginverse: 1", output.getvalue())
+            self.assertIn(r"\mnendverse: 1", output.getvalue())
+            output = StringIO()
+            with redirect_stderr(output):
+                self.assertEqual(main(["--check", str(path)]), 0)
+            self.assertIn("0 would change", output.getvalue())
 
     def test_low_secondary_requires_opt_in(self) -> None:
         self.assertFalse(migrate_text(r"\[\mad{E}]").safe)

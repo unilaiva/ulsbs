@@ -1721,47 +1721,40 @@ def _extract_lyrics_from_song_block(
         verses_raw: List[str] = []
         i = 0
         n = len(raw_song)
+        endverse_pattern = re.compile(r"\\endverse(?![A-Za-z])")
         while i < n:
-            if raw_song.startswith("\\mnbeginverse", i):
-                start = i + len("\\mnbeginverse")
-
-                # Optional [..] argument (e.g. \mnbeginverse[1]) should not be
-                # treated as lyric content.
-                j = start
-                while j < n and raw_song[j].isspace():
-                    j += 1
-                if j < n and raw_song[j] == "[":
-                    try:
-                        _, start = _parse_optional_bracket_argument(raw_song, j)
-                    except ValueError:
-                        start = j
-
-                end = raw_song.find("\\mnendverse", start)
-                if end == -1:
-                    break
-                verses_raw.append(raw_song[start:end])
-                i = end + len("\\mnendverse")
-                continue
-
-            if raw_song.startswith("\\beginverse", i):
+            if raw_song.startswith("\\beginverse", i) and (
+                i + len("\\beginverse") == n
+                or not raw_song[i + len("\\beginverse")].isalpha()
+            ):
                 start = i + len("\\beginverse")
 
-                # Optional [..] argument (e.g. \beginverse[1]) should not be
-                # treated as lyric content.
+                # TeX's star/plus modifiers precede the optional indentation.
                 j = start
                 while j < n and raw_song[j].isspace():
                     j += 1
+                if j < n and raw_song[j] == "*":
+                    j += 1
+                    while j < n and raw_song[j].isspace():
+                        j += 1
+                if j < n and raw_song[j] == "+":
+                    j += 1
+                    while j < n and raw_song[j].isspace():
+                        j += 1
                 if j < n and raw_song[j] == "[":
                     try:
                         _, start = _parse_optional_bracket_argument(raw_song, j)
                     except ValueError:
                         start = j
+                else:
+                    start = j
 
-                end = raw_song.find("\\endverse", start)
-                if end == -1:
+                end_match = endverse_pattern.search(raw_song, start)
+                if end_match is None:
                     break
+                end = end_match.start()
                 verses_raw.append(raw_song[start:end])
-                i = end + len("\\endverse")
+                i = end_match.end()
                 continue
 
             if raw_song.startswith("\\begin{verse}", i):

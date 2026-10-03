@@ -90,6 +90,11 @@ class MelodySyntaxIntegrationTests(unittest.TestCase):
         self.assertNotIn("Malformed melody block", output)
         self.assertTrue(pdf.startswith(b"%PDF"))
 
+    def test_verse_modifiers_restore_baseline_and_preserve_indentation(self) -> None:
+        output, pdf = compile_fixture("verse-modifiers")
+        self.assertNotIn("verse baseline", output.lower())
+        self.assertTrue(pdf.startswith(b"%PDF"))
+
     def test_melody_only_positions_stay_aligned_during_chord_replay(self) -> None:
         output, pdf = compile_fixture("melody-replay")
         self.assertNotIn("Replayed chord has no matching chord", output)

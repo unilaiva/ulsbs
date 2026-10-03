@@ -44,6 +44,7 @@ For a real-world example of a repository using ULSBS, see:
   - [General structure](#general-structure)
   - [`ulsbs-songbook` document class options](#ulsbs-songbook-document-class-options)
   - [Preamble configuration after loading the class](#preamble-configuration-after-loading-the-class)
+  - [Verses](#verses)
   - [Page and line breaks](#page-and-line-breaks)
   - [Repeats](#repeats)
   - [Measure bars](#measure-bars)
@@ -648,6 +649,26 @@ There are many more rewritable settings in `src/ulsbs/assets/tex/ulsbs.sty`,
 but the toggle list above is the most important document-level configuration
 surface.
 
+### Verses
+
+Start a verse with `\beginverse` and close it with `\endverse`. The supported
+forms are `\beginverse`, `\beginverse[n]`, `\beginverse*`,
+`\beginverse*[n]`, `\beginverse+`, `\beginverse+[n]`, `\beginverse*+`,
+and `\beginverse*+[n]`. When combined, modifiers must appear in canonical
+order: `*`, then `+`, then `[n]`.
+
+`*` makes the verse unnumbered. `[n]` indents the whole verse by `n` times
+`\verseindentwidthbase` (default `1em`). `+` increases lyric-line spacing for
+melody notes beyond the first line when chords and melody notes are visible.
+The usual baseline spacing is restored at `\endverse`.
+
+```tex
+\beginverse*+[2]
+  |\[<C>Am]First line with a melody note.
+  |\[<D>G]Second line with a melody note.
+\endverse
+```
+
 ### Page and line breaks
 
 The `songs` package already does most line and page breaking well, but sometimes
@@ -850,7 +871,7 @@ style). Neither setting changes which sequence is primary.
 
 `\shownotesfalse` and `\notesoff` hide melody notes; `\showbeatsfalse` and
 `\beatsoff` hide beats. `\noteson` and `\beatson` restore them. Use
-`\mnbeginverse` for looser spacing when a verse has melody hints throughout;
+`\beginverse+` for looser spacing when a verse has melody hints throughout;
 ordinary `\beginverse` is suitable when they occur only on its first line.
 
 Legacy `\mn*`, `\ma*`, `\bm*`, and `\usealtmnstyle...` authoring commands are

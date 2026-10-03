@@ -1938,7 +1938,7 @@
 % of each line you want to indent. The optional parameter specifies the indent
 % depth factor. The default is 1.
 %
-% To indent complete verses, use \beginverse[<n>] or \mnbeginverse[<n>] instead.
+% To indent complete verses, use \beginverse[<n>] instead.
 \newcommand\ind[1][1]{%
   \leavevmode\kern\dimexpr #1\verseindentwidthbase\relax%
 }
@@ -3457,7 +3457,7 @@
 \newcommand{\noteson}{\let\@melodynotesdisabled\undefined}
 
 
-% Is true, if baseline is increased due to being in mnverse
+% Is true, if baseline is increased for a melody-spaced verse
 \newif\if@baselineincreased\@baselineincreasedfalse
 
 % Used to hold the normal baselineadj value, set by \UL@mn@savebaselineadj
@@ -4622,7 +4622,7 @@
     % need to use \nointerlineskip and \hbox
     \nointerlineskip%
     \hbox to 0pt{%
-      % handle extra indentation if we have that from \{mn}beginverse[<n>]
+      % handle extra indentation from \beginverse[<n>]
       \kern\tmp@UL@currentverseextraindentwidth%
       \UL@rep@drawbars%
     }%
@@ -4982,7 +4982,7 @@
 %
 % This code extends the songs package \beginverse macro with optional
 % indentation factor, which applies to the whole verse. Optional star is
-% passed to the original macro as is.
+% passed to the original macro as is; optional + increases melody-note spacing.
 %
 %   \beginverse[<n>]
 %
@@ -4994,14 +4994,10 @@
 %        \beginverse[2]     % indent whole verse by 2 * \verseindentwidthbase
 %        \beginverse*       % behaves like the original starred form
 %        \beginverse*[2]    % starred + indentation
-%
-% Additionally, a replacement command is provided:
-%
-%   \mnbeginverse
-%
-%      Same interface as \beginverse (supports * and [n]), but also applies
-%      increased line spacing (baseline adjustment) suitable for verses with
-%      melody notes on other than only the first line of lyrics.
+%        \beginverse+       % increased spacing for melody notes on later lines
+%        \beginverse+[2]    % increased spacing + indentation
+%        \beginverse*+      % unnumbered + increased spacing
+%        \beginverse*+[2]   % unnumbered + increased spacing + indentation
 %
 % NOTE:
 %
@@ -5025,13 +5021,10 @@
 
 % Save the original \beginverse
 \let\@beginverseorig\beginverse
-% Save the original \@SB@endverse
+% Save the original \SB@endverse
 \let\@SB@endverseorig\SB@endverse
 
 \renewcommand{\SB@endverse}{\@SB@endverseorig\UL@mn@resetbaselineadj}
-
-% For backwards compatibility, deprecated; use \endverse instead
-\newcommand{\mnendverse}{\endverse}
 
 % Stores the computed indentation width for the current verse.
 % This is read by the per-line \everypar hook inside the verse environment
@@ -5049,11 +5042,12 @@
 
 % Internal implementation of the enhanced beginverse
 % Computes the verse extra indentation width and calls the original \beginverse.
-\NewDocumentCommand{\UL@beginverse@impl}{s o}{%
+\NewDocumentCommand{\UL@beginverse@impl}{s t+ o}{%
   \endgroup % close wrapper group AFTER xparse has scanned arguments
+  \IfBooleanTF{#2}{\UL@mn@increasebaselineadj}{\UL@mn@savebaselineadj}%
   % set indent factor for this verse (plain number)
-  \IfValueTF{#2}{%
-    \tmp@UL@currentverseextraindentwidth=\dimexpr #2\verseindentwidthbase\relax%
+  \IfValueTF{#3}{%
+    \tmp@UL@currentverseextraindentwidth=\dimexpr #3\verseindentwidthbase\relax%
   }{%
     \tmp@UL@currentverseextraindentwidth=0pt\relax%
   }%
@@ -5069,26 +5063,8 @@
   \UL@beginverse@impl%
 }
 
-% Drop-in replacement for songs' \beginverse with added optional [<n>]
-% indentation factor, while preserving the optional star.
-% Supports:
-%   \beginverse
-%   \beginverse*
-%   \beginverse[<n>]
-%   \beginverse*[<n>]
+% Drop-in replacement for songs' \beginverse: star, then +, then [<n>].
 \def\beginverse{%
-  \UL@mn@savebaselineadj%
-  \UL@beginverse@wrap%
-}
-
-% Like \beginverse, but first increases baseline spacing for melody notes
-% Supports:
-%   \mnbeginverse
-%   \mnbeginverse*
-%   \mnbeginverse[<n>]
-%   \mnbeginverse*[<n>]
-\def\mnbeginverse{%
-  \UL@mn@increasebaselineadj%
   \UL@beginverse@wrap%
 }
 

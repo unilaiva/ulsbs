@@ -66,8 +66,7 @@ const PATTERNS = [
     type: "endfeeler",
     regex: /\\end\{feeler\}/g
   },
-  { type: "beginverse", regex: /\\beginverse\b/g },
-  { type: "mnbeginverse", regex: /\\mnbeginverse\b/g },
+  { type: "beginverse", regex: /\\beginverse(?:\*\+|[+*])?(?:\[[^\]\r\n]*\])?(?![A-Za-z*+\[])/g },
   { type: "beginrep", regex: /\\beginrep\b/g },
   {
     type: "begintranslation",
@@ -88,7 +87,6 @@ const PATTERNS = [
   { type: "beginlilypond", regex: /\\begin\{lilypond\}/g },
   { type: "endsong", regex: /\\endsong\b/g },
   { type: "endverse", regex: /\\endverse\b/g },
-  { type: "mnendverse", regex: /\\mnendverse\b/g },
   { type: "endrep", regex: /\\endrep\b/g },
   {
     type: "endtranslation",

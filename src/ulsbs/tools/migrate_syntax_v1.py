@@ -315,6 +315,74 @@ def _migrate_accidentals(text: str, converted: Counter[str]) -> str:
     return text
 
 
+def _migrate_verses(text: str, converted: Counter[str]) -> tuple[str, list[Diagnostic]]:
+    protected = _protected_ranges(text)
+    replacements: list[tuple[int, int, str]] = []
+    diagnostics: list[Diagnostic] = []
+    for match in re.finditer(r"\\(mnbeginverse|mnendverse)(?![A-Za-z])", text):
+        if _inside(protected, match.start()):
+            continue
+        name = match.group(1)
+        end = match.end()
+        if name == "mnbeginverse":
+            if text.startswith("*", end):
+                end += 1
+            star = "*" if end > match.end() else ""
+            option = ""
+            option_start = _skip_space_comments(text, end)
+            if text.startswith("[", option_start):
+                parsed = _balanced(text, option_start, "[", "]")
+                if parsed is None or not re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)", parsed[0].strip()):
+                    line, column = _location(text, match.start())
+                    diagnostics.append(Diagnostic(line, column, "malformed \\mnbeginverse: expected numeric [indent]"))
+                    continue
+                option = text[end:parsed[1]]
+                end = parsed[1]
+            if end < len(text) and text[end] in "*+[":
+                line, column = _location(text, match.start())
+                diagnostics.append(Diagnostic(line, column, "malformed \\mnbeginverse: unsupported modifier placement"))
+                continue
+            replacement = f"\\beginverse{star}+{option}"
+        else:
+            if end < len(text) and text[end] in "*+[":
+                line, column = _location(text, match.start())
+                diagnostics.append(Diagnostic(line, column, "malformed \\mnendverse: unexpected modifier or argument"))
+                continue
+            replacement = "\\endverse"
+        replacements.append((match.start(), end, replacement))
+        converted[name] += 1
+    if diagnostics:
+        return text, diagnostics
+    for start, end, replacement in reversed(replacements):
+        text = text[:start] + replacement + text[end:]
+    return text, []
+
+
+def _verse_scopes(text: str) -> list[tuple[int, int | None]]:
+    """Pair canonical verse starts with their closes, ignoring opaque regions."""
+    protected = _protected_ranges(text)
+    scopes: list[list[int | None]] = []
+    open_scopes: list[int] = []
+    token = re.compile(r"\\(beginverse|endverse)(?![A-Za-z])")
+    for match in token.finditer(text):
+        if _inside(protected, match.start()):
+            continue
+        if match.group(1) == "beginverse":
+            end = match.end()
+            if end < len(text) and text[end] == "*":
+                end += 1
+            if end < len(text) and text[end] == "+":
+                end += 1
+            option = _balanced(text, _skip_space_comments(text, end), "[", "]")
+            if option is not None:
+                end = option[1]
+            open_scopes.append(len(scopes))
+            scopes.append([end, None])
+        elif open_scopes:
+            scopes[open_scopes.pop()][1] = match.start()
+    return [(start, end) for start, end in scopes if start is not None]
+
+
 def _convert_annotation(body: str, source: str, body_start: int, allow_low: bool) -> tuple[str, Counter[str], list[Diagnostic], str | None]:
     """Convert a leading legacy layer while leaving the chord remainder intact."""
     diagnostics: list[Diagnostic] = []
@@ -441,9 +509,12 @@ def _convert_annotation(body: str, source: str, body_start: int, allow_low: bool
 def migrate_text(text: str, *, normalize_low: bool = False) -> Result:
     """Migrate one TeX document in memory; unsafe input returns original text."""
     original_text = text
+    converted: Counter[str] = Counter()
+    text, verse_diagnostics = _migrate_verses(text, converted)
+    if verse_diagnostics:
+        return Result(original_text, converted, verse_diagnostics)
     protected = _protected_ranges(text)
     diagnostics: list[Diagnostic] = []
-    converted: Counter[str] = Counter()
     replacements: list[tuple[int, int, str, str | None]] = []
     annotation_spans: list[tuple[int, int]] = []
     pos = 0
@@ -477,15 +548,16 @@ def migrate_text(text: str, *, normalize_low: bool = False) -> Result:
                 line, column = _location(text, match.start())
                 diagnostics.append(Diagnostic(line, column, f"\\{match.group(1)} outside a chord annotation"))
     if diagnostics:
-        return Result(text, converted, diagnostics)
+        return Result(original_text, converted, diagnostics)
     # Placement is scoped to a uniform verse where possible. A non-uniform
     # same-position run is enclosed in an explicit local TeX group instead.
     scoped_placements = [item for item in replacements if item[3] in {"below", "same"}]
     insertions: list[tuple[int, str]] = []
+    scopes = _verse_scopes(text)
     for start, annotation_end, _, policy in scoped_placements:
-        begin = list(re.finditer(r"\\(?:mn)?beginverse\*?(?:\s*\[[^]]*\])?", text[:start]))
-        verse_ends = list(re.finditer(r"\\endverse\b", text[:start]))
-        if not begin or len(begin) <= len(verse_ends):
+        scope = next(((begin, end) for begin, end in reversed(scopes)
+                      if begin <= start and (end is None or start < end)), None)
+        if scope is None:
             if policy == "same":
                 insertions.extend(
                     [(start - 2, "{\\melodySecondaryPosition{same}"), (annotation_end + 1, "}")]
@@ -494,9 +566,8 @@ def migrate_text(text: str, *, normalize_low: bool = False) -> Result:
             line, column = _location(text, start)
             diagnostics.append(Diagnostic(line, column, "secondary-below has no safe verse scope"))
             continue
-        scope = begin[-1]
-        close = re.search(r"\\endverse\b", text[start:])
-        if close is None:
+        scope_start, scope_end = scope
+        if scope_end is None:
             if policy == "same":
                 insertions.extend(
                     [(start - 2, "{\\melodySecondaryPosition{same}"), (annotation_end + 1, "}")]
@@ -505,8 +576,7 @@ def migrate_text(text: str, *, normalize_low: bool = False) -> Result:
             line, column = _location(text, start)
             diagnostics.append(Diagnostic(line, column, "secondary-below verse is not closed"))
             continue
-        scope_end = start + close.start()
-        placements = [placement for item_start, _, _, placement in replacements if scope.end() <= item_start < scope_end]
+        placements = [placement for item_start, _, _, placement in replacements if scope_start <= item_start < scope_end]
         if any(placement not in {None, policy} for placement in placements):
             if policy == "same":
                 insertions.extend(
@@ -516,11 +586,11 @@ def migrate_text(text: str, *, normalize_low: bool = False) -> Result:
             line, column = _location(text, start)
             diagnostics.append(Diagnostic(line, column, "mixed secondary placement has no safe verse scope"))
             continue
-        insertion = (scope.end(), f"\n\\melodySecondaryPosition{{{policy}}}")
+        insertion = (scope_start, f"\n\\melodySecondaryPosition{{{policy}}}")
         if insertion not in insertions:
             insertions.append(insertion)
     if diagnostics:
-        return Result(text, converted, diagnostics)
+        return Result(original_text, converted, diagnostics)
     # Style switches are unambiguous, but comments and verbatim remain opaque.
     for match in re.finditer(r"\\usealtmnstyle(true|false)\b", text):
         if not _inside(protected, match.start()):

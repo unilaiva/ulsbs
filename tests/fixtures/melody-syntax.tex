@@ -4,7 +4,7 @@
 \begin{document}
 \begin{songs}{}
 \beginsong{Melody Syntax}[key={C}]
-  \mnbeginverse
+  \beginverse+
     \[<C>]one \[<C D E>Am]two \[<;E>]three \[<C;E>Am]four
     \[<C D;E F>G]five \[<C @ .3em>]six \[<C @ -.3em>Am]seven
     \[<C D;E F @ .3em>]eight \[<A _ C;E _ G>]gaps \[</>Am]unpitched \[<A / C;E _ G>]slash slot \[<* A _ * C>Am]beats
@@ -12,15 +12,15 @@
     \[<C# D& F;A C>Am]accidentals
     \[<*A_C;E*G@.2em>Am]compact
     \[<!C>]zero-advance note \[<!*>]zero-advance beat \[<!ABC@1em>Am]zero-advance adjusted melody with chord
-  \mnendverse
+  \endverse
   {\melodySecondaryPosition{below}\melodyStyleMapping{swapped}
-    \mnbeginverse
+    \beginverse+
       \[<C;E>Am]policy \[<C D;E F @ -.4em>G]offset \[<C D @ -.4em>]negative no chord
-    \mnendverse}
+    \endverse}
   {\melodySecondaryPosition{same}
-    \mnbeginverse
+    \beginverse+
       \[<;E>Am]secondary normal lane \[<C;E>Am]explicit overlay
-    \mnendverse}
+    \endverse}
   {\melodyPrimaryPosition{low}
     \beginverse
       {\melodySecondaryPosition{above}\[<C;E>Am]low/above}
@@ -28,17 +28,17 @@
       {\melodySecondaryPosition{below}\[<C;E>Am]low/below}
     \endverse}
   \notesoff
-  \mnbeginverse
+  \beginverse+
     \[<C D;E F>Am]hidden notes \[<* C>G]visible beat
-  \mnendverse
+  \endverse
   \noteson\beatsoff
-  \mnbeginverse
+  \beginverse+
     \[<* C>Am]hidden beat
-  \mnendverse
+  \endverse
   \beatson\transpose{2}
-  \mnbeginverse
+  \beginverse+
     \[<C D# E& /;A C>Am]transposed
-  \mnendverse
+  \endverse
 \endsong
 \end{songs}
 \makeatletter

@@ -5,6 +5,26 @@ the extension is released.
 
 ## [Unreleased]
 
+### Added
+
+- `+` modifier for `\beginverse`, enabling the larger melody-note line spacing
+  previously selected by a separate verse command. It composes with the
+  existing unnumbered `*` modifier and `[n]` indentation as
+  `\beginverse*+[n]`.
+
+### Changed
+
+- `ulsbs-migrate-syntax-v1` now converts legacy melody-spaced verse delimiters
+  to `\beginverse+...\endverse` while preserving numbering and indentation.
+- Song metadata extraction and the VS Code extension now recognize every
+  supported `\beginverse` modifier combination through the single canonical
+  verse construct.
+
+### Removed
+
+- The separate melody-spaced verse commands. Use `\beginverse+` and
+  `\endverse` instead, and run `ulsbs-migrate-syntax-v1` on existing sources.
+
 ## [0.2.1] - 2026-09-26
 
 ### Added

@@ -35,7 +35,13 @@ It understands ULSBS-specific structures such as:
 ```tex
 \beginsong ... \endsong
 \beginverse ... \endverse
-\mnbeginverse ... \mnendverse
+\beginverse[n] ... \endverse
+\beginverse* ... \endverse
+\beginverse*[n] ... \endverse
+\beginverse+ ... \endverse
+\beginverse+[n] ... \endverse
+\beginverse*+ ... \endverse
+\beginverse*+[n] ... \endverse
 \beginrep ... \endrep
 \begin{songs} ... \end{songs}
 \begin{translation} ... \end{translation}

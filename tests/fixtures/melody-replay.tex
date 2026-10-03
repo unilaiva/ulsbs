@@ -22,9 +22,9 @@
     \[^<E>]note-only \[^]chord \[^<F>]note-only \[^]chord
   \endverse
   \newchords{melodyexclude}
-  \mnbeginverse\memorize[melodyexclude]
+  \beginverse+\memorize[melodyexclude]
     \[<!C*>G]stored one \[^<D*>Am]excluded \[<E*>C]stored two
-  \mnendverse
+  \endverse
   \ExplSyntaxOn
   \tl_set:No \l_tmpa_tl {\the\cs:w SB@cr@melodyexclude\cs_end:}
   \typeout{ULSBS-REGISTER-BEGIN:\tl_to_str:V \l_tmpa_tl :ULSBS-REGISTER-END}

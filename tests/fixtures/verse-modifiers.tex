@@ -1,0 +1,60 @@
+\documentclass[paper={a5paper},maintitle={Verse Modifiers Test}]{ulsbs-songbook}
+\makeatletter
+\def\ULtestverse#1#2{%
+  \ifdim\tmp@UL@currentverseextraindentwidth=#1\relax\else
+    \errmessage{verse indentation did not match #1}%
+  \fi
+  \ifdim\baselineadj=#2\relax\else
+    \errmessage{verse baseline did not match #2}%
+  \fi
+}
+\def\ULtestverseended{\ifdim\baselineadj=2pt\relax\else
+  \errmessage{verse baseline was not restored}\fi}
+\def\ULtestnumbered{\ifvnumbered\else\errmessage{verse was not numbered}\fi}
+\def\ULtestunnumbered{\ifvnumbered\errmessage{verse was numbered}\fi}
+\def\ULtestmelodyverse#1{%
+  \ifdim\tmp@UL@currentverseextraindentwidth=#1\relax\else
+    \errmessage{melody verse indentation did not match #1}\fi
+  \ifdim\baselineadj>2pt\relax\else
+    \errmessage{melody verse baseline was not increased}\fi}
+\makeatother
+\begin{document}
+\begin{songs}{}
+\beginsong{Verse Modifiers}
+  \baselineadj=2pt
+  \beginverse\ULtestverse{0pt}{2pt}\ULtestnumbered
+    |\[C]Plain verse.
+  \endverse\ULtestverseended
+  \beginverse[2]\ULtestverse{\dimexpr2\verseindentwidthbase\relax}{2pt}\ULtestnumbered
+    |\[C]Indented verse.
+  \endverse\ULtestverseended
+  \beginverse*\ULtestverse{0pt}{2pt}\ULtestunnumbered
+    |\[C]Unnumbered verse.
+  \endverse\ULtestverseended
+  \beginverse*[2]\ULtestverse{\dimexpr2\verseindentwidthbase\relax}{2pt}\ULtestunnumbered
+    |\[C]Unnumbered indented verse.
+  \endverse\ULtestverseended
+  \beginverse+\ULtestmelodyverse{0pt}\ULtestnumbered
+    |\[<C>Am]Melody verse.
+  \endverse\ULtestverseended
+  \beginverse+[2]\ULtestmelodyverse{\dimexpr2\verseindentwidthbase\relax}\ULtestnumbered
+    |\[<C>Am]Indented melody verse.
+  \endverse\ULtestverseended
+  \beginverse*+\ULtestmelodyverse{0pt}\ULtestunnumbered
+    |\[<C>Am]Unnumbered melody verse.
+  \endverse\ULtestverseended
+  \beginverse*+[2]\ULtestmelodyverse{\dimexpr2\verseindentwidthbase\relax}\ULtestunnumbered
+    |\[<C>Am]Unnumbered indented melody verse.
+  \endverse\ULtestverseended
+  \notesoff
+  \beginverse+\ULtestverse{0pt}{2pt}
+    |\[C]Hidden melody notes leave baseline alone.
+  \endverse\ULtestverseended
+  \noteson
+\endsong
+\end{songs}
+\makeatletter
+\ifcsname mnbeginverse\endcsname\errmessage{obsolete verse start still defined}\fi
+\ifcsname mnendverse\endcsname\errmessage{obsolete verse end still defined}\fi
+\makeatother
+\end{document}

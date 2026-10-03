@@ -230,6 +230,7 @@
     "compile-web": "node esbuild.web.mjs",
     "watch-web": "node esbuild.web.mjs --watch",
     "test:grammar": "node test/grammar-fixtures.js",
+    "test:verse": "node test/verse.js",
     "package": "npm run compile-web && vsce package"
   },
   "devDependencies": {

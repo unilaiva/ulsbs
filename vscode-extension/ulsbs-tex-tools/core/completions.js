@@ -63,9 +63,6 @@ function computeCompletionContext(document, position) {
   let feelerDepth = 0;
   let intersongDepth = 0;
 
-  /** @type {Array<'verse'|'mnverse'>} */
-  const verseStack = [];
-
   for (let line = 0; line <= position.line; line++) {
     let text = document.lineAt(line).text;
     if (line === position.line) {
@@ -102,27 +99,8 @@ function computeCompletionContext(document, position) {
 
       if (token.type === "beginverse") {
         verseDepth += 1;
-        verseStack.push("verse");
-      } else if (token.type === "mnbeginverse") {
-        verseDepth += 1;
-        verseStack.push("mnverse");
       } else if (token.type === "endverse") {
         verseDepth = Math.max(0, verseDepth - 1);
-        // Best-effort stack unwind
-        for (let i = verseStack.length - 1; i >= 0; i--) {
-          if (verseStack[i] === "verse") {
-            verseStack.splice(i, 1);
-            break;
-          }
-        }
-      } else if (token.type === "mnendverse") {
-        verseDepth = Math.max(0, verseDepth - 1);
-        for (let i = verseStack.length - 1; i >= 0; i--) {
-          if (verseStack[i] === "mnverse") {
-            verseStack.splice(i, 1);
-            break;
-          }
-        }
       }
 
       if (token.type === "beginrep") {
@@ -184,8 +162,7 @@ function computeCompletionContext(document, position) {
     inFeeler: feelerDepth > 0,
     inIntersong: intersongDepth > 0,
 
-    inChordLine,
-    currentVerseType: verseStack.length ? verseStack[verseStack.length - 1] : null
+    inChordLine
   };
 }
 
@@ -480,20 +457,18 @@ function registerCompletionProvider(vscode, context) {
               snippet: "beginsong{${1:title}}\n\t$0\n\\endsong",
               isAllowed: (ctx) => !ctx.inSong
             },
-            {
-              name: "beginverse",
-              title: "Verse (ULSBS)",
-              doc: "Insert a `\\beginverse` ... `\\endverse` block (only inside a song).",
-              snippet: "beginverse\n\t$0\n\\endverse",
-              isAllowed: (ctx) => ctx.inSong && !ctx.inVerse
-            },
-            {
-              name: "mnbeginverse",
-              title: "Verse (MN: with space for melody note hints, ULSBS)",
-              doc: "Insert a `\\mnbeginverse` ... `\\mnendverse` block (only inside a song).",
-              snippet: "mnbeginverse\n\t$0\n\\mnendverse",
-              isAllowed: (ctx) => ctx.inSong && !ctx.inVerse
-            },
+            ...["", "*", "+", "*+"].flatMap((suffix) =>
+              [false, true].map((numbered) => {
+                const name = `beginverse${suffix}${numbered ? "[n]" : ""}`;
+                return {
+                  name,
+                  title: "Verse (ULSBS)",
+                  doc: `Insert a \`\\${name}\` ... \`\\endverse\` block (only inside a song).`,
+                  snippet: `beginverse${suffix}${numbered ? "[${1:n}]" : ""}\n\t$0\n\\endverse`,
+                  isAllowed: (ctx) => ctx.inSong && !ctx.inVerse
+                };
+              })
+            ),
             {
               name: "beginrep",
               title: "Repetition (ULSBS)",
@@ -531,18 +506,7 @@ function registerCompletionProvider(vscode, context) {
               insert: "endverse",
               title: "ULSBS macro",
               doc: "Close a `\\beginverse` block.",
-              isAllowed: (ctx) =>
-                ctx.inVerse &&
-                (ctx.currentVerseType === "verse" || ctx.currentVerseType == null)
-            },
-            {
-              name: "mnendverse",
-              insert: "mnendverse",
-              title: "ULSBS macro",
-              doc: "Close a `\\mnbeginverse` block.",
-              isAllowed: (ctx) =>
-                ctx.inVerse &&
-                (ctx.currentVerseType === "mnverse" || ctx.currentVerseType == null)
+              isAllowed: (ctx) => ctx.inVerse
             },
             {
               name: "endrep",

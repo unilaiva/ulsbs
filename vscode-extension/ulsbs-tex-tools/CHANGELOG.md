@@ -5,6 +5,20 @@ the extension is released.
 
 ## [Unreleased]
 
+### Added
+
+- Editing support for every canonical `\beginverse` modifier combination,
+  including unnumbered `*`, melody-spacing `+`, and `[n]` indentation.
+
+### Changed
+
+- Unified verse parsing, outlines, completions, region tracking, folding, and
+  indentation around `\beginverse...\endverse` as the sole verse construct.
+
+### Removed
+
+- Support for the separate legacy melody-spaced verse delimiters.
+
 ## [0.2.1] - 2026-09-26
 
 ### Changed

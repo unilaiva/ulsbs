@@ -56,7 +56,6 @@ function symbolFromOutlineNode(vscode, node) {
   const kindByType = {
     song: vscode.SymbolKind.Module,
     verse: vscode.SymbolKind.Namespace,
-    mnverse: vscode.SymbolKind.Namespace,
     translation: vscode.SymbolKind.Namespace,
     lilypond: vscode.SymbolKind.Namespace,
     explanation: vscode.SymbolKind.Namespace,

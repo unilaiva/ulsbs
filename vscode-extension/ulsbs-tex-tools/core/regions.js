@@ -7,6 +7,8 @@
  * @module
  */
 
+const { tokenizeSongLine } = require("./songsyntax");
+
 /**
  * Update verse region state for the next line.
  * @param {boolean} prevInVerse
@@ -14,21 +16,15 @@
  * @returns {{lineInVerse: boolean, nextInVerse: boolean}}
  */
 function updateVerseState(prevInVerse, code) {
-  const hasBeginVerse = /\\beginverse\b|\\mnbeginverse\b/.test(code);
-  const hasEndVerse = /\\endverse\b|\\mnendverse\b/.test(code);
-
-  const lineInVerse = prevInVerse || hasBeginVerse;
-
-  let nextInVerse;
-  if (hasEndVerse && hasBeginVerse) {
-    // close previous verse, open new verse: stay inside for next line
-    nextInVerse = true;
-  } else if (hasEndVerse) {
-    nextInVerse = false;
-  } else if (hasBeginVerse) {
-    nextInVerse = true;
-  } else {
-    nextInVerse = prevInVerse;
+  let nextInVerse = prevInVerse;
+  let lineInVerse = prevInVerse;
+  for (const token of tokenizeSongLine(code, 0)) {
+    if (token.type === "beginverse") {
+      lineInVerse = true;
+      nextInVerse = true;
+    } else if (token.type === "endverse") {
+      nextInVerse = false;
+    }
   }
 
   return { lineInVerse, nextInVerse };
