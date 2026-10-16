@@ -1,0 +1,80 @@
+\documentclass[paper={a5paper},maintitle={Unknown Uppercase Accidentals}]{ulsbs-songbook}
+\makeatletter
+\newcount\ULtestunknownfactor
+\newcommand\ULtestunknownlog[3]{%
+  \def\shrp{SHARP}\def\flt{FLAT}%
+  \edef\ULtestunknownresult{\the\SB@toks}%
+  \typeout{ULUNKNOWN:\ULtestunknownkey:#1:#2:#3:\ULtestunknownresult}}
+\newcommand\ULtestunknowncase[2]{%
+  \ULtestunknownfactor=-2
+  \loop
+    \begingroup
+    \UL@pdfalternatefalse
+    \SB@transposefactor=\ULtestunknownfactor
+    \SB@dotranspose{#2}%
+    \ULtestunknownlog{source}{\the\ULtestunknownfactor}{#1}%
+    \endgroup
+    \advance\ULtestunknownfactor by 2
+  \ifnum\ULtestunknownfactor<3\repeat
+  \ULtestunknownfactor=0
+  \loop
+    \begingroup
+    \UL@pdfalternatetrue
+    \UL@pdfspellprepare{\the\ULtestunknownfactor}%
+    \SB@dotranspose{#2}%
+    \ULtestunknownlog{alternate}{\the\ULtestunknownfactor}{#1}%
+    \endgroup
+    \begingroup
+    \UL@pdfalternatetrue
+    \UL@pdfspellprepare{\the\ULtestunknownfactor}%
+    % Typography converts canonical input at zero, even after a key hook.
+    \SB@transposefactor=0\SB@convertnotestrue
+    \notenamesout abcdefg%
+    \SB@dotranspose{#2}%
+    \ULtestunknownlog{zero}{\the\ULtestunknownfactor}{#1}%
+    \endgroup
+    \advance\ULtestunknownfactor by 1
+  \ifnum\ULtestunknownfactor<12\repeat}
+\newcommand\ULtestunknownprobes[1]{%
+  \def\ULtestunknownkey{#1}%
+  \ULtestunknowncase{CDs}{CD\shrp}%
+  \ULtestunknowncase{CDf}{CD\flt}%
+  \ULtestunknowncase{NCs}{NC\shrp}%
+  \ULtestunknowncase{NCf}{NC\flt}%
+  \ULtestunknownfactor=0
+  \loop
+    \begingroup
+    \UL@pdfalternatetrue
+    \UL@pdfspellprepare{\the\ULtestunknownfactor}%
+    \SB@transposefactor=0\SB@convertnotestrue
+    \notenamesout abcdefg%
+    \SB@dotranspose{C\shrp}%
+    \ULtestunknownlog{zero}{\the\ULtestunknownfactor}{Cs}%
+    \endgroup
+    \advance\ULtestunknownfactor by 1
+  \ifnum\ULtestunknownfactor<12\repeat}
+\makeatother
+\begin{document}
+\begin{songs}{}
+\beginsong{Known Key Unknown Text}[id={fixture-1},key={C}]
+\ULtestunknownprobes{known}
+\transpose{2}
+\beginverse
+\[CD#]KnownSequenceSharp
+\[CD&]KnownSequenceFlat
+\[NC#]KnownTextSharp
+\[NC&]KnownTextFlat
+\endverse
+\endsong
+\beginsong{Missing Key Unknown Text}[id={fixture-2}]
+\ULtestunknownprobes{missing}
+\transpose{2}
+\beginverse
+\[CD#]MissingSequenceSharp
+\[CD&]MissingSequenceFlat
+\[NC#]MissingTextSharp
+\[NC&]MissingTextFlat
+\endverse
+\endsong
+\end{songs}
+\end{document}

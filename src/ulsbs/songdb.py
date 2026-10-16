@@ -28,9 +28,13 @@ following JSON Schema (draft-07):
         "source_file_relative",
         "total_songs",
         "songs_with_id",
+        "has_multikey_info",
+        "multikey_info",
         "creation_time"
       ],
       "properties": {
+        "has_multikey_info": {"type": "boolean"},
+        "multikey_info": {"type": ["object", "null"]},
         "book_info": {"$ref": "#/definitions/BookInfo"},
         "chapters": {
           "type": "array",
@@ -615,6 +619,7 @@ class SongbookData:
             return obj
 
         raw = _strip_optional_null_fields(asdict(self))
+        raw.update(has_multikey_info=False, multikey_info=None)
         return json.dumps(raw, default=_default, indent=indent, ensure_ascii=False) + "\n"
 
     def to_json_file(self, dest: Path, *, indent: int = 2) -> None:

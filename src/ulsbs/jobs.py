@@ -8,24 +8,33 @@ This file is part of the 'ulsbs' package.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import re
 from typing import List
 
 from .config import Config
-from .constants import TEMP_DIRNAME
+from .constants import (
+    BASSCLEF_FNAMEPART,
+    CHARANGO_FNAMEPART,
+    LYRICSONLY_FNAMEPART,
+    MULTIKEY_FNAMEPART,
+    RESULT_JSON_SUBDIRNAME,
+    RESULT_MULTIKEY_SUBDIRNAME,
+    TEMP_DIRNAME,
+)
 from .util import read_text, regex_documentclass_ulsbs_songbook
 
 
 @dataclass(frozen=True)
 class Job:
-    """One compilation job (document + variant + paths)."""
+    """One compilation job (document + variant + edition + paths)."""
 
     doc_tex_abs: Path
     doc_stem: str
     variant: str
     compile_dir: Path
+    multikey: bool = False
 
 
 def variant_possible_lyrics(doc_tex_abs: Path) -> bool:
@@ -88,12 +97,25 @@ def build_variant_basename(original_base: str, insert: str) -> str:
     return original_base[:idx] + insert + original_base[idx:]
 
 
+def build_job_basename(job: Job) -> str:
+    """Build the edition/variant name while preserving standard filenames."""
+    variant_marker = {
+        "default": "",
+        "lyrics": LYRICSONLY_FNAMEPART,
+        "charango": CHARANGO_FNAMEPART,
+        "bassclef": BASSCLEF_FNAMEPART,
+    }[job.variant]
+    marker = (MULTIKEY_FNAMEPART if job.multikey else "") + variant_marker
+    return build_variant_basename(job.doc_stem, marker)
+
+
 def build_job_queue(cfg: Config) -> List[Job]:
     """Build jobs for selected songbooks and allowed variants."""
     project_root = cfg.runtime.project_paths.project_root
     jobs: List[Job] = []
     for doc in cfg.songbooks:
         base = doc.stem
+        first_job = len(jobs)
         jobs.append(Job(doc, base, "default", project_root / TEMP_DIRNAME / base / "default"))
         if cfg.lyricbooks and variant_possible_lyrics(doc):
             jobs.append(Job(doc, base, "lyrics", project_root / TEMP_DIRNAME / base / "lyrics"))
@@ -105,4 +127,34 @@ def build_job_queue(cfg: Config) -> List[Job]:
             jobs.append(
                 Job(doc, base, "bassclef", project_root / TEMP_DIRNAME / base / "bassclef")
             )
+        if cfg.multikey_books:
+            standard_jobs = jobs[first_job:]
+            jobs.extend(
+                replace(
+                    job,
+                    multikey=True,
+                    compile_dir=job.compile_dir.with_name(f"{job.variant}-multikey"),
+                )
+                for job in standard_jobs
+                if job.variant != "lyrics"
+            )
+    # Distinct job locks do not protect a shared publication destination.
+    outputs: dict[Path, Job] = {}
+    for job in jobs:
+        basename = build_job_basename(job)
+        pdf_dir = Path(RESULT_MULTIKEY_SUBDIRNAME) if job.multikey else Path()
+        destinations = [pdf_dir / (basename + ".pdf")]
+        if cfg.json:
+            # JSON remains shared even when PDF editions have separate folders.
+            destinations.append(Path(RESULT_JSON_SUBDIRNAME) / (basename + ".json"))
+        for destination in destinations:
+            if destination in outputs:
+                previous = outputs[destination]
+                raise ValueError(
+                    f"Output filename collision for {str(destination)!r}: "
+                    f"{previous.doc_tex_abs} ({previous.variant}, multikey={previous.multikey}) and "
+                    f"{job.doc_tex_abs} ({job.variant}, multikey={job.multikey}). "
+                    "Rename a source document or change the selected variants/editions."
+                )
+            outputs[destination] = job
     return jobs

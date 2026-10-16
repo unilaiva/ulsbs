@@ -9,14 +9,17 @@ This file is part of the 'ulsbs' package.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .constants import (
     RESULTLIST_SEPARATOR,
     RESULT_TYPE_INFO,
     RESULTLIST_BASENAME,
 )
-from .pipeline import ParallelRunResult
 from .util import ensure_dir, read_text, create_unique_id, current_time_human_readable
+
+if TYPE_CHECKING:
+    from .pipeline import ParallelRunResult
 
 # Module-level variables, all initialized by initialize()
 _initialized: bool = False

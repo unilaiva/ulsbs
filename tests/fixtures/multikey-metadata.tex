@@ -1,0 +1,71 @@
+\providecommand{\MetadataSongID}{repeat-song}
+\documentclass[paper={a5paper},maintitle={Multikey Metadata}]{ulsbs-songbook}
+\begin{document}
+\pagestyle{empty}
+\pagenumbering{roman}
+Preliminary page.
+\clearpage
+\pagenumbering{arabic}
+\begin{songs}{}
+\beginsong{First Header}[id={\MetadataSongID},key={Am},ph={I}]
+\beginverse
+\[<C D;E F>Am]FirstBody
+\endverse
+\endsong
+\end{songs}
+\clearpage
+\pagenumbering{arabic}
+\setcounter{songnum}{1}
+\begin{songs}{}
+\beginsong{Second Header}[id={repeat-song},key={C#m}]
+\transpose{2}
+\beginverse
+\[Bm]SecondBody
+\endverse
+\endsong
+\end{songs}
+\clearpage
+\pagenumbering{arabic}
+\setcounter{songnum}{1}
+\begin{songs}{}
+\beginsong{Empty Tag Header}[id={no-key}]
+\beginverse
+\[C]ThirdBody
+\endverse
+\endsong
+\end{songs}
+\clearpage
+\pagenumbering{arabic}
+\setcounter{songnum}{1}
+\begin{songs}{}
+\beginsong{Third Occurrence}[id={repeat-song},key={G&}]
+\beginverse
+\[G&]FourthBody
+\endverse
+\endsong
+\end{songs}
+\clearpage
+\pagenumbering{arabic}
+\setcounter{songnum}{1}
+\begingroup
+\chordsoff
+\shownotesfalse
+\begin{songs}{}
+\beginsong{Hidden Notation}[id={hidden-song},key={Dm}]
+\beginverse
+\[<D>Dm]FifthBody
+\endverse
+\endsong
+\end{songs}
+\endgroup
+\clearpage
+\pagenumbering{arabic}
+\setcounter{songnum}{1}
+\begin{songs}{}
+\beginsong{Missing ID}[key={D}]
+\beginverse
+\[D]SixthBody
+\endverse
+\endsong
+\end{songs}
+\end{document}

@@ -821,7 +821,8 @@ class UI:
         """Format a document label for a Job in a consistent, colored style.
 
         The document stem is colored per-book (stable across the run), and
-        the :<variant> suffix is colored using a fixed mapping.
+        the :<variant> suffix is colored using a fixed mapping. Multikey
+        companion editions have an additional :multikey label.
         """
         doc_color = self._color_for_doc_stem(job.doc_stem)
         variant = job.variant
@@ -831,6 +832,9 @@ class UI:
             inner = f"{doc_color}{job.doc_stem}{self.C_DGRAY}:{variant_color}{variant}{self.C_DGRAY}"
         else:
             inner = f"{doc_color}{job.doc_stem}{self.C_DGRAY}"
+
+        if job.multikey:
+            inner += f":{self.C_CYAN}multikey{self.C_DGRAY}"
 
         return f"{self.C_DGRAY}[{inner}]{self.C_RESET}"
 

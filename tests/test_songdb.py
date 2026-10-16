@@ -6,8 +6,19 @@
 from __future__ import annotations
 
 import unittest
+import json
+from pathlib import Path
 
-from ulsbs.songdb import _extract_lyrics_from_song_block
+from ulsbs.songdb import BookInfo, SongbookData, _extract_lyrics_from_song_block
+
+
+class SongbookJsonTests(unittest.TestCase):
+    def test_ordinary_json_explicitly_has_no_multikey_info(self) -> None:
+        database = SongbookData(BookInfo(maintitle="Book"), [], [], Path("book.tex"), 0, 0, "fixed")
+        data = json.loads(database.to_json())
+        self.assertIs(data["has_multikey_info"], False)
+        self.assertIsNone(data["multikey_info"])
+        self.assertEqual(data["book_info"]["maintitle"], "Book")
 
 
 class VerseExtractionTests(unittest.TestCase):

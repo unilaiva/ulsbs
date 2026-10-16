@@ -20,32 +20,49 @@ TEX_ASSETS = ROOT / "src" / "ulsbs" / "assets" / "tex"
 REPEAT_RECTANGLE = re.compile(rb"(?:^|\s)1\.395\s+(-?\d+(?:\.\d+)?)\s+re\s+f(?:\s|$)")
 
 
-def compile_fixture(name: str, *, expect_success: bool = True) -> tuple[str, bytes]:
+def compile_fixture(
+    name: str, *, expect_success: bool = True, preamble: str = "", passes: int = 1,
+    draft_passes: int = 0, files: dict[str, bytes] | None = None, multikey: bool | None = True,
+    artifacts: dict[str, bytes | None] | None = None,
+) -> tuple[str, bytes]:
     source = FIXTURES / f"{name}.tex"
     with tempfile.TemporaryDirectory(prefix=f"ulsbs-test-{name}-") as temporary:
         workdir = Path(temporary)
         shutil.copy2(source, workdir / source.name)
+        # Exercise the layered renderer by default; explicit fixture overrides
+        # still win. Production/manual builds default to conventional notation.
+        edition = "true" if multikey else "false"
+        definition = "" if multikey is None else f"\\providecommand{{\\ulPdfTranspositionLayers}}{{{edition}}}\n"
+        (workdir / source.name).write_text(
+            preamble + definition + source.read_text()
+        )
+        for filename, contents in (files or {}).items():
+            (workdir / filename).write_bytes(contents)
         cache = workdir / "texmf-cache"
         cache.mkdir()
         env = os.environ.copy()
         env["TEXINPUTS"] = f"{TEX_ASSETS}//{os.pathsep}{env.get('TEXINPUTS', '')}"
         env["TEXMFVAR"] = str(cache)
         env["TEXMFCACHE"] = str(cache)
-        result = subprocess.run(
-            [
-                "lualatex",
-                "-file-line-error",
-                "-halt-on-error",
-                "-interaction=nonstopmode",
-                source.name,
-            ],
-            cwd=workdir,
-            env=env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-        )
+        command = [
+            "lualatex",
+            "-file-line-error",
+            "-halt-on-error",
+            "-interaction=nonstopmode",
+            source.name,
+        ]
+        for pass_number in range(passes):
+            result = subprocess.run(
+                command[:1] + (["-draftmode"] if pass_number < draft_passes else []) + command[1:],
+                cwd=workdir,
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            if result.returncode:
+                break
         if result.returncode and expect_success:
             raise AssertionError(f"LuaLaTeX failed for {source.name}:\n{result.stdout}")
         if not result.returncode and not expect_success:
@@ -53,6 +70,10 @@ def compile_fixture(name: str, *, expect_success: bool = True) -> tuple[str, byt
         pdf = workdir / f"{source.stem}.pdf"
         if not pdf.is_file() and expect_success:
             raise AssertionError(f"LuaLaTeX did not produce {pdf.name}")
+        if artifacts is not None:
+            for filename in artifacts:
+                path = workdir / filename
+                artifacts[filename] = path.read_bytes() if path.is_file() else None
         return result.stdout, pdf.read_bytes() if pdf.is_file() else b""
 
 

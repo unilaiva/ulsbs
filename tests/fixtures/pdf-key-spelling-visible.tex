@@ -1,0 +1,61 @@
+\documentclass[paper={a5paper},maintitle={Visible Key Spelling}]{ulsbs-songbook}
+\begin{document}
+\begin{songs}{}
+\beginsong{Degree Preserving Major}[id={fixture-1},key={C}]
+\beginverse
+\[F]MajorFour
+\[G#]MajorRaisedFive
+\[Fmaj7/G#]MajorSlash
+\[<F>]MajorMelody
+\[<G#>]MajorAlteredMelody
+\[G&]MajorRawFlat
+\[G\flt]MajorGlyphFlat
+\endverse
+\newchords{keyspellreplay}
+\beginverse\memorize[keyspellreplay]
+\[<G#>F]MajorStored
+\endverse
+\beginverse\replay[keyspellreplay]
+^MajorReplayed
+\endverse
+\endsong
+\beginsong{Signed Major Alteration}[id={fixture-2},key={G}]
+\beginverse
+\[F]MajorFlatSeven
+\[<F>]MajorFlatSevenMelody
+\endverse
+\endsong
+\beginsong{Natural Minor Alterations}[id={fixture-3},key={Am}]
+\beginverse
+\[G#]MinorRaisedSeven
+\[F#]MinorRaisedSix
+\[G]MinorSeven
+\[F]MinorSix
+\[<G# F# G F>]MinorMelody
+\endverse
+\endsong
+\beginsong{Effective Metadata}[id={fixture-4},key={D}]
+\transpose{2}
+\beginverse
+\[C]EffectiveTonic
+\[<C>]EffectiveMelody
+\endverse
+\endsong
+\beginsong{Sharp Major Tonic}[id={fixture-5},key={F#}]
+\beginverse \[F#]SharpMajorTonic \endverse
+\endsong
+\beginsong{Sharp Minor Tonic}[id={fixture-6},key={D#m}]
+\beginverse \[D#m]SharpMinorTonic \endverse
+\endsong
+\begingroup\preferflats
+\beginsong{Missing Metadata}[id={fixture-7}]
+\beginverse \[Fmaj7/G#]MissingFallback \endverse
+\endsong
+\endgroup
+\begingroup\preferflats
+\beginsong{Unsupported Metadata}[id={fixture-8},key={Ddor}]
+\beginverse \[Fmaj7/G#]UnsupportedFallback \endverse
+\endsong
+\endgroup
+\end{songs}
+\end{document}

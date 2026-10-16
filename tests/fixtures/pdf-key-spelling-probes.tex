@@ -1,0 +1,71 @@
+\documentclass[paper={a5paper},maintitle={Key Spelling Probes}]{ulsbs-songbook}
+\makeatletter
+\newcount\ULtestoffset
+\newcommand\ULtestprobe[2]{%
+  \begingroup
+  % Match the visual pipeline: this input is already source-transposed.
+  \UL@pdfalternatetrue
+  \UL@pdfspellprepare{\the\ULtestoffset}%
+  \SB@dotranspose{#2}%
+  \def\shrp{SHARP}\def\flt{FLAT}%
+  \edef\ULtestresult{\the\SB@toks}%
+  \typeout{ULSPELL:\ULtestcase:\the\ULtestoffset:#1:\ULtestresult}%
+  \endgroup}
+\newcommand\ULtestprobes[1]{%
+  \def\ULtestcase{#1}%
+  \edef\ULtestbefore{\the\SB@transposefactor,%
+    \ifSB@prefshrps sharp\else flat\fi,%
+    \ifSB@needkey auto\else fixed\fi}%
+  \ULtestoffset=1
+  \loop
+    \ULtestprobe{C}{C}\ULtestprobe{Cs}{C\shrp}\ULtestprobe{Cf}{C\flt}%
+    \ULtestprobe{D}{D}\ULtestprobe{Ds}{D\shrp}\ULtestprobe{Df}{D\flt}%
+    \ULtestprobe{E}{E}\ULtestprobe{Es}{E\shrp}\ULtestprobe{Ef}{E\flt}%
+    \ULtestprobe{F}{F}\ULtestprobe{Fs}{F\shrp}\ULtestprobe{Ff}{F\flt}%
+    \ULtestprobe{G}{G}\ULtestprobe{Gs}{G\shrp}\ULtestprobe{Gf}{G\flt}%
+    \ULtestprobe{A}{A}\ULtestprobe{As}{A\shrp}\ULtestprobe{Af}{A\flt}%
+    \ULtestprobe{B}{B}\ULtestprobe{Bs}{B\shrp}\ULtestprobe{Bf}{B\flt}%
+    \ULtestprobe{slash}{Fmaj7/G\shrp}%
+    \ULtestprobe{suffix}{G\shrp m7(add9)/F\shrp}%
+    \advance\ULtestoffset by 1
+  \ifnum\ULtestoffset<12\repeat
+  \edef\ULtestafter{\the\SB@transposefactor,%
+    \ifSB@prefshrps sharp\else flat\fi,%
+    \ifSB@needkey auto\else fixed\fi}%
+  \ifx\ULtestbefore\ULtestafter\else
+    \PackageError{key-spelling-probes}{Alternative spelling leaked source state}{}%
+  \fi
+  \typeout{ULSTATE:#1:\ULtestafter}}
+\makeatother
+\begin{document}
+\begin{songs}{}
+\beginsong{C Major Probes}[id={fixture-1},key={C}]
+\ULtestprobes{C}
+{\preferflats\ULtestprobes{Cflats}}
+{\prefersharps\ULtestprobes{Csharps}}
+\beginverse \[C]Probe \endverse
+\endsong
+\beginsong{G Major Probes}[id={fixture-2},key={G}]
+\ULtestprobes{G}\beginverse \[G]Probe \endverse
+\endsong
+\beginsong{A Minor Probes}[id={fixture-3},key={Am}]
+\ULtestprobes{Am}\beginverse \[Am]Probe \endverse
+\endsong
+\beginsong{Sharp Major Probes}[id={fixture-4},key={F#}]
+\ULtestprobes{Fs}\beginverse \[F#]Probe \endverse
+\endsong
+\beginsong{Sharp Minor Probes}[id={fixture-5},key={D#m}]
+\ULtestprobes{Dsm}\beginverse \[D#m]Probe \endverse
+\endsong
+\beginsong{Flat Major Probes}[id={fixture-6},key={D&}]
+\ULtestprobes{Df}\beginverse \[D&]Probe \endverse
+\endsong
+\beginsong{Flat Minor Probes}[id={fixture-7},key={B&m}]
+\ULtestprobes{Bfm}\beginverse \[B&m]Probe \endverse
+\endsong
+\beginsong{Effective Key Probes}[id={fixture-8},key={D}]
+\transpose{2}
+\ULtestprobes{effectiveD}\beginverse \[C]Probe \endverse
+\endsong
+\end{songs}
+\end{document}

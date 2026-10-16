@@ -106,6 +106,9 @@ class Config:
     midifiles_allow_for_optional_variants: bool = False
     audiofiles_allow_for_optional_variants: bool = False
     fast_audio_encode: bool = False
+    multikey_books: bool = True
+    multikey_layer_ui: str = "native"
+    multikey_require_song_ids: bool = False
 
     # Container resources (GiB)
     # NOTE: container_memory_unlimited is only used to decide whether to pass
@@ -591,6 +594,9 @@ _ALLOWED_FILE_KEYS: Set[str] = {
     "audiofiles_allow_for_optional_variants",
     "extrainstrumentbooks",
     "lyricbooks",
+    "multikey_books",
+    "multikey_layer_ui",
+    "multikey_require_song_ids",
     # Files
     "songbooks",
     "common_deploy_icons",
@@ -675,7 +681,9 @@ def _resolve_profile_data(
             # Only 'default' is implicitly allowed/created; all others must exist
             raise ValueError(f"Profile '{name}' not found in configuration")
         seen.add(name)
-        data = dict(profiles[name])
+        # Resolve aliases at each level so an inherited no-* cannot override
+        # an explicit positive setting in a descendant profile.
+        data = _apply_negations(dict(profiles[name]))
         parent = data.pop("inherit_from", None)
         # Per-profile merge policy: a list of keys whose array values should be merged
         merge_keys_raw = data.pop("merge_keys", None)
@@ -734,6 +742,19 @@ def build_config(
     prof_eff = _apply_negations(prof_eff)
     _ensure_known_keys(f"profile '{profile}'", prof_eff, _ALLOWED_FILE_KEYS)
 
+    for data in (flat, prof_eff):
+        if "multikey_books" in data and not isinstance(
+            data["multikey_books"], bool
+        ):
+            raise ValueError("multikey-books must be a boolean")
+        if "multikey_require_song_ids" in data and not isinstance(
+            data["multikey_require_song_ids"], bool
+        ):
+            raise ValueError("multikey-require-song-ids must be a boolean")
+        if "multikey_layer_ui" in data and data["multikey_layer_ui"] not in (
+            "native", "hidden"
+        ):
+            raise ValueError("multikey-layer-ui must be 'native' or 'hidden'")
     project_root = Path(runtime_project_paths.project_root)
 
     # Start from defaults
@@ -837,6 +858,10 @@ def build_config(
             cli_over["extrainstrumentbooks"] = False
         if getattr(args_ns, "no_lyric", False):
             cli_over["lyricbooks"] = False
+        if getattr(args_ns, "no_multikey", False):
+            cli_over["multikey_books"] = False
+        if getattr(args_ns, "require_song_ids", False):
+            cli_over["multikey_require_song_ids"] = True
         if getattr(args_ns, "quick", False):
             cli_over["quick"] = True
         if getattr(args_ns, "fast_audio_encode", False):
@@ -1144,6 +1169,7 @@ def build_config(
             clean_temp=False,
             extrainstrumentbooks=False,
             lyricbooks=False,
+            multikey_books=False,
             midifiles=False,
             audiofiles=False,
         )

@@ -1,0 +1,26 @@
+\documentclass[paper={a5paper},maintitle={Layer Scaling Test}]{ulsbs-songbook}
+\makeatletter
+\newcount\ULtestsideeffects
+\newcommand{\ULtestsideeffect}{\global\advance\ULtestsideeffects by 1 C}
+\let\ULtestoriginalscalebox\scalebox
+\newcommand{\ULtestrecordscale}[2]{%
+  \typeout{ULSBS-SCALE:\ULtestcase:\UL@pdfscale:\strip@pt\wd\UL@pdfbasebox:\strip@pt\wd\UL@pdfaltbox}%
+  \ULtestoriginalscalebox{#1}{#2}}
+\makeatother
+\begin{document}
+\begin{songs}{}
+\beginsong{Scaling Cases}[id={fixture-1}]
+  \beginverse
+    \[{\ULtestsideeffect}]Command-bearing source group.
+  \endverse
+  \typeout{ULSBS-GROUP-SIDEEFFECT:\the\ULtestsideeffects}
+  \makeatletter
+  {\let\scalebox\ULtestrecordscale\ulChordFont
+    \def\ULtestcase{wide}\UL@pdfvisual{C\shrp m}{\@firstofone}{1}
+    \def\ULtestcase{short}\UL@pdfvisual{C}{\@firstofone}{1}
+    \def\ULtestcase{equal}\UL@pdfvisual{X}{\@firstofone}{1}
+    \def\ULtestcase{empty}\UL@pdfvisual{}{\@firstofone}{1}}
+  \makeatother
+\endsong
+\end{songs}
+\end{document}

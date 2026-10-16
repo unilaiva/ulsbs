@@ -1,0 +1,39 @@
+\documentclass[paper={a5paper},maintitle={Layer Layout Test}]{ulsbs-songbook}
+\begin{document}
+\begin{songs}{}
+\beginsong{First Layer Song}[id={fixture-1},key={C}]
+  \beginverse
+    \[Am]Opening words \[E7]with longer lyric phrases \[F#m/C#]and slash chords.
+    \[<* C D;E F @ .3em>Asus2]Combined melody \[<A _ C;E _ G>]empty slots.
+    \[<!C>]Zero advance \[</>Am]unpitched \[<* @ 1em>]shared beat.
+    \[<C D @ -.4em>]Negative offset \[G]\[<*>]adjacent annotations.
+  \endverse
+  {\melodyStyleMapping{swapped}\melodySecondaryPosition{below}
+    \beginverse
+      \[<C# D&;A C>Am7]Swapped secondary notes and accidental hints.
+    \endverse}
+  \notesoff
+  \beginverse
+    \[<* C>G]Hidden notes with a visible beat.
+  \endverse
+  \noteson
+  \beginverse
+    \[C\kern.5em]Dimension argument \[C\textsuperscript7]unbraced suffix.
+    \[F\shrp{}m/C\shrp{}]Explicit accidental groups \[F#\textdegree7]degree suffix.
+  \endverse
+  \newchords{layeradjacent}
+  \beginverse+\memorize[layeradjacent]
+    \[Am]\[<*>]Stored adjacent chord and beat \[<C>]\[<*>]\[<D>]\[G]melody.
+  \endverse
+  \beginverse+\replay[layeradjacent]
+    \[<E>^]\[<*>^]\[<F>^]\[^]Explicit adjacent replay annotations.
+  \endverse
+  \musicnote{Prose \ac{1}{C} example outside verse notation.}
+\endsong
+\beginsong{Second Layer Song}[id={fixture-2},key={G}]
+  \beginverse
+    \[G]Independent song \[<G B;D F#>D7]with independent melody.
+  \endverse
+\endsong
+\end{songs}
+\end{document}

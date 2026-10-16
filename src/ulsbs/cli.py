@@ -80,14 +80,16 @@ def build_arg_parser(ui: UI) -> argparse.ArgumentParser:
     prestr = p.add_argument_group("restricting options")
     prestr.add_argument("--no-deploy", action="store_true", help="Do not copy result files into deploy directory")
     prestr.add_argument("--no-printouts", action="store_true", help="Do not produce extra printouts for home printing")
+    prestr.add_argument("--no-multikey", action="store_true", help="Do not produce multikey companion PDFs")
+    prestr.add_argument("--require-song-ids", action="store_true", help="Require explicit song IDs for multikey publishing validation (multikey PDFs only; otherwise skip songs without IDs with a warning)")
     prestr.add_argument("--no-coverimage", action="store_true", help="Do not produce cover images as .png")
     prestr.add_argument("--no-json", action="store_true", help="Do not produce JSON metadata files")
-    prestr.add_argument("--no-midi", action="store_true", help="Do not produce MIDI files")
+    prestr.add_argument("--no-midi", action="store_true", help="Do not export MIDI files (audio may still need intermediate MIDI)")
     prestr.add_argument("--no-audio", action="store_true", help="Do not produce MP3 audio files")
     prestr.add_argument("--no-lyric", action="store_true", help="Do not produce lyrics-only variant")
     prestr.add_argument("--no-extrainstr", action="store_true", help="Do not produce variants for extra instruments")
     prestr.add_argument("--fast-audio-encode", dest="fast_audio_encode", action="store_true", help="Use faster audio encoding (limiter instead of loudnorm)")
-    prestr.add_argument("--midifiles-allow-for-optional-variants", action="store_true", help="Allow MIDI file generation for optional variants")
+    prestr.add_argument("--midifiles-allow-for-optional-variants", action="store_true", help="Allow MIDI export for optional variants")
     prestr.add_argument("--audiofiles-allow-for-optional-variants", action="store_true", help="Allow audio file generation for optional variants")
 
     pmodes = p.add_argument_group("special modes")
@@ -116,7 +118,7 @@ def print_plan_summary(
     ui.plain("")
     ui.plain(f"  - Project root: {ui.colorize(cfg.runtime.project_paths.host_project_root, ui.C_LBLUE)}")
     ui.plain(f"  - Base profile: {ui.colorize(cfg.profile, ui.C_LBLUE)}")
-    ui.plain(f"  - Songbooks to compile: {ui.colorize(f'{songbooks_count}', ui.C_LBLUE)} {ui.colorize(f'({jobs_count} variant jobs)', ui.C_BLUE)}")
+    ui.plain(f"  - Songbooks to compile: {ui.colorize(f'{songbooks_count}', ui.C_LBLUE)} {ui.colorize(f'({jobs_count} compilation jobs)', ui.C_BLUE)}")
     ui.plain(f"  - Using container: {_yn(cfg.use_container or cfg.runtime.in_container)}"
       + (f" {ui.colorize(f'(engine: {cfg.container_engine})', ui.C_BLUE)}" if (cfg.use_container or cfg.runtime.in_container) else f" {ui.C_YELLOW}(this is not recommended!){ui.C_RESET}"))
     if cfg.runtime.in_container:
@@ -130,9 +132,13 @@ def print_plan_summary(
     ui.plain(f"  - Additional lyrics only variants: {_yn(cfg.lyricbooks)}")
     ui.plain(f"  - Additional extra instrument variants: {_yn(cfg.extrainstrumentbooks)}")
     ui.plain(f"  - Create printouts: {_yn(cfg.create_printouts)}")
+    ui.plain(f"  - Create multikey books: {_yn(cfg.multikey_books)}")
+    if cfg.multikey_books:
+        ui.plain(f"      - Layer UI: {ui.colorize(cfg.multikey_layer_ui, ui.C_LBLUE)}")
+        ui.plain(f"      - Require song IDs (strict publishing): {_yn(cfg.multikey_require_song_ids)}")
     ui.plain(f"  - Extract covers as images: {_yn(cfg.coverimage)}")
     ui.plain(f"  - Create JSON metadata: {_yn(cfg.json)}")
-    ui.plain(f"  - Create MIDI files: {_yn(cfg.midifiles)}")
+    ui.plain(f"  - Export MIDI files: {_yn(cfg.midifiles)}")
     if cfg.midifiles:
         ui.plain(f"      - Also for optional variants: {_yn(cfg.midifiles_allow_for_optional_variants)}")
     ui.plain(f"  - Create audio files: {_yn(cfg.audiofiles)}")
@@ -376,6 +382,12 @@ def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
         threads = str(cfg.runtime.system_info.cpu_threads or '?')
         ui.info_line(f"SYSTEM - cpu threads: {threads}, free memory: {free_mem}, total memory: {total_mem}")
 
+    try:
+        jobs = build_job_queue(cfg=cfg)
+    except ValueError as ex:
+        ui.error_line(f"Compilation plan error: {ex}")
+        return 1
+
     require_tools()
 
     ensure_dir(cfg.runtime.project_paths.temp_dir)
@@ -384,8 +396,6 @@ def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
     # initialize resultfile in temp
     resultlist.initialize(cfg.runtime.project_paths.temp_dir, cfg.runtime.unique_id)
     resultlist.write_header()
-
-    jobs = build_job_queue(cfg=cfg)
 
     print_plan_summary(ui=ui, cfg=cfg, jobs_count=len(jobs))
 
@@ -438,7 +448,7 @@ def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
         ui.plain("")
         ui.fail_line(f"{'All' if len(result.failures) == len(jobs) else 'Some'} jobs failed:")
         for f in result.failures:
-            ui.fail_line(f"  - {f.job.doc_stem}:{f.job.variant} -> {f.reason}")
+            ui.fail_line(f"  - {ui.fmt_doc(f.job)} -> {f.reason}")
         if cfg.deploy:
             ui.plain("")
             ui.nodeploy_line("Nothing is deployed due to failures.")

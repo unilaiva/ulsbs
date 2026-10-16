@@ -199,9 +199,527 @@
 % after including this file, too.
 \RequirePackage[\ulSongbookType]{ext_packages/songs/songs}
 
+% Set these before loading ulsbs (the compiler supplies them from build config).
+\providecommand{\ulPdfTranspositionLayers}{false}
+\providecommand{\ulPdfTranspositionLayerUI}{native}
+\providecommand{\ulPdfTranspositionRequireSongIDs}{false}
+\providecommand{\ulPdfTranspositionMinimumScale}{0.85}
+\newif\ifUL@pdflayers
+\ifdefstring{\ulPdfTranspositionLayers}{true}{\ifchorded\UL@pdflayerstrue\fi}{%
+  \ifdefstring{\ulPdfTranspositionLayers}{false}{}{%
+    \PackageError{ulsbs}{Invalid PDF transposition setting}{Use true or false.}}}
+\ifdefstring{\ulPdfTranspositionLayerUI}{native}{}{%
+  \ifdefstring{\ulPdfTranspositionLayerUI}{hidden}{}{%
+    \PackageError{ulsbs}{Invalid PDF layer UI setting}{Use native or hidden.}}}
+\ifdefstring{\ulPdfTranspositionRequireSongIDs}{true}{}{%
+  \ifdefstring{\ulPdfTranspositionRequireSongIDs}{false}{}{%
+    \PackageError{ulsbs}{Invalid multikey song ID policy}{Use true or false.}}}
+\ifUL@pdflayers\RequirePackage{ocgx2}\fi
+
 % END PACKAGE IMPORTS
 
 \makeatletter% To allow using and rewriting @-containing macros
+
+% PDF transposition layers. Only complete, bounded visual boxes contain marked
+% content; measuring or discarding a box never emits its operators into a page.
+\newcount\UL@pdfsongcount
+\newif\ifUL@pdfsong
+\newif\ifUL@pdfchord
+\newif\ifUL@pdfrightalign
+\newif\ifUL@pdfalternate
+\newif\ifUL@keytranspose\UL@keytransposetrue
+\newsavebox{\UL@pdfbasebox}
+\newsavebox{\UL@pdfaltbox}
+\newsavebox{\UL@pdfresultbox}
+\newsavebox{\UL@pdfanchorbox}
+\let\UL@pdfpreludesongid\@empty
+\ifUL@pdflayers
+  \directlua{ulsbs_multikey=dofile(assert(kpse.find_file("ulsbs-multikey.lua","tex"),
+    "ULSBS multikey Lua module not found"))}
+  \AddToHook{enddocument/afterlastpage}{\directlua{ulsbs_multikey.finish()}}
+\fi
+\ExplSyntaxOn
+\tl_new:N \l_UL_pdf_chunk_tl
+\tl_new:N \l_UL_pdf_output_tl
+\tl_new:N \l_UL_pdf_original_tl
+\tl_new:N \g_UL_transpose_key_tl
+\tl_new:N \l_UL_pdf_key_tl
+\seq_new:N \l_UL_pdf_key_seq
+\prop_new:N \g_UL_pdf_occurrences_prop
+\tl_new:N \l_UL_pdf_source_id_tl
+\tl_new:N \l_UL_pdf_original_key_tl
+\tl_new:N \l_UL_pdf_labels_lua_tl
+\tl_new:N \l_UL_pdf_label_tl
+\int_new:N \l_UL_pdf_occurrence_int
+\cs_generate_variant:Nn \prop_gput:Nnn {NVx}
+\clist_const:Nn \c_UL_pdf_letters_clist {C,D,E,F,G,A,B}
+\clist_const:Nn \c_UL_pdf_natural_clist {0,2,4,5,7,9,11}
+\clist_const:Nn \c_UL_pdf_minor_clist {0,2,3,5,7,8,10}
+\clist_new:N \l_UL_pdf_scale_clist
+\int_new:N \l_UL_pdf_key_letter_int
+\int_new:N \l_UL_pdf_key_pitch_int
+\int_new:N \l_UL_pdf_key_minor_int
+\int_new:N \l_UL_pdf_target_letter_int
+\int_new:N \l_UL_pdf_target_pitch_int
+\int_new:N \l_UL_pdf_declared_letter_int
+\int_new:N \l_UL_pdf_note_letter_int
+\int_new:N \l_UL_pdf_degree_int
+\int_new:N \l_UL_pdf_alteration_int
+\int_new:N \l_UL_pdf_accidental_int
+\bool_new:N \l_UL_pdf_key_available_bool
+\cs_new_eq:NN \UL@normaltrtrans \SB@trtrans
+\cs_new_eq:NN \UL@normaldotranspose \SB@dotranspose
+\cs_generate_variant:Nn \regex_extract_once:nnNTF {nV}
+% Key metadata is already in the effective original key. Cache only its tonic
+% and mode, independently of source transposition and the body's local group.
+\cs_new_protected:Npn \UL_pdf_key_save:
+ {
+  \tl_gclear:N \g_UL_transpose_key_tl
+  \tl_set:Nx \l_UL_pdf_key_tl {\tl_to_str:V \key}
+  \regex_replace_all:nnN {\{\}} {} \l_UL_pdf_key_tl
+  \regex_replace_all:nnN {\s+} {} \l_UL_pdf_key_tl
+  \tl_trim_spaces:N \l_UL_pdf_key_tl
+  \regex_extract_once:nVNTF {\A([A-G])(\#|\&|\\shrp|\\flt)?(m?)\Z}
+    \l_UL_pdf_key_tl \l_UL_pdf_key_seq
+   {
+    \int_set:Nn \l_UL_pdf_key_letter_int
+      {\str_case:en {\seq_item:Nn \l_UL_pdf_key_seq {2}}
+        {{C}{0}{D}{1}{E}{2}{F}{3}{G}{4}{A}{5}{B}{6}}}
+    \tl_set:Nx \l_UL_pdf_key_tl {\seq_item:Nn \l_UL_pdf_key_seq {3}}
+    \regex_match:nVTF {\#|\\shrp} \l_UL_pdf_key_tl
+      {\int_set:Nn \l_UL_pdf_accidental_int {1}}
+      {\int_set:Nn \l_UL_pdf_accidental_int
+        {\tl_if_empty:NTF \l_UL_pdf_key_tl {0}{-1}}}
+    \int_set:Nn \l_UL_pdf_key_pitch_int
+      {\int_mod:nn {12+
+        \clist_item:Nn \c_UL_pdf_natural_clist {\l_UL_pdf_key_letter_int+1}+
+        \l_UL_pdf_accidental_int}{12}}
+    \int_set:Nn \l_UL_pdf_key_minor_int
+      {\str_if_eq:eeTF {\seq_item:Nn \l_UL_pdf_key_seq {4}}{m}{1}{0}}
+    \tl_gset:Nx \g_UL_transpose_key_tl
+      {{\int_use:N \l_UL_pdf_key_letter_int}
+       {\int_use:N \l_UL_pdf_key_pitch_int}
+       {\int_use:N \l_UL_pdf_key_minor_int}}
+   }
+   {\tl_if_empty:NF \l_UL_pdf_key_tl
+     {\PackageWarning{ulsbs}{Song~\tl_to_str:V\songtitle :~unsupported~key=\tl_to_str:V\key;
+       ~using~current~sharp/flat~preference~for~transposition}}}
+ }
+\cs_new_protected:Npn \UL_pdf_key_use:nnn #1#2#3
+ {
+  \int_set:Nn \l_UL_pdf_key_letter_int {#1}
+  \int_set:Nn \l_UL_pdf_key_pitch_int {#2}
+  \int_set:Nn \l_UL_pdf_key_minor_int {#3}
+ }
+\cs_new_protected:Npn \UL_pdf_key_load:
+ {
+  \bool_set_false:N \l_UL_pdf_key_available_bool
+  \ifSB@insong
+    \tl_if_empty:NF \g_UL_transpose_key_tl
+      {\bool_set_true:N \l_UL_pdf_key_available_bool
+       \exp_after:wN \UL_pdf_key_use:nnn \g_UL_transpose_key_tl}
+  \fi
+ }
+\cs_new_protected:Npn \UL_pdf_canonical_tonic:n #1
+ {
+      \int_if_zero:nTF {\l_UL_pdf_key_minor_int}
+       {
+        \clist_set_eq:NN \l_UL_pdf_scale_clist \c_UL_pdf_natural_clist
+        % Conventional major tonics: C Db D Eb E F F# G Ab A Bb B.
+        \int_set:Nn \l_UL_pdf_target_letter_int
+          {\clist_item:nn {0,1,1,2,2,3,3,4,5,5,6,6}{#1+1}}
+        \int_if_zero:nTF
+          {\clist_item:nn {0,1,0,1,0,1,0,0,1,0,1,0}{#1+1}}
+          {\SB@prefshrpstrue}{\SB@prefshrpsfalse}
+       }
+       {
+        \clist_set_eq:NN \l_UL_pdf_scale_clist \c_UL_pdf_minor_clist
+        % Natural minor: Cm C#m Dm D#m Em Fm F#m Gm G#m Am Bbm Bm.
+        \int_set:Nn \l_UL_pdf_target_letter_int
+          {\clist_item:nn {0,0,1,1,2,3,3,4,4,5,6,6}{#1+1}}
+        \int_if_zero:nTF
+          {\clist_item:nn {1,0,1,0,0,1,0,1,0,0,1,0}{#1+1}}
+          {\SB@prefshrpstrue}{\SB@prefshrpsfalse}
+       }
+ }
+\cs_new_protected:Npn \UL@pdfspellprepare #1
+ {
+  \SB@transposefactor=#1\relax
+  \SB@needkeyfalse
+  \UL_pdf_key_load:
+  \int_compare:nNnT {#1}>{0}
+   {\bool_if:NT \l_UL_pdf_key_available_bool
+     {\int_set:Nn \l_UL_pdf_target_pitch_int
+        {\int_mod:nn {\l_UL_pdf_key_pitch_int+#1}{12}}
+      \UL_pdf_canonical_tonic:n {\l_UL_pdf_target_pitch_int}
+      \let\SB@trtrans\UL@pdftrtrans}}
+ }
+\cs_new_protected:Npn \UL_pdf_source_prepare:
+ {
+  \UL_pdf_key_load:
+  \bool_if:NT \l_UL_pdf_key_available_bool
+   {
+    % key= names the destination of source \transpose. Reverse the semitone
+    % offset to infer its source tonic using our conventional key spellings.
+    \int_set_eq:NN \l_UL_pdf_declared_letter_int \l_UL_pdf_key_letter_int
+    \int_set_eq:NN \l_UL_pdf_target_pitch_int \l_UL_pdf_key_pitch_int
+    \int_set:Nn \l_UL_pdf_key_pitch_int
+      {\int_mod:nn {12+\int_mod:nn
+        {\l_UL_pdf_key_pitch_int-\SB@transposefactor}{12}}{12}}
+    \UL_pdf_canonical_tonic:n {\l_UL_pdf_key_pitch_int}
+    \int_set_eq:NN \l_UL_pdf_key_letter_int \l_UL_pdf_target_letter_int
+    \UL_pdf_canonical_tonic:n {\l_UL_pdf_target_pitch_int}
+    \int_set_eq:NN \l_UL_pdf_target_letter_int \l_UL_pdf_declared_letter_int
+    \let\SB@trtrans\UL@pdftrtrans
+   }
+ }
+\cs_set_protected:Npn \SB@dotranspose #1
+ {
+  \begingroup
+  % Without usable key metadata, use the active preference, not a first-chord
+  % key guess. Parser setup never changes ambient preferences or replay state.
+  \SB@needkeyfalse
+  \ifnum\SB@transposefactor=0\relax
+    \let\SB@trtrans\UL@normaltrtrans
+  \else
+    \let\SB@trtrans\UL@pdftrtrans
+  \fi
+  \ifUL@pdfalternate\else
+    \bool_set_false:N \l_UL_pdf_key_available_bool
+    \ifUL@keytranspose
+      \ifnum\SB@transposefactor=0\relax\else\UL_pdf_source_prepare:\fi
+    \fi
+  \fi
+  \UL@normaldotranspose{#1}
+  \xdef\UL@transposereturn{\unexpanded\expandafter{\the\SB@toks}}
+  \endgroup
+  \SB@toks\expandafter{\UL@transposereturn}
+ }
+\cs_new_protected:Npn \UL_pdf_target_key:
+ {
+  % Derive the alternate badge from parsed metadata, not the raw token stream.
+  \int_set:Nn \l_UL_pdf_accidental_int
+    {\int_mod:nn {18+\l_UL_pdf_target_pitch_int-
+      \clist_item:Nn \c_UL_pdf_natural_clist {\l_UL_pdf_target_letter_int+1}}{12}-6}
+  \edef\SB@temp{
+    \use:c {printnote\clist_item:Nn \c_UL_pdf_letters_clist {\l_UL_pdf_target_letter_int+1}}
+    \int_case:nn {\l_UL_pdf_accidental_int}
+      {{-1}{\noexpand\flt}{1}{\noexpand\shrp}}
+    \int_if_zero:nF {\l_UL_pdf_key_minor_int}{m}}
+  \SB@toks\expandafter{\SB@temp}
+ }
+% Reuse songs' note recognition and accidental scanning. At this boundary,
+% SB@temp is the source note name and SB@cnt its explicit accidental (-1/0/1).
+% Translate its letter/scale degree, not just its pitch class, so chromatic
+% alterations retain their meaning even when the target key changes signature.
+\cs_new_protected:Npn \UL@pdftrtrans
+ {
+  \int_set:Nn \l_UL_pdf_note_letter_int {-1}
+  \int_step_inline:nn {7}
+   {\str_if_eq:eeT {\SB@temp}
+      {\use:c {notename\clist_item:Nn \c_UL_pdf_letters_clist {##1}}}
+     {\int_set:Nn \l_UL_pdf_note_letter_int {##1-1}}}
+  \int_compare:nNnTF {\l_UL_pdf_note_letter_int}<{0}
+   {
+    % The scanner may accumulate unknown uppercase text and already consume
+    % its accidental. Preserve both, rather than silently dropping the sign.
+    \edef\SB@temp{\the\SB@toks\SB@temp
+      \int_case:nn {\SB@cnt}{{-1}{\noexpand\flt}{1}{\noexpand\shrp}}}
+    \SB@toks\expandafter{\SB@temp}
+    \let\SB@dothis\SB@trmain
+    \SB@trscan
+   }
+   {
+    \bool_if:NTF \l_UL_pdf_key_available_bool
+     {
+    \int_set:Nn \l_UL_pdf_degree_int
+      {\int_mod:nn {7+\l_UL_pdf_note_letter_int-\l_UL_pdf_key_letter_int}{7}}
+    % Normalize to -6..5; 30 keeps all modulo inputs positive.
+    \int_set:Nn \l_UL_pdf_alteration_int
+      {\int_mod:nn {30+
+        \clist_item:Nn \c_UL_pdf_natural_clist {\l_UL_pdf_note_letter_int+1}+\SB@cnt-
+        \l_UL_pdf_key_pitch_int-
+        \clist_item:Nn \l_UL_pdf_scale_clist {\l_UL_pdf_degree_int+1}}{12}-6}
+    \int_set:Nn \l_UL_pdf_note_letter_int
+      {\int_mod:nn {\l_UL_pdf_target_letter_int+\l_UL_pdf_degree_int}{7}}
+    \int_set:Nn \l_UL_pdf_accidental_int
+      {\int_mod:nn {30+\l_UL_pdf_target_pitch_int+
+        \clist_item:Nn \l_UL_pdf_scale_clist {\l_UL_pdf_degree_int+1}+
+        \l_UL_pdf_alteration_int-
+        \clist_item:Nn \c_UL_pdf_natural_clist {\l_UL_pdf_note_letter_int+1}}{12}-6}
+    \int_compare:nNnTF {\int_abs:n {\l_UL_pdf_accidental_int}}>{1}
+     {\UL@normaltrtrans} % Single-accidental enharmonic fallback; pitch is retained.
+     {
+      \edef\SB@temp{\the\SB@toks
+        \use:c {printnote\clist_item:Nn \c_UL_pdf_letters_clist {\l_UL_pdf_note_letter_int+1}}
+        \int_case:nn {\l_UL_pdf_accidental_int}
+          {{-1}{\noexpand\flt}{1}{\noexpand\shrp}}}
+      \SB@toks\expandafter{\SB@temp}
+      \let\SB@dothis\SB@trmain
+      \SB@trscan
+     }
+     }
+     {\UL@normaltrtrans}
+   }
+ }
+\cs_new:Npn \UL_pdf_pad:nn #1#2
+  {\prg_replicate:nn {\int_max:nn {0}{#1-\str_count:e {\int_eval:n {#2}}}}{0}\int_eval:n {#2}}
+\cs_new_protected:Npn \UL_pdf_metadata_song:
+ {
+  \begingroup
+  \tl_set:Nx \l_UL_pdf_original_key_tl {\tl_to_str:V\key}
+  \tl_trim_spaces:N \l_UL_pdf_original_key_tl
+  \tl_set:Nn \l_UL_pdf_labels_lua_tl {nil}
+  \UL_pdf_key_load:
+  \bool_if:NT \l_UL_pdf_key_available_bool
+   {
+    \tl_set:Nx \l_UL_pdf_labels_lua_tl {\c_left_brace_str}
+    \int_step_inline:nnn {0}{11}
+     {
+      \int_set:Nn \l_UL_pdf_target_pitch_int
+        {\int_mod:nn {\l_UL_pdf_key_pitch_int+##1}{12}}
+      \int_compare:nNnTF {##1}={0}
+        {\int_set_eq:NN \l_UL_pdf_target_letter_int \l_UL_pdf_key_letter_int}
+        {\UL_pdf_canonical_tonic:n {\l_UL_pdf_target_pitch_int}}
+      \int_set:Nn \l_UL_pdf_accidental_int
+        {\int_mod:nn {18+\l_UL_pdf_target_pitch_int-
+          \clist_item:Nn \c_UL_pdf_natural_clist {\l_UL_pdf_target_letter_int+1}}{12}-6}
+      \tl_set:Nx \l_UL_pdf_label_tl
+        {\clist_item:Nn \c_UL_pdf_letters_clist {\l_UL_pdf_target_letter_int+1}
+         \int_case:nn {\l_UL_pdf_accidental_int}{{-1}{♭}{1}{♯}}
+         \int_if_zero:nF {\l_UL_pdf_key_minor_int}{m}}
+      \tl_put_right:Nx \l_UL_pdf_labels_lua_tl
+        {"\luaescapestring{\l_UL_pdf_label_tl}",}
+     }
+    \tl_put_right:Nx \l_UL_pdf_labels_lua_tl {\c_right_brace_str}
+   }
+  \directlua{ulsbs_multikey.begin_song(
+    "\UL@pdfsongid","\luaescapestring{\l_UL_pdf_source_id_tl}",
+    \int_use:N\l_UL_pdf_occurrence_int,"\UL@pdfnameprefix",
+    \tl_if_empty:NTF\l_UL_pdf_original_key_tl{nil}
+      {"\luaescapestring{\l_UL_pdf_original_key_tl}"},\l_UL_pdf_labels_lua_tl)}
+  \endgroup
+ }
+\cs_new_protected:Npn \UL_pdf_song_layers:
+ {
+  \global\advance\UL@pdfsongcount by 1\relax
+  \UL@pdfsongtrue
+  \edef\UL@pdfsongid{s\UL_pdf_pad:nn {6}{\UL@pdfsongcount}}
+  \prop_get:NVNTF \g_UL_pdf_occurrences_prop \l_UL_pdf_source_id_tl \l_tmpa_tl
+    {\int_set:Nn \l_UL_pdf_occurrence_int {\l_tmpa_tl+1}}
+    {\int_set:Nn \l_UL_pdf_occurrence_int {1}}
+  \prop_gput:NVx \g_UL_pdf_occurrences_prop \l_UL_pdf_source_id_tl
+    {\int_use:N\l_UL_pdf_occurrence_int}
+  \edef\UL@pdfnameprefix{ulsbs:transpose:v1:id:\l_UL_pdf_source_id_tl
+    \int_compare:nNnT {\l_UL_pdf_occurrence_int}>{1}
+      {:o\UL_pdf_pad:nn {2}{\l_UL_pdf_occurrence_int}}}
+  % songs builds the prelude after closing the song body's local group.
+  \global\let\UL@pdfpreludesongid\UL@pdfsongid
+  \UL_pdf_metadata_song:
+  \int_step_inline:nnn {0}{11}
+   {
+    \edef\UL@pdfid{ulsbs:transpose:v1:\UL@pdfsongid :t\UL_pdf_pad:nn {2}{##1}}
+    \edef\UL@pdfname{\UL@pdfnameprefix :t\UL_pdf_pad:nn {2}{##1}}
+    \ifdefstring{\ulPdfTranspositionLayerUI}{hidden}
+      {\def\UL@pdfshowingui{false}}{\def\UL@pdfshowingui{true}}
+    \edef\UL@pdfoptions{radiobtngrps={\UL@pdfsongid},
+      showingui=\UL@pdfshowingui,
+      printocg=\ifnum##1=0 always\else never\fi}
+    \ifnum##1=0\relax\def\UL@pdfinitial{1}\else\def\UL@pdfinitial{0}\fi
+    % Internal references remain private sequences; exposed names use source IDs.
+    \sbox\UL@pdfresultbox{\begin{ocg}[\UL@pdfoptions]{\UL@pdfname}{\UL@pdfid}
+      {\UL@pdfinitial}\end{ocg}}
+   }
+ }
+\cs_new_protected:Npn \UL@pdfsongbegin
+ {
+  \UL_pdf_key_save:
+  \UL@pdfsongfalse
+  \global\let\UL@pdfpreludesongid\@empty
+  \ifUL@pdflayers
+    \tl_set:Nx \l_UL_pdf_source_id_tl {\songid}
+    \tl_set:Nx \l_UL_pdf_source_id_tl {\tl_to_str:V\l_UL_pdf_source_id_tl}
+    \tl_trim_spaces:N \l_UL_pdf_source_id_tl
+    \regex_match:nVTF {\A[a-z0-9-]+\Z} \l_UL_pdf_source_id_tl
+      {\UL_pdf_song_layers:}
+      {\ifdefstring{\ulPdfTranspositionRequireSongIDs}{true}
+        {\PackageError{ulsbs}{Missing~or~invalid~song~id:~\tl_to_str:V\songtitle}
+          {Set~id=~to~a~nonempty~lowercase~letter/digit/dash~identifier.}}
+        {\PackageWarning{ulsbs}{Song~\tl_to_str:V\songtitle :~missing~or~invalid~id;
+          ~skipping~multikey~layers~and~controls~for~this~song}}}
+  \fi
+ }
+\cs_new_protected:Npn \UL_pdf_mark:nn #1#2
+ {
+  \ocgbase_oc_bdc:n
+    {\use:c {ocgxii_ocg_ulsbs:transpose:v1:\UL@pdfsongid :t\UL_pdf_pad:nn {2}{#1}}}
+  % Execute only if the box is shipped, not when it is measured or discarded.
+  \int_compare:nNnT {#1}={0}
+    {\exp_args:Nx \latelua {ulsbs_multikey.mark_used("\UL@pdfsongid")}}
+  #2
+  \ocgbase_oc_emc:
+ }
+% #1 is effective musical text, #2 its typography, #3 enables chord shrinking.
+% Parser and spelling changes for alternatives are strictly local; source and
+% alternate parsing never change ambient preferences or replay data.
+\cs_new_protected:Npn \UL_pdf_visual:nnn #1#2#3
+ {
+  \begingroup
+  \sbox\UL@pdfbasebox{#2{#1}}
+  \setbox\UL@pdfresultbox\hbox{\UL_pdf_mark:nn {0}{\copy\UL@pdfbasebox}}
+  \int_step_inline:nn {11}
+   {
+    \begingroup
+    \SB@transposefactor=##1\relax
+    \UL@pdfalternatetrue
+    \UL@pdfspellprepare{##1}
+    \ifUL@pdfrightalign
+      \bool_if:NTF \l_UL_pdf_key_available_bool
+        {\UL_pdf_target_key:}{\SB@dotranspose{#1}}
+    \else
+      \SB@dotranspose{#1}
+    \fi
+    \edef\UL@pdfalttext{\unexpanded\expandafter{\the\SB@toks}}
+    \sbox\UL@pdfaltbox{\expandafter#2\expandafter{\UL@pdfalttext}}
+    \fp_set:Nn \l_tmpa_fp {1}
+    \ifnum#3=1\relax
+      \ifdim\wd\UL@pdfbasebox>0pt
+        \ifdim\wd\UL@pdfaltbox>\wd\UL@pdfbasebox
+          \fp_set:Nn \l_tmpa_fp
+            {max(\ulPdfTranspositionMinimumScale,
+              \dim_to_fp:n {\wd\UL@pdfbasebox}/\dim_to_fp:n {\wd\UL@pdfaltbox})}
+        \fi
+      \fi
+    \fi
+    \edef\UL@pdfscale{\fp_to_decimal:N \l_tmpa_fp}
+    \setbox\UL@pdfaltbox\hbox{\UL_pdf_mark:nn {##1}
+      {\scalebox{\UL@pdfscale}{\copy\UL@pdfaltbox}}}
+    % Only t00 determines width, height, depth, and baseline.
+    \global\setbox\UL@pdfaltbox\hbox{\smash{\rlap{%
+      \ifUL@pdfrightalign
+        \kern\dimexpr\wd\UL@pdfbasebox-\wd\UL@pdfaltbox\relax
+      \fi
+      \copy\UL@pdfaltbox}}}
+    \endgroup
+    \setbox\UL@pdfresultbox\hbox{\box\UL@pdfaltbox\unhbox\UL@pdfresultbox}
+   }
+  \box\UL@pdfresultbox
+  \endgroup
+ }
+\cs_new_eq:NN \UL@pdfvisual \UL_pdf_visual:nnn
+\cs_new_protected:Npn \UL@pdfchunkflush
+ {
+  \tl_if_empty:NF \l_UL_pdf_chunk_tl
+   {\tl_put_right:Nx \l_UL_pdf_output_tl
+     {\exp_not:N\UL@pdfvisual{\exp_not:V\l_UL_pdf_chunk_tl}{\exp_not:N\@firstofone}{1}}
+    \tl_clear:N \l_UL_pdf_chunk_tl}
+ }
+\cs_new_protected:Npn \UL@pdfchunkadd #1 {\tl_put_right:Nn \l_UL_pdf_chunk_tl {#1}}
+\cs_new_protected:Npn \UL@pdfsharedadd #1
+ {\UL@pdfchunkflush\tl_put_right:Nn \l_UL_pdf_output_tl {#1}}
+\cs_generate_variant:Nn \regex_match:nnTF {nV}
+\cs_new_protected:Npn \UL@pdfgroup #1
+ {
+  \tl_set:Nx \l_tmpa_tl {\tl_to_str:n {#1}}
+  % songs preserves braced groups without inspecting their contents. Arbitrary
+  % nested commands are not safe to execute in eleven extra visual boxes.
+  \regex_match:nVTF {\\|\^} \l_tmpa_tl
+    {\UL@pdfunknown{{#1}}}
+    {\UL@pdfchunkadd{{#1}}\UL@pdfsplit}
+ }
+\cs_new_protected:Npn \UL@pdfsplittoken #1
+ {
+  % Test the character, not its meaning: songs rebinds active ^ for tracking
+  % and replay. It must never be re-evaluated in an alternative representation.
+  \str_if_eq:eeTF {\token_to_str:N #1}{\char_generate:nn {94}{12}}
+   {\UL@pdfsharedadd{#1}\UL@pdfsplit}
+   {
+    \token_if_eq_meaning:NNTF #1\UL@melodyreplaypayload
+      {\UL@pdfsplitpayload}
+      {\token_if_eq_meaning:NNTF #1\ac
+        {\UL@pdfsplitac}
+        {\token_if_eq_meaning:NNTF #1\notrans
+          {\UL@pdfsplitnotrans}
+          {\token_if_active:NTF #1
+            {\UL@pdfchunkadd{#1}\UL@pdfsplit}
+            {\token_if_cs:NTF #1
+            {\clist_if_in:nnTF
+              {\shrp,\flt,\textdegree,\textsuperscript,\textsubscript,\up,
+               \kern,\hspace,\hphantom,\phantom,\strut,\relax,
+               \smraiseopenparen,\smraisecloseparen}
+              {#1}{\UL@pdfchunkadd{#1}\UL@pdfsplit}
+              {\UL@pdfunknown{#1}}}
+            {\UL@pdfchunkadd{#1}\UL@pdfsplit}}}}}
+   }
+ }
+\cs_new_protected:Npn \UL@pdfunknown #1#2\UL@pdfsplitend
+ {
+  % Unknown commands may consume dimensions, optional or unbraced arguments.
+  % Preserve the complete tail, rather than injecting boxes into that stream.
+  \tl_set_eq:NN \l_UL_pdf_output_tl \l_UL_pdf_original_tl
+  \tl_clear:N \l_UL_pdf_chunk_tl
+  \PackageWarning{ulsbs}{Song~\UL@pdfsongid :~unsupported~chord~command/group~
+    \tl_to_str:n {#1};~interactive~transposition~is~not~applied~to~this~chord~text}
+ }
+\cs_new_protected:Npn \UL@pdfchordtext #1
+ {
+  \tl_clear:N \l_UL_pdf_chunk_tl
+  \tl_clear:N \l_UL_pdf_output_tl
+  \tl_set:Nn \l_UL_pdf_original_tl {#1}
+  \UL@pdfsplit #1\UL@pdfsplitend
+  \tl_use:N \l_UL_pdf_output_tl
+ }
+\ExplSyntaxOff
+\def\UL@pdfsplit{\futurelet\UL@pdfnext\UL@pdfsplitdispatch}
+\def\UL@pdfsplitdispatch{%
+  \ifx\UL@pdfnext\UL@pdfsplitend\let\UL@pdfnextstep\UL@pdfsplitfinish
+  \else\ifx\UL@pdfnext\bgroup\let\UL@pdfnextstep\UL@pdfsplitgroup
+  \else\ifcat\noexpand\UL@pdfnext\@sptoken\let\UL@pdfnextstep\UL@pdfsplitspace
+  \else\let\UL@pdfnextstep\UL@pdfsplitstep\fi\fi\fi
+  \UL@pdfnextstep}
+\def\UL@pdfsplitfinish\UL@pdfsplitend{\UL@pdfchunkflush}
+\def\UL@pdfsplitgroup#1{\UL@pdfgroup{#1}}
+\def\UL@pdfsplitstep#1{\UL@pdfsplittoken{#1}}
+\def\UL@pdfsplitpayload#1#2{\UL@pdfsharedadd{\UL@melodyreplaypayload{#1}{#2}}\UL@pdfsplit}
+\def\UL@pdfsplitac#1#2{\UL@pdfsharedadd{\ac{#1}{#2}}\UL@pdfsplit}
+\def\UL@pdfsplitnotrans#1{\UL@pdfsharedadd{\notrans{#1}}\UL@pdfsplit}
+\begingroup
+\def\:{\UL@pdfsplitspace}\expandafter\gdef\: {\UL@pdfchunkadd{ }\UL@pdfsplit}
+\endgroup
+\let\UL@normaltransposehere\transposehere
+\renewcommand{\transposehere}[1]{%
+  \ifUL@pdfchord\ifUL@pdfsong
+    \ifnum\SB@transposefactor=0\relax
+      \ifSB@convertnotes
+        \SB@dotranspose{#1}\expandafter\UL@pdfchordtext\expandafter{\the\SB@toks}%
+      \else\UL@pdfchordtext{#1}\fi
+    \else
+      \ifSB@convertnotes
+        {\SB@transposefactor=0\relax\SB@dotranspose{#1}%
+          \xdef\SB@tempv{\the\SB@toks}}%
+      \else\def\SB@tempv{#1}\fi
+      \SB@dotranspose{#1}%
+      \edef\UL@pdfeffective{\unexpanded\expandafter{\the\SB@toks}}%
+      \expandafter\trchordformat\expandafter{\SB@tempv}%
+        {\expandafter\UL@pdfchordtext\expandafter{\UL@pdfeffective}}%
+    \fi
+  \else\UL@normaltransposehere{#1}\fi
+  \else\UL@normaltransposehere{#1}\fi}
+\AtBeginDocument{%
+  \typeout{ULSBS PDF transposition layers: \ifUL@pdflayers enabled (UI: \ulPdfTranspositionLayerUI)\else disabled\fi}%
+}
+\ExplSyntaxOn
+\AtBeginDocument{
+  \ifUL@pdflayers
+    \fp_compare:nNnTF {\ulPdfTranspositionMinimumScale}>{0}
+      {\fp_compare:nNnT {\ulPdfTranspositionMinimumScale}>{1}
+        {\PackageError{ulsbs}{Invalid~PDF~chord~minimum~scale}{Use~a~number~greater~than~0~and~at~most~1.}}}
+      {\PackageError{ulsbs}{Invalid~PDF~chord~minimum~scale}{Use~a~number~greater~than~0~and~at~most~1.}}
+  \fi
+}
+\ExplSyntaxOff
+\AtEndDocument{\typeout{ULSBS PDF transposition: \the\UL@pdfsongcount\space songs,
+  \the\numexpr12*\UL@pdfsongcount\relax\space OCGs}}
 
 % BEGIN MAIN LANGUAGE
 
@@ -994,6 +1512,7 @@
 \newunicodechar{⭠}{{\symboliifont ⭠}}\newcommand\symlarrow{⭠}
 \newunicodechar{⭢}{{\symboliifont ⭢}}\newcommand\symrarrow{⭢}
 \newunicodechar{⮀}{{\symboliifont ⮀}}\newcommand\symlrarrow{⮀}
+\newunicodechar{⮁}{{\symboliifont ⮁}}\newcommand\symudarrow{⮁}
 \newunicodechar{⮞}{{\symboliifont ⮞}}\newcommand\symrarrowhead{⮞}
 
 % Allow further emergency stretching to fix some "overfull hbox" situations.
@@ -1002,6 +1521,7 @@
 
 % color: Color definitions:
 \definecolor{chordcolor}{rgb}{0.20,0,0.22} % chords
+\definecolor{transposedkeycolor}{rgb}{0.60,0,0.04} % non-original prelude keys
 \definecolor{altinlinechordcolor}{rgb}{0.4,0,0.22} % alt. chord coloring used with \ac
 \definecolor{altchordcolor_a}{rgb}{0.10,0.4,0.10} % green, set 1 (default)
 \definecolor{altchordcolor_b}{rgb}{0.35,0.22,0.06} % brown, set 2
@@ -1099,6 +1619,9 @@
 % songs: use same text color for music notes as for chords and do not show
 % at all in lyric-only books
 \renewcommand\musicnote[1]{\iflyriconly\else\textnote{\color{chordcolor}#1}\fi}%
+% Text/music notes are prose even when inserted within an active verse.
+\pretocmd{\SB@boxup}{\UL@pdfsongfalse}{}{%
+  \PackageError{ulsbs}{Could not exclude prose notes from PDF layers}{Check the bundled songs version.}}
 % songs: use real sharp and flat symbols from Noto Symbol font:
 \renewcommand{\sharpsymbol}{\textsuperscript{{\symbolfont♯}}}%
 \renewcommand{\flatsymbol}{\raise.5ex\hbox{\SB@flatsize{{\symbolfont♭}}}}%
@@ -2108,6 +2631,8 @@
   \ifchorded\ifshowaltchords%
     {%
       \bool_set_true:N \l__in_altchords_bool
+      \UL@pdfchordfalse
+      \UL@keytransposefalse
       \providecommand{\id}[2][1]{\@altchordsid[##1]{\UL@transposealtchord{##2}}}%
       \renewcommand{\meterfont}{\color{chordcolor}\normalfont\tiny\sffamily\upshape}%
       \renewcommand{\e}{\ifmeasures-\fi}% % shorter dash for altchords
@@ -2159,6 +2684,7 @@
         \color{accolor}\UL@transposealtchord{#2}
       }
       { % for normal verse chords, set chord font, change color and transpose
+        \ifSB@inverse\UL@pdfchordtrue\else\ifSB@inchorus\UL@pdfchordtrue\fi\fi
         \ulChordFont\color{accolor}\transposehere{#2}%
       }
   }%
@@ -3055,14 +3581,30 @@
       \renewcommand{\flatsymbol}{\@mnflatsymbol}%
       \raisebox{#1}{%
         \@mnsymbolstyle% Set the style
-        % Make the tag, if it exists, on the left of the note circle
-        \makebox[0pt][l]{\@mntag}%
         % `/` is an intentional unpitched marker, not a transposable pitch.
-        \ifstrequal{#2}{/}{\circled{/}}{\circled{\transposehere{#2}}}%
+        \ifstrequal{#2}{/}{\makebox[0pt][l]{\@mntag}\circled{/}}{%
+          \ifUL@pdfsong
+            \ifUL@pdfchord\UL@pdfnote{#2}%
+            \else\makebox[0pt][l]{\@mntag}\circled{\UL@normaltransposehere{#2}}\fi
+          \else\makebox[0pt][l]{\@mntag}\circled{\UL@normaltransposehere{#2}}\fi}%
       }%
       \endgroup%
     \fi%
   \fi%
+}
+
+\newcommand{\UL@pdfnotecircle}[1]{%
+  \begingroup\SB@transposefactor=0\relax\SB@convertnotestrue
+  \makebox[0pt][l]{\@mntag}%
+  \circled{\UL@normaltransposehere{#1}}\endgroup}
+\newcommand{\UL@pdfnote}[1]{%
+  % Resolve source transposition with canonical uppercase output, then use the
+  % normal lowercase melody typography for every visual representation.
+  \notenamesout ABCDEFG%
+  \SB@dotranspose{#1}%
+  \edef\UL@pdfeffective{\unexpanded\expandafter{\the\SB@toks}}%
+  \notenamesout abcdefg%
+  \expandafter\UL@pdfvisual\expandafter{\UL@pdfeffective}{\UL@pdfnotecircle}{0}%
 }
 
 % --- Melody-block parser state ---
@@ -3252,7 +3794,7 @@
 % Negative offsets may protrude left but never reduce the unadjusted advance.
 \cs_new_protected:Npn \UL_melody_render:
  {
-    \sbox\UL@melodylayerbox{{\ulChordFont\UL@melodystyle{primary}\@note{C}}}%
+    \sbox\UL@melodylayerbox{{\UL@pdfsongfalse\ulChordFont\UL@melodystyle{primary}\@note{C}}}%
     \UL@melodyslotwidth=\wd\UL@melodylayerbox\relax
     \ifUL@melodyprimarylow%
       \def\UL@primaryheight{\dimexpr\mnlowheightfactor ex\relax}%
@@ -3275,8 +3817,8 @@
         \fi%
       \fi%
     \fi%
-    \sbox\UL@melodyprimarybox{\ulChordFont\UL_melody_sequence:Nnn \l_UL_melody_primary_seq {\UL@melodystyle{primary}} {\UL@primaryheight}}%
-    \sbox\UL@melodysecondarybox{\ulChordFont\UL_melody_sequence:Nnn \l_UL_melody_secondary_seq {\UL@melodystyle{secondary}} {\UL@secondaryheight}}%
+    \sbox\UL@melodyprimarybox{\UL@pdfchordtrue\ulChordFont\UL_melody_sequence:Nnn \l_UL_melody_primary_seq {\UL@melodystyle{primary}} {\UL@primaryheight}}%
+    \sbox\UL@melodysecondarybox{\UL@pdfchordtrue\ulChordFont\UL_melody_sequence:Nnn \l_UL_melody_secondary_seq {\UL@melodystyle{secondary}} {\UL@secondaryheight}}%
     \ifshownotes\ifdefined\@melodynotesdisabled\else
       \UL_melody_mark_note_visible:N \l_UL_melody_primary_seq
       \UL_melody_mark_note_visible:N \l_UL_melody_secondary_seq
@@ -3287,7 +3829,8 @@
     \ifshowbeats\ifdefined\@beatsdisabled\else
       \UL_melody_beat_extent:N \l_UL_melody_primary_seq
       \UL_melody_beat_extent:N \l_UL_melody_secondary_seq
-      \ifdim\UL@melodybeatextent>0pt\UL@annotationvisibletrue\fi
+        % Stop dimension scanning before the expandable newif setter.
+        \ifdim\UL@melodybeatextent>0pt\relax\UL@annotationvisibletrue\fi
     \fi\fi
     \sbox\UL@melodybeatbox{%
       \rlap{\UL_melody_beats:N \l_UL_melody_primary_seq}%
@@ -3353,7 +3896,9 @@
   \setbox\SB@chordbox\box\voidb@x
   \global\UL@melodyhadpayloadfalse
   \global\let\UL@melodyreplayraw\@empty%
+  \UL@pdfchordtrue
   \UL@songs@setchord{#1}%
+  \UL@pdfchordfalse
   \ifx\UL@melodyreplayraw\@empty\else%
     \ifUL@melodypayloadempty
       \setbox\SB@chordbox\box\voidb@x
@@ -3364,12 +3909,12 @@
   \fi%
   \ifUL@melodyhadpayload
     \ifUL@melodypayloadempty\else
-      \ifdim\wd\SB@chordbox>0pt\UL@annotationvisibletrue\fi
+      \ifdim\wd\SB@chordbox>0pt\relax\UL@annotationvisibletrue\fi
     \fi
   \else
     \def\UL@setchordargument{#1}%
     \ifx\UL@setchordargument\@empty\else
-      \ifdim\wd\SB@chordbox>0pt\UL@annotationvisibletrue\fi
+        \ifdim\wd\SB@chordbox>0pt\relax\UL@annotationvisibletrue\fi
     \fi
   \fi
   \setbox\UL@melodylayerbox\box\SB@chordbox
@@ -3732,6 +4277,38 @@
 
 % Texts for key info in prelude. Can be set before including this file.
 \providecommand{\preludetextkey}{\IfLangTF{portuguese}{Tom:}{Key:}}
+
+\newcommand{\UL@preludekeybadge}[1]{%
+  \ifnum\SB@transposefactor=0\relax
+    \def\UL@preludekeycolor{chordcolor}%
+  \else
+    \def\UL@preludekeycolor{transposedkeycolor}%
+  \fi
+  \@mainkeybox[\UL@preludekeycolor]{%
+    \ifnum\SB@transposefactor=0\relax\else
+      {\color{\UL@preludekeycolor}\symudarrow}\space
+    \fi
+    \textit{\preludetextkey}
+    \textbf{\color{\UL@preludekeycolor}#1\vphantommaxtext}}%
+}
+\newcommand{\UL@preludekey}{%
+  \begingroup
+  % key= already describes the printed key; do not apply the body's final
+  % source transposition again. Only interactive offsets are added here.
+  \SB@transposefactor=0\relax
+  \ifUL@pdflayers
+    \ifx\UL@pdfpreludesongid\@empty
+      \UL@preludekeybadge{\key}%
+    \else
+      \let\UL@pdfsongid\UL@pdfpreludesongid
+      \UL@pdfrightaligntrue
+      \expandafter\UL@pdfvisual\expandafter{\key}{\UL@preludekeybadge}{0}%
+    \fi
+  \else
+    \UL@preludekeybadge{\key}%
+  \fi
+  \endgroup
+}
 \providecommand{\preludetextgood}{\IfLangTF{portuguese}{Boas:}{Good:}} % ", " is prepended before this
 \providecommand{\preludetextgoodkeysalone}{\IfLangTF{portuguese}{Boas tons:}{Good keys:}}
 
@@ -3888,12 +4465,37 @@
   \fi%
 }
 
+% The UI point is independent of which tags are present. These discarded boxes
+% measure their possible top edge; the zero-size marker never reserves space.
+\newcommand{\UL@pdfheaderanchor}{%
+  \ifUL@pdflayers\ifx\UL@pdfpreludesongid\@empty\else
+    \begingroup
+    \sbox\UL@pdfanchorbox{{\scriptsize\normalfont\preludekeylinestyle
+      \@mainkeybox{\symudarrow\textbf{\vphantommaxtext}}}}%
+    \dimen@=\ht\UL@pdfanchorbox
+    \sbox\UL@pdfanchorbox{{\scriptsize\normalfont\itshape\preludetagstyle
+      \@tagsbox{\vphantommaxtext}}}%
+    \ifdim\ht\UL@pdfanchorbox>\dimen@\dimen@=\ht\UL@pdfanchorbox\fi
+    \sbox\UL@pdfanchorbox{{\scriptsize\normalfont\rmfamily\preludephasestyle
+      \@tagsbox{\vphantommaxtext}}}%
+    \ifdim\ht\UL@pdfanchorbox>\dimen@\dimen@=\ht\UL@pdfanchorbox\fi
+    \makebox[0pt][l]{\raisebox{\dimexpr\@preludeRTfirstraise+\dimen@\relax}[0pt][0pt]{%
+      \kern2bp%
+      \ifUL@havepos\UL@savepos\fi
+      \edef\UL@pdfanchorcode{\noexpand\latelua{
+        ulsbs_multikey.anchor("\UL@pdfpreludesongid")}}%
+      \UL@pdfanchorcode
+    }}%
+    \endgroup
+  \fi\fi
+}
+
 % Redefine the song prelude display. Only one line is modified (into a block,
 % see comment) to show the phase, tags and key info.
 \renewcommand\makeprelude{
   \resettitles%
   \ifslides%
-    \hbox to\hsize{{\hfil\stitlefont\relax\songtitle\hfil}}%
+    \hbox to\hsize{{\hfil\stitlefont\relax\songtitle\hfil\UL@pdfheaderanchor}}%
     \vskip5\p@%
     \hbox to\hsize{%
       \hfil%
@@ -3931,6 +4533,7 @@
           \setcounter{@preludeRTrowscreatedcount}{0}%
           \@setpreludeRTraise%
           \hfill%
+          \UL@pdfheaderanchor%
           % tag line (tags, phase)
           \def\taglinetext{}%
           \ifshowtags\ifnowidth{\taglist}{}{% Add tags
@@ -3954,7 +4557,7 @@
               \makebox[0pt][r]{\raisebox{\@preludeRTraise}[0pt][0pt]{%
                 \iflyriconly\tiny\else\scriptsize\fi%
                 \normalfont\preludekeylinestyle%
-                \@mainkeybox[chordcolor]{\textit{\preludetextkey} \textbf{\color{chordcolor}\key\vphantommaxtext}}%
+                \UL@preludekey%
               }}%
               \stepcounter{@preludeRTrowscreatedcount}%
               \@setpreludeRTraise%
@@ -4795,6 +5398,7 @@
   \global\@stanzasgluedfalse%
   % Call the original command:
   \@SB@@@beginsongorig%
+  \UL@pdfsongbegin%
   % Create the TOC line. Note that these belong to a group started in the
   % original command called above.
   \hypersetup{bookmarksdepth=0}%

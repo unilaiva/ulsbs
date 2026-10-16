@@ -1,0 +1,29 @@
+\documentclass[paper={a5paper},maintitle={Layer Semantics Test}]{ulsbs-songbook}
+\begin{document}
+\begin{songs}{}
+\beginsong{Effective Original}[id={fixture-1}]
+  \prefersharps
+  \transpose{2}
+  \beginverse
+    \[C]source
+    \[\notrans{G}]suppressed
+    \ac{1}{C} inline
+    \[<C;E>]melody
+  \endverse
+  \newchords{layerreplay}
+  \beginverse\memorize[layerreplay]
+    \[<C;E>C]stored
+  \endverse
+  \beginverse\replay[layerreplay]
+    ^replayed
+  \endverse
+  \beginverse
+    \altchords{|C |G} alternate
+  \endverse
+  \transpose{-2}
+  \beginverse
+    \[C]changed
+  \endverse
+\endsong
+\end{songs}
+\end{document}

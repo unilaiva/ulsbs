@@ -16,6 +16,7 @@ from .config import Config
 from .constants import (
     RESULTLIST_SEPARATOR,
     RESULT_TYPE_MAIN_PDF,
+    RESULT_TYPE_MULTIKEY_PDF,
     RESULT_TYPE_PRINTOUT_PDF,
     RESULT_TYPE_JSON,
     RESULT_TYPE_IMAGE,
@@ -26,12 +27,14 @@ from .constants import (
     RESULT_TYPE_COMMONMETADATA,
     RESULT_TYPE_COMMONOTHER,
     RESULT_PRINTOUT_SUBDIRNAME,
+    RESULT_MULTIKEY_SUBDIRNAME,
     RESULT_JSON_SUBDIRNAME,
     RESULT_IMAGE_SUBDIRNAME,
     RESULT_MIDI_SUBDIRNAME,
     RESULT_AUDIO_SUBDIRNAME,
     DEPLOY_IMAGE_SUBDIRNAME,
     DEPLOY_PRINTOUT_SUBDIRNAME,
+    DEPLOY_MULTIKEY_SUBDIRNAME,
     DEPLOY_JSON_SUBDIRNAME,
     DEPLOY_MIDI_SUBDIRNAME,
     DEPLOY_AUDIO_SUBDIRNAME,
@@ -99,6 +102,9 @@ def deploy_results(ui: UI, cfg: Config) -> None:
         if ftype == RESULT_TYPE_MAIN_PDF:
             src = result_dir / fname
             dst_dir = deploy_dir
+        elif ftype == RESULT_TYPE_MULTIKEY_PDF:
+            src = result_dir / RESULT_MULTIKEY_SUBDIRNAME / fname
+            dst_dir = deploy_dir / DEPLOY_MULTIKEY_SUBDIRNAME
         elif ftype == RESULT_TYPE_PRINTOUT_PDF:
             src = result_dir / RESULT_PRINTOUT_SUBDIRNAME / fname
             dst_dir = deploy_dir / DEPLOY_PRINTOUT_SUBDIRNAME

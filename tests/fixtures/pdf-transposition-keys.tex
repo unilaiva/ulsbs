@@ -1,0 +1,31 @@
+\documentclass[paper={a5paper},maintitle={Prelude Key Layers}]{ulsbs-songbook}
+\begin{document}
+\begin{songs}{}
+\beginsong{Major Key}[id={fixture-1},key={D},gk={Am}]
+  \transpose{2}
+  \beginverse
+    \[C]MajorBody
+  \endverse
+\endsong
+\beginsong{Minor Key}[id={fixture-2},key={F#m},gk={Cm}]
+  \transpose{-2}
+  \beginverse
+    \[G#m]MinorBody
+  \endverse
+\endsong
+\begingroup
+\showkeyfalse
+\beginsong{Hidden Key}[id={fixture-3},key={Am}]
+  \beginverse
+    \[Am]HiddenBody
+  \endverse
+\endsong
+\endgroup
+\beginsong{Missing Key}[id={fixture-4}]
+  \beginverse
+    \[C]MissingBody
+  \endverse
+\endsong
+\end{songs}
+Reusable symbol: \symudarrow.
+\end{document}
