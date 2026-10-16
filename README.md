@@ -48,7 +48,8 @@ For a real-world example of a repository using ULSBS, see:
   - [Page and line breaks](#page-and-line-breaks)
   - [Repeats](#repeats)
   - [Measure bars](#measure-bars)
-  - [Accidentals and alternate chords](#accidentals-and-alternate-chords)
+  - [Keys and accidentals](#keys-and-accidentals)
+  - [Alternate chord sets](#alternate-chord-sets)
   - [Chords and melody blocks inside `\[ ... ]`](#chords-and-melody-blocks-inside---)
   - [Full melodies with Lilypond](#full-melodies-with-lilypond)
   - [Tags](#tags)
@@ -194,7 +195,7 @@ songbook documents must use a ULSBS songbook class or one derived from it.
 And the included song file:
 
 ```tex
-\beginsong{Example Song}[by={Example Author}, key={C}]
+\beginsong{Example Song}[id={example-song},by={Example Author},key={C}]
   \beginverse
     |\[C]This is an example |song line.
     Another |\[G7]line of |\[C]lyrics.
@@ -228,6 +229,8 @@ From the songbook project root:
   - `./ulsbs-compile --profile dev`
 - quick local dev build
   - `./ulsbs-compile --quick my-songbook_A5.tex`
+- compile ordinary editions without extra multikey PDFs
+  - `./ulsbs-compile --no-multikey my-songbook_A5.tex`
 - compile on the host instead of in a container
   - `./ulsbs-compile --no-container`
 - open a shell in the build container
@@ -281,6 +284,7 @@ Depending on configuration and available tools, ULSBS can also produce:
 
 - lyrics-only variants
 - extra instrument variants
+- multikey PDFs with per-song transposition controls
 - printout PDFs
 - JSON exports
 - MIDI files
@@ -472,6 +476,91 @@ Precedence is, from lowest to highest:
 - profile config
 - environment variables
 - CLI flags
+
+### Multikey PDF editions
+
+By default, every selected non-lyrics variant produces an ordinary PDF and an
+additional multikey PDF. In a compatible viewer, readers can select a different
+key for each song through its PDF layer controls. The ordinary PDF remains the
+conventional edition without interactive layers.
+
+```toml
+multikey-books = true
+multikey-layer-ui = "native"
+```
+
+- `multikey-books` is a boolean, default `true`. It follows normal profile
+  inheritance: a profile may enable or disable companions, including enabling
+  them when the root setting is `false`.
+- `multikey-layer-ui` accepts `native` (default) or `hidden`. Hidden mode keeps
+  layers available for programmatic discovery and switching, but requests that
+  viewers hide the native layer list. Viewer support varies.
+- `multikey-require-song-ids` is a boolean, default `false`. Enable it or use
+  `--require-song-ids` to fail multikey builds on missing or invalid song IDs.
+- Musical variant selection is unchanged. Multikey editions do not select extra
+  instrument variants, and lyrics-only output never gets a multikey edition.
+
+Use `--no-multikey` to disable companions for a single invocation. Quick mode
+(`-q`/`--quick`) also disables multikey companions, regardless of the configured
+default, along with its other reduced-output settings.
+
+The `MULTIKEY` marker precedes the musical variant and paper suffix:
+
+| Selected variant | Ordinary PDF | Additional multikey PDF |
+|---|---|---|
+| Main | `book_A5.pdf` | `multikey/book_MULTIKEY_A5.pdf` |
+| Charango | `book_CHARANGO_A5.pdf` | `multikey/book_MULTIKEY_CHARANGO_A5.pdf` |
+| Bass clef | `book_BASSCLEF_A5.pdf` | `multikey/book_MULTIKEY_BASSCLEF_A5.pdf` |
+
+Ordinary PDFs remain at the root under `result/` and, when enabled, `deploy/`;
+multikey PDFs go into their `multikey/` subdirectories. With JSON export enabled,
+each multikey PDF also gets a matching JSON
+companion, reusing the ordinary variant's metadata and media links. Multikey
+jobs do not create extra printouts, MIDI, audio, or cover images.
+All JSON sidecars stay in `json/`.
+Existing flat multikey files from earlier builds are not automatically deleted.
+
+Give each song a stable `id=` containing lowercase letters, digits and dashes.
+Layers use this ID rather than the printed song number. Repeated songs may keep
+the same ID: each occurrence receives independent layers and its own UI position.
+Without a valid ID, a song still prints normally but gets no interactive layers;
+compilation warns, or fails the multikey job when strict ID validation is enabled.
+Existing ordinary metadata validation may still reject malformed IDs.
+Run your ID-assignment tool before compiling; compilation does not rewrite sources.
+Quick mode produces no multikey books and therefore does not enforce this policy.
+
+Multikey PDFs contain key-selection metadata with display labels and header
+positions. Book JSON files expose `has_multikey_info` and `multikey_info`:
+ordinary files use `false` and `null`, while multikey files carry the same
+multikey payload as their PDF. See the
+[viewer integration contract](ARCHITECTURE.md#viewer-integration).
+
+Transposition covers verse chords, inline `\ac` references, pitched melody
+hints, and the declared `key=` badge. Non-default key badges use dark red by
+default and show `⮁` before the key label. The symbol is also available separately
+as `\symudarrow`. Override `transposedkeycolor` with `\colorlet` or `\definecolor`. Recommended
+singing keys (`gk=`), standalone `\altchords`, prose, chord diagrams, and
+LilyPond scores do not switch.
+
+The stock bass-clef setup hides all transposable annotations. Its multikey
+companion therefore has no visible key-switching effect unless those annotations
+are enabled; the bass-clef scores themselves remain unchanged.
+
+Original notation determines layout and default viewing/printing. Alternative
+chord labels may shrink or overflow without reflowing lyrics. Multikey books
+take longer to compile and require `ocgx2`, supplied by the supported toolchain.
+Layer controls and original-only printing depend on the viewer; hidden notation
+may appear in search, copy/paste, or accessibility output. Use the ordinary PDF
+for conventional printing and maximum viewer compatibility.
+
+For manual compilation, the public LaTeX flags remain
+`\ulPdfTranspositionLayers` (`false` by default) and
+`\ulPdfTranspositionLayerUI` (`native` by default). To enable layers, define
+`\newcommand{\ulPdfTranspositionLayers}{true}` before `\documentclass` (or
+before `\usepackage{ulsbs}` with another class). The pipeline supplies these
+flags itself, enabling layers only for multikey jobs; do not duplicate its
+definitions in source files. See [Architecture](ARCHITECTURE.md) for the layer
+protocol, manual-build reruns, layout rules, and detailed viewer limitations.
 
 Some useful environment variables:
 
@@ -702,7 +791,7 @@ Inline repeat marks:
 Block repeat bars on the left side of lyric lines:
 
 ```tex
-\beginsong{My Song}
+\beginsong{My Song}[id={my-song}]
   \beginverse
     \beginrep
       Here are lyrics for the verse
@@ -746,14 +835,41 @@ So the rule of thumb is:
 
 To hide measure bars in the final document, use `\measuresoff`.
 
-### Accidentals and alternate chords
+### Keys and accidentals
+
+The song's `key=` describes its already-effective printed key, **after** any
+user `\transpose` offset. Do not give the untransposed source key when the song
+is printed in another key. For example, to print source C-major notation in F:
+
+```tex
+\beginsong{Example}[id={transposed-example},key={F}]
+  \transpose{5}
+  \beginverse
+    |\[C]Home |\[F]fourth |\[G#]raised fifth.
+  \endverse
+\endsong
+```
+
+The printed chords are F, B-flat, and C-sharp. ULSBS infers source C major by
+subtracting the five-semitone offset from the declared F major. The prelude
+already says F and is not transposed again.
+
+Both ordinary source transposition and multikey selection preserve scale degree
+and chromatic alteration, not just pitch class. Major and natural minor are the
+reference scales; raised harmonic/melodic-minor degrees retain their alterations.
+This applies to chord roots, slash basses, and pitched melody hints even in
+ordinary PDFs without layers. Double-accidental results use a pitch-equivalent
+single-accidental spelling. Missing keys use the current `\preferflats` or
+`\prefersharps` setting without inferring a key from the first chord; unsupported
+keys also use that fallback and issue a warning. Enharmonic source-key inference
+uses conventional tonic spellings, detailed in [Architecture](ARCHITECTURE.md#key-spelling).
 
 Write a sharp as `#` and a flat as `&` in musical contexts. The shorthand is
 supported in ordinary `\[ ... ]` chords and melody blocks, in `\altchords`, in
 the `key` and `gk` values of `\beginsong`, and in the `key` value of `\audio`:
 
 ```tex
-\beginsong{Example}[key={C#m},gk={B&m, Am--C#m}]
+\beginsong{Example}[id={key-example},key={C#m},gk={B&m, Am--C#m}]
   \audio[key={F#m}]{https://example.test/recording}
   \beginverse
     |\[C#m]Example line \altchords{\id[1]{alt. (B&m)}|B&m |F#7}
@@ -764,6 +880,17 @@ the `key` and `gk` values of `\beginsong`, and in the `key` value of `\audio`:
 Outside these musical contexts, use `\shrp` and `\flt` to print sharp and flat
 symbols. Use `\#` and `\&` only when the text calls for a literal hash sign or
 ampersand rather than a musical accidental.
+
+Supported transposition keys contain an A--G tonic, an optional accidental, and
+an optional `m`, for example `F`, `B&`, or `C#m`. Existing `\shrp` and `\flt`
+macros also work in key metadata. A lowercase `b` is not a flat alias: write
+`B&`, not `Bb`.
+
+#### Alternate chord sets
+
+Use `\altchords{...}` for a standalone alternate chord set; `\id[<n>]{...}`
+labels it, and `\ac{<n>}{<chord>}` identifies a repetition-specific chord.
+These sets do not switch with the multikey PDF layers.
 
 Alternate chords do not follow `\transpose` by default. Enable this explicitly
 with `\transposealtchordstrue`; restore the default with
@@ -912,7 +1039,7 @@ Be careful with whitespace.
 Tags are attached with the `tags=` key in `\beginsong`:
 
 ```tex
-\beginsong{Song name}[tags={love, smile}]
+\beginsong{Song name}[id={song-name},tags={love, smile}]
 ```
 
 In the Unilaiva repository, allowed tags are listed in `include/tags.can`.
@@ -933,6 +1060,21 @@ Those are enabled by a special comment in the main `.tex` file, for example:
 The exact post-setup files for such variants live under:
 
 - `src/ulsbs/assets/tex/`
+
+This comment-based selection is unchanged. Each selected non-lyrics variant
+also gets a multikey PDF when `multikey-books` is enabled; multikey is an edition,
+not another instrument variant. See [Multikey PDF editions](#multikey-pdf-editions).
+
+MIDI and audio exports normally come only from the main ordinary variant.
+Optional ordinary variants explicitly support `--midifiles-allow-for-optional-variants`
+and `--audiofiles-allow-for-optional-variants` (or the corresponding TOML keys).
+These opt-ins use each variant's own generated MIDI, not the main variant's
+files. MIDI export must still be enabled for the MIDI opt-in, and audio export
+for the audio opt-in: `--no-midi` and `--no-audio` independently disable their
+respective exports. Multikey editions never generate MIDI or audio regardless of opt-ins.
+Audio still requires intermediate MIDI and internal song metadata: `--no-midi`
+disables exported MIDI files, not the MIDI needed to encode enabled audio.
+Likewise, disabling JSON export does not remove metadata needed for audio.
 
 ### Creating song selections
 
@@ -1042,7 +1184,13 @@ Useful options:
 Host testing is intended for development only; the containerized suite is the
 canonical result because it uses the supported ULSBS toolchain and fonts.
 
+Renderer validation, PDF inspection, and performance observations are documented
+in [Architecture](ARCHITECTURE.md#validation-and-performance).
+
 ## More information
+
+[Architecture](ARCHITECTURE.md) describes build-job contracts, the PDF layer
+protocol, notation state and layout, key spelling, and viewer compatibility.
 
 The most important source files to inspect when extending or debugging ULSBS
 are:

@@ -48,7 +48,7 @@
 # CLI highlights (override config):
 # - Flags like --no-container, --container-rebuild, --shell, --pull, --sequential, --max-parallel,
 #   --no-deploy, --no-printouts, --no-coverimage, --no-json, --no-midi, --no-audio,
-#   --no-extrainstr, --no-lyric, -q/--quick, --deploy-last, --deploy-common, --max-log-lines.
+#   --no-extrainstr, --no-lyric, --no-multikey, -q/--quick, --deploy-last, --deploy-common, --max-log-lines.
 # - Passing files on the CLI overrides songbook selection.
 
 
@@ -77,9 +77,31 @@ coverimage = true            # default: true
 json = true                  # default: true
 midifiles = true             # default: true
 audiofiles = true            # default: true
+# Optional ordinary variants normally do not export media. Explicit opt-ins use
+# each variant's own generated MIDI, not the main variant's files:
+midifiles-allow-for-optional-variants = false # requires midifiles = true
+audiofiles-allow-for-optional-variants = false # requires audiofiles = true
+# --no-midi and --no-audio independently disable their respective exports.
+# Enabled audio still needs intermediate MIDI and internal metadata even when
+# exported MIDI files or JSON export are disabled.
+# Multikey jobs never generate MIDI or audio regardless of these opt-ins.
 extrainstrumentbooks = true  # default: true
 lyricbooks = true            # default: true
 fast-audio-encode = false    # default: false; if true, use faster audio encoding (limiter instead of loudnorm)
+multikey-books = true        # default: true; add a multikey PDF beside each selected non-lyrics variant
+multikey-layer-ui = "native" # native (default) or hidden; hidden keeps layers discoverable
+multikey-require-song-ids = false # fail multikey jobs on missing/invalid IDs; CLI: --require-song-ids
+# IDs use lowercase letters, digits and dashes. Without strict validation,
+# missing/invalid IDs skip a song's layers with a warning. Source files are not rewritten.
+# Normal profile inheritance applies: profiles can enable or disable extras,
+# including enabling them when the root multikey-books setting is false.
+# --no-multikey and -q/--quick disable extra multikey PDFs for one invocation.
+# Ordinary PDFs are always retained; lyrics-only variants never get multikey editions.
+# PDF paths: book_A5.pdf + multikey/book_MULTIKEY_A5.pdf;
+#            book_CHARANGO_A5.pdf + multikey/book_MULTIKEY_CHARANGO_A5.pdf (same for BASSCLEF).
+# JSON companions stay in json/. Both result/ and deploy/ use this layout.
+# Multikey jobs produce PDFs and matching JSON (when enabled), reusing ordinary
+# metadata/media links. They do not create printouts, MIDI, audio or covers.
 
 # Cover image extraction and modified PNGs
 cover-image-height = 1024    # default: 1024; height in pixels for pdftoppm -scale-to-y

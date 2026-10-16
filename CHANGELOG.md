@@ -7,6 +7,13 @@ the extension is released.
 
 ### Added
 
+- Separate `_MULTIKEY` PDFs in `multikey/` with per-song key selection for non-lyrics variants;
+  ordinary PDFs remain layer-free. See [Multikey PDF editions](README.md#multikey-pdf-editions).
+- `multikey-books`, `multikey-layer-ui`, and `--no-multikey` controls. Quick
+  builds skip multikey output.
+- Song-ID-based layers, independent repeated-song controls, and embedded multikey
+  metadata shared with JSON companions. `--require-song-ids` enables strict validation.
+- An [architecture reference](ARCHITECTURE.md) for implementation details.
 - `+` modifier for `\beginverse`, enabling the larger melody-note line spacing
   previously selected by a separate verse command. It composes with the
   existing unnumbered `*` modifier and `[n]` indentation as
@@ -14,6 +21,12 @@ the extension is released.
 
 ### Changed
 
+- Source and multikey transposition follow `key=`, preserving scale degrees and
+  chromatic alterations.
+- All books use three LuaLaTeX passes (draft, full, full). Non-original key tags
+  use a red transpose indicator; detailed job settings are shown only with `--verbose`.
+- Avoid unnecessary MIDI generation for multikey and optional editions while
+  preserving audio dependencies and explicit optional-variant export settings.
 - `ulsbs-migrate-syntax-v1` now converts legacy melody-spaced verse delimiters
   to `\beginverse+...\endverse` while preserving numbering and indentation.
 - Song metadata extraction and the VS Code extension now recognize every
