@@ -232,6 +232,13 @@
 \newsavebox{\UL@pdfaltbox}
 \newsavebox{\UL@pdfresultbox}
 \newsavebox{\UL@pdfanchorbox}
+% Keep the alternate ink in a zero-advance transform. Its matrix can then be
+% adjusted after lyric collection without changing any layout-bearing node.
+\newcommand{\UL@pdfscalechord}{%
+  \pdfextension save\relax
+  \pdfextension setmatrix{\UL@pdfscale\space 0 0 \UL@pdfscale}%
+  \rlap{\copy\UL@pdfaltbox}%
+  \pdfextension restore\relax}
 \let\UL@pdfpreludesongid\@empty
 \ifUL@pdflayers
   \directlua{ulsbs_multikey=dofile(assert(kpse.find_file("ulsbs-multikey.lua","tex"),
@@ -592,8 +599,14 @@
       \fi
     \fi
     \edef\UL@pdfscale{\fp_to_decimal:N \l_tmpa_fp}
+    \dim_set:Nn \l_tmpa_dim {\wd\UL@pdfaltbox}
     \setbox\UL@pdfaltbox\hbox{\UL_pdf_mark:nn {##1}
-      {\scalebox{\UL@pdfscale}{\copy\UL@pdfaltbox}}}
+      {\int_compare:nNnTF {#3}={1}
+        {\UL@pdfscalechord}
+        {\scalebox{\UL@pdfscale}{\copy\UL@pdfaltbox}}}}
+    \int_compare:nNnT {#3}={1}
+      {\directlua{ulsbs_multikey.tag_chord(\number\UL@pdfaltbox,
+        \number\wd\UL@pdfbasebox,\number\l_tmpa_dim)}}
     % Only t00 determines width, height, depth, and baseline.
     \global\setbox\UL@pdfaltbox\hbox{\smash{\rlap{%
       \ifUL@pdfrightalign
@@ -3953,6 +3966,16 @@
       \setbox\SB@chordbox\hbox{\unhbox\SB@chordbox\kern\@tempdima}%
     \fi
   \fi\fi
+}
+\let\UL@songs@emitchord\SB@emitchord
+\def\SB@emitchord{%
+  % At this point songs has already typeset the lyrics exactly once. Reuse
+  % their measured width, never retypeset them or widen the original chord box.
+  \ifUL@pdflayers
+    \directlua{ulsbs_multikey.fit_chords(\number\SB@chordbox,
+      \number\wd\SB@lyricbox,\ulPdfTranspositionMinimumScale)}%
+  \fi
+  \UL@songs@emitchord
 }
 \let\UL@songs@@chord\SB@@chord
 % Localized entry parser. Accepted forms are \[<...>chord] and

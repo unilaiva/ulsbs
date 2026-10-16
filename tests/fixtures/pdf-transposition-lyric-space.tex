@@ -1,0 +1,93 @@
+\documentclass[paper={a5paper},maintitle={Lyric Space Test}]{ulsbs-songbook}
+\makeatletter
+\newdimen\ULtestfitwidth
+\newcount\ULtestlyriccalls
+\newcommand{\ULtestlyric}{\global\advance\ULtestlyriccalls by 1 happy tune}
+\ifUL@pdflayers
+  \directlua{
+    local fit = ulsbs_multikey.fit_chords
+    local attribute = luatexbase.attributes["ulsbs.multikey.chord_width"]
+    local natural = luatexbase.attributes["ulsbs.multikey.alternate_width"]
+    local function record(box, spare)
+      for n in node.traverse(box.head) do
+        if n.id == node.id("hlist") then
+          local original = node.has_attribute(n, attribute)
+          if original then
+            for matrix in node.traverse(n.head) do
+              if matrix.id == node.id("whatsit") and matrix.subtype == node.subtype("pdf_setmatrix") then
+                texio.write_nl("ULSBS-FIT:" .. token.get_macro("ULtestcase") .. ":"
+                  .. original .. ":" .. node.has_attribute(n, natural) .. ":"
+                  .. spare .. ":" .. matrix.data:match("^[^ ]+") .. ";")
+              end
+            end
+          else
+            record(n, spare)
+          end
+        end
+      end
+    end
+    ulsbs_multikey.fit_chords = function(number, lyrics, minimum)
+      local box = tex.box[number]
+      local width, height, depth = box.width, box.height, box.depth
+      fit(number, lyrics, minimum)
+      assert(box.width == width and box.height == height and box.depth == depth)
+      record(box, lyrics - width)
+    end
+  }
+\fi
+\makeatother
+\begin{document}
+\makeatletter
+\sbox\UL@pdfbasebox{\ulChordFont C\shrp}
+\ULtestfitwidth=.9\wd\UL@pdfbasebox
+\sbox\UL@pdfbasebox{\ulChordFont\kern.2em}
+\advance\ULtestfitwidth by \wd\UL@pdfbasebox
+\makeatother
+\begin{songs}{}
+\beginsong{Lyric Space}[id={fixture-1},key={C}]
+  \def\ULtestcase{example}
+  \beginverse
+    Please \[C]sing \[C]a \[C]{\ULtestlyric}.
+  \endverse
+  \def\ULtestcase{partial}
+  \beginverse
+    \[C]{\makebox[\ULtestfitwidth][l]{i}} fit.
+  \endverse
+  \def\ULtestcase{adjacent}
+  \beginverse
+    \[C]\[C]{wide words}.
+  \endverse
+  \def\ULtestcase{split}
+  \beginverse
+    \[C\ac{1}{G}C]{shared middle}.
+  \endverse
+  \def\ULtestcase{suffix}
+  \beginverse
+    \[C\ac{1}{G}]{shared suffix}.
+  \endverse
+  \newchords{lyricspace}
+  \def\ULtestcase{stored}
+  \beginverse\memorize[lyricspace]
+    \[C]i.
+  \endverse
+  \def\ULtestcase{replay}
+  \beginverse\replay[lyricspace]
+    ^{replayed phrase}.
+  \endverse
+  \newchords{lyricspacepair}
+  \def\ULtestcase{storedpair}
+  \beginverse\memorize[lyricspacepair]
+    \[C]i \[C]i.
+  \endverse
+  \def\ULtestcase{repeat}
+  \beginverse\replay[lyricspacepair]
+    This ^is another ^verse.
+  \endverse
+  \def\ULtestcase{empty}
+  \beginverse
+    \[C]
+  \endverse
+\endsong
+\end{songs}
+\typeout{ULSBS-LYRIC-CALLS:\the\ULtestlyriccalls}
+\end{document}

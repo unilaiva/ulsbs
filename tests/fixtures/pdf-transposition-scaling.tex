@@ -2,10 +2,10 @@
 \makeatletter
 \newcount\ULtestsideeffects
 \newcommand{\ULtestsideeffect}{\global\advance\ULtestsideeffects by 1 C}
-\let\ULtestoriginalscalebox\scalebox
-\newcommand{\ULtestrecordscale}[2]{%
+\let\ULtestoriginalscalechord\UL@pdfscalechord
+\newcommand{\ULtestrecordscale}{%
   \typeout{ULSBS-SCALE:\ULtestcase:\UL@pdfscale:\strip@pt\wd\UL@pdfbasebox:\strip@pt\wd\UL@pdfaltbox}%
-  \ULtestoriginalscalebox{#1}{#2}}
+  \ULtestoriginalscalechord}
 \makeatother
 \begin{document}
 \begin{songs}{}
@@ -15,7 +15,7 @@
   \endverse
   \typeout{ULSBS-GROUP-SIDEEFFECT:\the\ULtestsideeffects}
   \makeatletter
-  {\let\scalebox\ULtestrecordscale\ulChordFont
+  {\let\UL@pdfscalechord\ULtestrecordscale\ulChordFont
     \def\ULtestcase{wide}\UL@pdfvisual{C\shrp m}{\@firstofone}{1}
     \def\ULtestcase{short}\UL@pdfvisual{C}{\@firstofone}{1}
     \def\ULtestcase{equal}\UL@pdfvisual{X}{\@firstofone}{1}

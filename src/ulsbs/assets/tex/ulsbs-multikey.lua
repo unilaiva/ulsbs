@@ -1,6 +1,6 @@
 -- SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 -- SPDX-License-Identifier: GPL-3.0-or-later
--- Shipout-derived multikey manifest, embedded as JSON in an XMP property.
+-- Lyric-safe chord fitting and a shipout-derived multikey manifest in XMP.
 
 local M = {}
 local songs, by_id = {}, {}
@@ -9,6 +9,78 @@ local sp_per_bp = 65536 * 72.27 / 72
 
 local function fail(message)
   error("ULSBS multikey: " .. message, 2)
+end
+
+local chord_width = luatexbase.new_attribute("ulsbs.multikey.chord_width")
+local alternate_width = luatexbase.new_attribute("ulsbs.multikey.alternate_width")
+local hlist_id = node.id("hlist")
+local vlist_id = node.id("vlist")
+local glyph_id = node.id("glyph")
+local rule_id = node.id("rule")
+local glue_id = node.id("glue")
+local kern_id = node.id("kern")
+local whatsit_id = node.id("whatsit")
+local matrix_subtype = node.subtype("pdf_setmatrix")
+
+-- Attributes survive the copies and nested boxes used by songs and melody
+-- annotations. Tag only the explicit alternate wrapper, not its descendants.
+function M.tag_chord(box_number, original, alternative)
+  if original > 0 and alternative > 0 then
+    local box = tex.box[box_number]
+    node.set_attribute(box, chord_width, original)
+    node.set_attribute(box, alternate_width, alternative)
+  end
+end
+
+-- The original chord/lyric pair reserves max(chord width, lyric width). Only
+-- a trailing chord chunk may borrow the spare lyric width: growing an earlier
+-- chunk could cover a following chord, inline hint or other shared material.
+-- Ignore paragraph spaces and broken-word hyphen padding, since they are not
+-- a guaranteed part of this pair. No dimensions or t00 nodes are ever changed.
+function M.fit_chords(box_number, lyric_width, minimum_scale)
+  local chord = tex.box[box_number]
+  if not chord or lyric_width <= chord.width then return end
+  local candidates, rightmost = {}, 0
+
+  local function visit(box, x)
+    for n in node.traverse(box.head) do
+      if n.id == hlist_id then
+        local original = node.has_attribute(n, chord_width)
+        if original then
+          candidates[#candidates + 1] = {box = n, x = x, original = original}
+        else
+          visit(n, x)
+        end
+        x = x + n.width
+      elseif n.id == glue_id then
+        x = x + node.effective_glue(n, box)
+      elseif n.id == kern_id then
+        x = x + n.kern
+      else
+        if n.id == glyph_id or n.id == rule_id or n.id == vlist_id then
+          rightmost = math.max(rightmost, x + n.width)
+        end
+        x = x + (n.width or 0)
+      end
+    end
+  end
+  visit(chord, 0)
+  for _, candidate in ipairs(candidates) do
+    if candidate.x + candidate.original >= rightmost - 1 then
+      -- Preserve songs' trailing chord separation (and any other padding),
+      -- borrowing only the extra width already reserved by these lyrics.
+      local available = candidate.original + lyric_width - chord.width
+      local natural = node.has_attribute(candidate.box, alternate_width)
+      local scale = math.max(minimum_scale, math.min(1, available / natural))
+      -- This is our own wrapper's matrix, not any nested glyph scaling.
+      for transform in node.traverse(candidate.box.head) do
+        if transform.id == whatsit_id and transform.subtype == matrix_subtype then
+          transform.data = string.format("%.8f 0 0 %.8f", scale, scale)
+          break
+        end
+      end
+    end
+  end
 end
 
 local function json_string(value)

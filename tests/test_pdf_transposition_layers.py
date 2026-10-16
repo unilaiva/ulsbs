@@ -413,6 +413,80 @@ class PdfTranspositionLayerIntegrationTests(unittest.TestCase):
                     self.assertGreater(wider, 0, "Exercise proportional shrinking above the floor")
                 self.assertIn("ULSBS-GROUP-SIDEEFFECT:1", output)
 
+    def test_chords_use_spare_lyric_width_without_changing_layout(self) -> None:
+        output, enabled = compile_fixture("pdf-transposition-lyric-space", passes=3)
+        disabled_output, disabled = compile_fixture(
+            "pdf-transposition-lyric-space", passes=3,
+            preamble="\\def\\ulPdfTranspositionLayers{false}\n",
+        )
+        for log in (output, disabled_output):
+            self.assertIn("ULSBS-LYRIC-CALLS:1", log)
+        self.assertEqual(rendered_pages(enabled), rendered_pages(disabled))
+        original_words = words_and_geometry(disabled)
+        # Poppler can group adjacent original chords into one word in a plain
+        # PDF, but separate them when optional-content boxes intervene.
+        lyric_words = {word[1] for word in original_words
+                       if word[1] != "Key:" and not re.fullmatch(r"[A-G]+", word[1])}
+        self.assertEqual(
+            [word for word in words_and_geometry(enabled) if word[1] in lyric_words],
+            [word for word in original_words if word[1] in lyric_words],
+        )
+
+        samples = re.findall(
+            r"ULSBS-FIT:([a-z]+):(\d+):(\d+):(-?\d+):([\d.]+);",
+            output.replace("\n", ""),
+        )
+        cases = {}
+        for case, original, natural, spare, scale in samples:
+            cases.setdefault(case, []).append(
+                (int(original), int(natural), int(spare), float(scale))
+            )
+        self.assertEqual(
+            {case: len(values) for case, values in cases.items()},
+            dict(example=33, partial=11, adjacent=22, split=33, suffix=22,
+                 stored=11, replay=11, storedpair=22, repeat=22, empty=11),
+        )
+
+        def assert_scales(values, full_size):
+            for original, natural, _, scale in values:
+                expected = 1 if full_size else max(0.85, min(1, original / natural))
+                self.assertAlmostEqual(scale, expected, delta=0.00002)
+
+        assert_scales(cases["example"][:11], True)  # sing
+        assert_scales(cases["example"][11:22], False)  # a
+        assert_scales(cases["example"][22:], True)  # braced happy tune
+        for case in ("adjacent", "split"):
+            assert_scales(cases[case][:-11], False)
+            assert_scales(cases[case][-11:], True)
+        assert_scales(cases["suffix"][:11], False)
+        assert_scales(cases["suffix"][11:], True)
+        for case in ("stored", "storedpair", "empty"):
+            assert_scales(cases[case], False)
+        assert_scales(cases["replay"], True)
+        # Bare ^ replay is measured against each new lyric, not against the
+        # original memorized syllable or another replay location's width.
+        for original, natural, spare, scale in cases["repeat"][:11]:
+            expected = max(0.85, min(1, (original + max(0, spare)) / natural))
+            self.assertAlmostEqual(scale, expected, delta=0.00002)
+        assert_scales(cases["repeat"][11:], True)
+        # A deliberately narrow lyric box permits proportional shrinking above
+        # the floor for wider alternatives, and full size for narrower ones.
+        for original, natural, spare, scale in cases["partial"]:
+            expected = max(0.85, min(1, (original + spare) / natural))
+            self.assertAlmostEqual(scale, expected, delta=0.00002)
+        self.assertTrue(any(0.85 < scale < 1 for _, _, _, scale in cases["partial"]))
+
+        structure = PdfStructure(enabled)
+        for offset in range(1, 12):
+            selected = structure.selected_pdf(enabled, {1: offset})
+            # Chord text changes, but every lyric word and page stays put.
+            self.assertEqual(
+                [word for word in words_and_geometry(selected) if word[1] in lyric_words],
+                [word for word in original_words if word[1] in lyric_words],
+            )
+        self.assert_valid_layer_content(enabled)
+        pdf_command(enabled, ["qpdf", "--check", "{pdf}"])
+
     def assert_valid_layer_content(self, pdf: bytes) -> None:
         structure = PdfStructure(pdf)
         used_layers = set()
