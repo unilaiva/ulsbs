@@ -39,7 +39,11 @@ build-backend = "setuptools.build_meta"
 
 [tool.ruff]
 line-length = 100
-select = ["F", "W", "B"] # "E"
+lint.select = ["F", "W", "B"] # "E"
+
+[tool.pyrefly]
+preset = "basic"
+search-path = ["src", "tests"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

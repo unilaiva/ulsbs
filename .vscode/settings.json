@@ -26,13 +26,15 @@
 
   // Language server: use JediLSP instead of Pylance
   "python.languageServer": "Jedi",
-  // Jedi: find source
+  // Jedi: find source and sibling test modules
   "python.autoComplete.extraPaths": [
-    "${workspaceFolder}/src"
+    "${workspaceFolder}/src",
+    "${workspaceFolder}/tests"
   ],
-  // Pylance: find sources
+  // Pylance: find source and sibling test modules
   "python.analysis.extraPaths": [
-    "${workspaceFolder}/src"
+    "${workspaceFolder}/src",
+    "${workspaceFolder}/tests"
   ],
   // Use ruff as the python linter
   "python.linting.pylintEnabled": false,

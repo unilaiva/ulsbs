@@ -35,6 +35,7 @@ RUN apt-get update \
     poppler-utils \
     python3 \
     python3-pikepdf \
+    qpdf \
     texlive \
     texlive-font-utils \
     texlive-lang-arabic \
