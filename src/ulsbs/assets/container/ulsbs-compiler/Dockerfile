@@ -34,6 +34,7 @@ RUN apt-get update \
     lilypond \
     poppler-utils \
     python3 \
+    python3-pikepdf \
     texlive \
     texlive-font-utils \
     texlive-lang-arabic \

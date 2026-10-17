@@ -40,6 +40,7 @@ For a real-world example of a repository using ULSBS, see:
   - [Host build (`--no-container`)](#host-build---no-container)
   - [Platform-specific setup examples](#platform-specific-setup-examples)
 - [Configuration](#configuration)
+  - [Multikey PDF editions](#multikey-pdf-editions)
 - [Writing songbooks](#writing-songbooks)
   - [General structure](#general-structure)
   - [`ulsbs-songbook` document class options](#ulsbs-songbook-document-class-options)
@@ -49,7 +50,6 @@ For a real-world example of a repository using ULSBS, see:
   - [Repeats](#repeats)
   - [Measure bars](#measure-bars)
   - [Keys and accidentals](#keys-and-accidentals)
-  - [Alternate chord sets](#alternate-chord-sets)
   - [Chords and melody blocks inside `\[ ... ]`](#chords-and-melody-blocks-inside---)
   - [Full melodies with Lilypond](#full-melodies-with-lilypond)
   - [Tags](#tags)
@@ -293,6 +293,12 @@ Depending on configuration and available tools, ULSBS can also produce:
 
 If deployment is enabled, files are also copied under `deploy/`.
 
+Songbook PDFs automatically share identical embedded font data to reduce file
+size, especially in books with many Lilypond scores. All embedded glyphs and the
+book's appearance are preserved; fonts are not substituted or removed. This is
+always enabled, including for quick builds. Multikey layers and key-selection
+metadata are preserved. Books without duplicate font data are left unchanged.
+
 ## Requirements
 
 ### Recommended: container build
@@ -330,6 +336,7 @@ Important host dependencies include:
 - Lilypond with `lilypond-book`
 - `bash`
 - `python3` 3.11+
+- Python package `pikepdf` 8+ (mandatory for automatic PDF font sharing)
 - Noto fonts (`Noto Sans`, `Noto Serif`, with needed weights)
 - locale `fi_FI.utf8`
 
@@ -429,7 +436,7 @@ setup:
 
 ```sh
 sudo apt update
-sudo apt install bash locales git python3 context context-modules ffmpeg fluidsynth fluid-soundfont-gm fonts-noto-core fonts-noto-extra fonts-noto-mono imagemagick lilypond poppler-utils texlive texlive-font-utils texlive-lang-arabic texlive-lang-english texlive-lang-european texlive-lang-portuguese texlive-lang-spanish texlive-latex-base texlive-latex-extra texlive-luatex texlive-music texlive-plain-generic
+sudo apt install bash locales git python3 python3-pikepdf context context-modules ffmpeg fluidsynth fluid-soundfont-gm fonts-noto-core fonts-noto-extra fonts-noto-mono imagemagick lilypond poppler-utils texlive texlive-font-utils texlive-lang-arabic texlive-lang-english texlive-lang-european texlive-lang-portuguese texlive-lang-spanish texlive-latex-base texlive-latex-extra texlive-luatex texlive-music texlive-plain-generic
 sudo locale-gen fi_FI.utf8
 sudo mtxrun --generate
 

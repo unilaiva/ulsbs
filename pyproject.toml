@@ -12,7 +12,7 @@ classifiers = [
   "Programming Language :: Python :: 3",
 ]
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["pikepdf>=8"]
 
 [project.optional-dependencies]
 dev = [

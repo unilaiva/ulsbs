@@ -9,6 +9,7 @@ This file is part of the 'ulsbs' package.
 from __future__ import annotations
 
 import concurrent.futures as cf
+import importlib.util
 import json
 import os
 import re
@@ -16,6 +17,7 @@ import shlex
 import shutil
 import signal
 import threading
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List
@@ -180,10 +182,16 @@ def die_log(ui: UI, cfg: Config, job: Job, cwd: Path, message: str, log_path: Pa
 
 
 def require_tools() -> None:
-    """Ensure required external tools are available in PATH."""
+    """Ensure required tools and Python dependencies are available."""
     for t in ("lualatex", "texlua", "lilypond-book"):
         if which(t) is None:
             raise SystemExit(f"'{t}' binary not found in PATH")
+    if importlib.util.find_spec("pikepdf") is None:
+        raise SystemExit(
+            "Python dependency 'pikepdf' is required for PDF font deduplication. "
+            "Install it with pip install 'pikepdf>=8' (or apt install python3-pikepdf), "
+            "or rebuild the compiler container."
+        )
 
 
 def build_include_paths(cfg: Config, job: Job) -> tuple[dict[str, str], list[str], list[Path]]:
@@ -667,6 +675,28 @@ def step_texlua_indices(
     else:
         ui.warning_line("Skipping creating tag index: tag definition file not found!")
     return step
+
+
+def step_pdf_fonts(ui: UI, cfg: Config, job: Job, basename: str, step: int) -> int:
+    """Deduplicate font programs using the optimizer's validated atomic replacement."""
+    txt_doc = ui.fmt_doc(job)
+    log_path = job.compile_dir / f"{step:02d}_pdf-fonts.log"
+    ui.exec_line(f"{txt_doc} {ui.fmt_step(step)} internal: deduplicate PDF fonts")
+    try:
+        from .pdf_fonts import deduplicate_fonts
+
+        original, final, removed = deduplicate_fonts(job.compile_dir / f"{basename}.pdf")
+        summary = (
+            f"PDF fonts: {original} -> {final} bytes; saved {original - final} bytes; "
+            f"removed {removed} duplicate font-program streams"
+        )
+        write_text(log_path, summary + "\n")
+    except Exception as e:
+        write_text(log_path, traceback.format_exc())
+        raise CompileError(f"PDF font deduplication failed: {e}", log_path) from e
+    if cfg.verbose:
+        ui.debug_line(f"{txt_doc} {summary}")
+    return step + 1
 
 
 def step_context_printouts(
@@ -1404,7 +1434,7 @@ def compile_one_job(
             if cfg.json and multikey_payload_sink is not None:
                 multikey_payload_sink[job] = payload
 
-        # Ensure PDF exists and copy to result dir
+        # Ensure PDF exists before post-processing or publication.
         produced_pdf = cwd / f"{basename}.pdf"
         if not produced_pdf.exists():
             die_log(
@@ -1415,6 +1445,11 @@ def compile_one_job(
                 message="Expected PDF not produced by lualatex.",
                 log_path=last_tex_log,
             )
+        try:
+            step = step_pdf_fonts(ui, cfg, job, basename, step)
+        except CompileError as ce:
+            die_log(ui, cfg, job, cwd=cwd, message=str(ce), log_path=ce.log_path)
+
         dst_pdf = pdf_dir / produced_pdf.name
         shutil.copy2(produced_pdf, dst_pdf)
         resultlist.append_line(

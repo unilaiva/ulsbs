@@ -21,6 +21,10 @@ the extension is released.
 
 ### Changed
 
+- Songbook PDFs, including multikey editions, now use automatic, lossless font
+  sharing to reduce file size while preserving appearance and all embedded glyphs.
+  Host builds require `pikepdf` 8+; rebuild existing compiler images after upgrading. See
+  [requirements](README.md#requirements).
 - Source and multikey transposition follow `key=`, preserving scale degrees and
   chromatic alterations.
 - All books use three LuaLaTeX passes (draft, full, full). Non-original key tags

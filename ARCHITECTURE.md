@@ -3,6 +3,59 @@
 This reference describes ULSBS internals and implementation contracts. For writing
 sources and compiling books, start with the [README](README.md).
 
+## PDF Font Sharing
+
+All published jobs run `pipeline.py:step_pdf_fonts` after the third and final
+LuaLaTeX pass, before publishing the job PDF to `result/`. The step calls
+`pdf_fonts.py:deduplicate_fonts` on the canonical job PDF, so publication,
+printouts, and cover extraction all consume the same validated artifact. It also
+runs for quick, lyrics-only, instrument, and multikey editions. Multikey jobs first
+validate their final-pass metadata; disabled companions are still skipped before
+optimization or publication. LilyPond generation, the processed source tree,
+MIDI/audio associations, and JSON export contracts are unchanged.
+
+Font sharing is always enabled. `pikepdf>=8` is a required compiler dependency,
+checked before compilation even when there are no scores
+or duplicate fonts. The container installs `python3-pikepdf`; host installation
+and image-rebuild instructions are in the [README requirements](README.md#requirements).
+No external optimizer executable is required. Syntax checking supports both the
+older `Pdf.check()` API and its replacement, `Pdf.check_pdf_syntax()`.
+
+The optimizer shares only identical decoded `/FontFile`, `/FontFile2`, or
+`/FontFile3` streams whose semantic dictionaries also match. Hashes locate
+candidates, but exact byte equality authorizes sharing. Stream length, filter,
+and decoding parameters are excluded from the identity after decoding; other
+entries, such as font subtype and Type 1 segment lengths, must match. Font
+names alone are never evidence of equivalence. Each font dictionary, encoding,
+width table, and Unicode map remains intact. Different subsets are not merged,
+and every original embedded glyph program remains available, including Noto Sans
+programs used by LilyPond lyrics. Fonts are neither substituted nor unembedded.
+
+A rewrite is saved to a temporary file in the job directory. Before replacement,
+the candidate must be smaller, pass libqpdf syntax checks, and preserve the entire
+reachable logical document graph. Comparison covers decoded streams, resource
+dictionaries, metadata, multikey layer configuration, page dimensions, outlines,
+links, and destinations; page identity is checked even for identical-looking
+pages. Physical cross-reference
+serialization and the PDF file identifiers (`/ID`) are not compared. Unsupported image codecs
+must retain their encoded bytes and decoding parameters. Metadata rewriting is
+disabled. Only a validated candidate is atomically renamed over the canonical
+PDF. No-duplicate inputs are not rewritten; non-shrinking candidates are discarded.
+Optimization or validation errors fail the job before publication without
+replacing the original PDF. Encrypted or signed inputs are rejected rather than
+silently invalidated.
+
+`tests/test_pdf_fonts.py` covers stream identity, semantic validation, idempotence,
+and atomic replacement/failure behavior. Pipeline tests cover publication order,
+failure handling, and multikey publication. `tests/test_pdf_fonts_integration.py`
+exercises real cold/warm lilypond-book and LuaLaTeX builds, comparing rendered
+pixels and text geometry, checking embedded fonts, and preserving staged sources
+and media mappings. Multikey integration checks embedded JSON and all twelve
+key selections, requiring both identical baseline/candidate pixels and visible
+differences between key selections. Rendering comparisons are regression checks,
+not part of every production build's runtime validation. Savings depend on exact
+duplication; substantial distinct-subset overhead may remain.
+
 ## Multikey Books
 
 ### Build jobs and publication
@@ -175,7 +228,8 @@ artifact. Python captures it before cleanup. Exported ordinary book JSON has
 `has_multikey_info: false` and `multikey_info: null`; exported multikey book JSON
 retains ordinary book metadata and adds the exact embedded `multikey_info`
 object with `has_multikey_info: true`. Full book metadata is not embedded in
-ordinary PDFs, and no extra PDF postprocessing stage is required.
+ordinary PDFs. Embedding multikey metadata requires no extra PDF postprocessing
+stage; font sharing is the separate step described above and preserves that metadata.
 
 Each LuaLaTeX pass first removes any prior renderer artifact. Disabled capability
 writes a current-run `false`/`null` envelope without adding XMP; a missing or

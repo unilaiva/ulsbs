@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import shutil
 import json
+import sys
 import tempfile
 import threading
 import unittest
@@ -191,11 +192,34 @@ class MultikeyPipelineTests(unittest.TestCase):
                         self.cfg, create_printouts=False, coverimage=False, json=False,
                         midifiles=False, audiofiles=False,
                     )
+                    events = []
+                    basename = build_job_basename(job)
+                    output_dir = self.result / RESULT_MULTIKEY_SUBDIRNAME if multikey else self.result
+                    output = output_dir / f"{basename}.pdf"
+
+                    def optimize(path, job=job, basename=basename, events=events, output=output):
+                        self.assertEqual(path, job.compile_dir / f"{basename}.pdf")
+                        self.assertEqual(events, ["pass1", "pass2", "pass3"])
+                        self.assertFalse(output.exists())
+                        events.append("fonts")
+                        path.write_bytes(b"%PDF-optimized\n")
+                        return 100, 80, 2
+
+                    optimizer = Mock(side_effect=optimize)
+
+                    def consume(*args, output=output, job=job,
+                                basename=basename, events=events):
+                        expected_pdf = b"%PDF-optimized\n"
+                        self.assertEqual(output.read_bytes(), expected_pdf)
+                        self.assertEqual((job.compile_dir / f"{basename}.pdf").read_bytes(), expected_pdf)
+                        self.assertEqual(events[:4], ["pass1", "pass2", "pass3", "fonts"])
+                        return args[-1]
 
                     def lilypond(**kwargs):
                         return kwargs["input_tex"], kwargs["job"].compile_dir / "lilypond.log", kwargs["step"] + 1
 
-                    def latex(ui, cfg, job, basename, env, step, *, pass_no, draftmode):
+                    def latex(ui, cfg, job, basename, env, step, *, pass_no, draftmode, events=events):
+                        events.append(f"pass{pass_no}")
                         if job.multikey:
                             (job.compile_dir / f"{basename}.ulsbs-multikey.json").write_text(
                                 '{"has_multikey_info": true, "multikey_info": {"songs": []}}'
@@ -209,9 +233,15 @@ class MultikeyPipelineTests(unittest.TestCase):
                             patch.object(pipeline, "step_lilypond_book", side_effect=lilypond) as engraving, \
                             patch.object(pipeline, "step_texlua_indices", side_effect=lambda *args: args[-1] + 1), \
                             patch.object(pipeline, "step_lualatex_pass", side_effect=latex) as passes, \
+                            patch.dict(sys.modules, {"ulsbs.pdf_fonts": SimpleNamespace(deduplicate_fonts=optimizer)}), \
+                            patch.object(pipeline, "step_context_printouts", side_effect=consume) as printouts, \
+                            patch.object(pipeline, "step_coverimage_extraction", side_effect=consume) as covers, \
                             patch.object(pipeline, "analyze_warnings", return_value=0):
                         self.assertEqual(pipeline.compile_one_job(self.ui, Mock(), cfg, job), 0)
                         engraving.assert_called_once()
+                        printouts.assert_called_once()
+                        covers.assert_called_once()
+                        optimizer.assert_called_once()
                     self.assertEqual(
                         [(call.kwargs["pass_no"], call.kwargs["draftmode"]) for call in passes.call_args_list],
                         [(1, True), (2, False), (3, False)],
@@ -255,6 +285,7 @@ class MultikeyPipelineTests(unittest.TestCase):
                 patch.object(pipeline, "step_texlua_indices", return_value=3), \
                 patch.object(pipeline, "step_lualatex_pass", side_effect=latex,
                              return_value=(self.doc, 4)) as passes, \
+                patch.object(pipeline, "step_pdf_fonts", return_value=5), \
                 patch.object(pipeline, "analyze_warnings", return_value=2):
             self.assertEqual(pipeline.compile_one_job(
                 self.ui, Mock(), self.cfg, job, multikey_payload_sink=sink
@@ -314,6 +345,7 @@ class MultikeyPipelineTests(unittest.TestCase):
                             patch.object(pipeline, "step_lilypond_book", return_value=(job.compile_dir / f"{basename}.tex", self.doc, 2)) as engraving, \
                             patch.object(pipeline, "step_texlua_indices", return_value=3), \
                             patch.object(pipeline, "run_cmd", side_effect=latex), \
+                            patch.object(pipeline, "step_pdf_fonts", return_value=7) as fonts, \
                             patch.object(pipeline, "analyze_warnings", return_value=0):
                         if status in statuses[:2]:
                             warnings = pipeline.compile_one_job(
@@ -330,6 +362,9 @@ class MultikeyPipelineTests(unittest.TestCase):
                             if disabled:
                                 self.ui.warning_line.assert_called_once()
                                 self.ui.success_line.assert_not_called()
+                                fonts.assert_not_called()
+                            else:
+                                fonts.assert_called_once()
                         else:
                             with self.assertRaisesRegex(pipeline.CompileError, "Failed to capture multikey metadata"):
                                 pipeline.compile_one_job(
@@ -337,6 +372,7 @@ class MultikeyPipelineTests(unittest.TestCase):
                                 )
                             self.assertFalse(output.exists())
                             self.assertFalse(resultlist.exists())
+                            fonts.assert_not_called()
                         engraving.assert_called_once()
                         self.assertEqual(len(passes), 3)
                 finally:
