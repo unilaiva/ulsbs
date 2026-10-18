@@ -1386,13 +1386,11 @@ def compile_one_job(
                 not job.multikey and cfg.create_printouts and PAPERA5_FNAMEPART in basename
                 and bool(which("context") or which("contextjit"))
             )
-            ui.space_line(
-                f"{txt_doc} Source: {job.doc_tex_abs}; variant: {job.variant}; "
+            ui.debug_line(
+                f"{txt_doc}\n{ui.colorize('Source:', ui.C_DGRAY)} {job.doc_tex_abs}; variant: {job.variant}; "
                 f"edition: {'multikey' if job.multikey else 'standard'}; "
                 f"compile: {job.compile_dir}; PDF: {pdf_dir / (basename + '.pdf')}"
-            )
-            ui.space_line(
-                f"{txt_doc} Outputs: printouts={printouts}, MIDI={midi}, audio={audio}, "
+                f"\n{ui.colorize('Outputs:', ui.C_DGRAY)} printouts={printouts}, MIDI={midi}, audio={audio}, "
                 f"JSON={'companion' if job.multikey and cfg.json else cfg.json}, "
                 f"covers={not job.multikey and cfg.coverimage and bool(which('pdftoppm'))}; "
                 f"layers={layers}"
