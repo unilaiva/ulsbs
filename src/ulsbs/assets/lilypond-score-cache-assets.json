@@ -1,0 +1,30 @@
+{
+  "assets": {
+    "ulsbs-include-head-spacious.ly": "e775ac0d28bcbca57efe62bf625c14f23c734f3285f6fc43091fb805255847d6",
+    "ulsbs-include-head.ly": "c5c915027a0bce2d88e990442f7eb3f65578effa7a271c26e3bfce3365bf837a",
+    "ulsbs-include-tail-lyricsbetween.ly": "18b32aadb0f6134a6c19d3f46f882168c6cc368935b51234541f5004e0f08382",
+    "ulsbs-include-tail-lyricsbetween_bassclef.ly": "00f8870102fe5dae13447c3abbb0b52787012a150f5cc9a659170a31a2422eb0",
+    "ulsbs-include-tail-multivoice-notab.ly": "587fdfa5cc7ba40358033cb7cc8f541811149f692d16752afa36bc865fe5082c",
+    "ulsbs-include-tail-multivoice-notab_bassclef.ly": "3179260c3ce6e8f946a3200310e5c110c485e7c9aac7fd340e7cc3aca2270db6",
+    "ulsbs-include-tail-multivoice-twotabs.ly": "99510e3a837479897df2304ac3188e15a5519a24ebfa3a22c219aa840d46eb48",
+    "ulsbs-include-tail-multivoice-twotabs_bassclef.ly": "304bd532cf9304705ecabe184943843eca862c1f2d9cd74451bd0deeaca61856",
+    "ulsbs-include-tail-notab-nolyrics.ly": "760d6c4eeed2a5a483860b251ba62491728e09e98332e71f66181e3d4b41b2b8",
+    "ulsbs-include-tail-notab-nolyrics_bassclef.ly": "50cb5223224a59eac25db303d03573a4e18af6bcb4d7c614fc808a449737434a",
+    "ulsbs-include-tail-notab.ly": "d8c407b8ce6e3ddec807f5209439de44dd0ae58a95f4eccc03d2c96d2c19b740",
+    "ulsbs-include-tail-notab_bassclef.ly": "a162169895843a2ef0c66f10d8a5fe63e2abe1615d71e13f2b0adebb564d4aa2",
+    "ulsbs-include-tail.ly": "de129414632a2850e93cacb5e35b53a1e38201b18343a7831787f1b1edad97ac",
+    "ulsbs-include-tail_bassclef.ly": "4537116f9a69e34155b7a5f0f91f2a70d97b857dd2016c1141db5950ef1c1893",
+    "ulsbs-internal-common-head.ly": "e35e978747784b879c7f55780daab8dbf585c33d09892980837bad963dde6f49",
+    "ulsbs-internal-common-tail.ly": "0b0ff25c5064d60491f33de4ba0b69beaaac30256db106ea13e7b7845df88606",
+    "ulsbs-internal-score-midi.ly": "3bc5a8d9719ecd0fe1791285ba7d296ad3707042dbc4edbdf2a5626f7d7a3078",
+    "ulsbs-internal-scorepart-lyrics.ly": "f7b9d3cd13a332dea29712543d3c783d42a33dc58cdacd803f9c492c3fc2d034",
+    "ulsbs-internal-scorepart-tabstaff-melody2.ly": "78b6ed2fa8a1df8fc6fb8ad40f62522295d9daac07416d8f902292cb5b537ab9",
+    "ulsbs-internal-scorepart-tabstaff.ly": "f245ba1b61c1b9b767e98d6e2afc1e7875e856efefe3160c325b0eb188e4ade9",
+    "ulsbs-score-boundaries.ily": "f45ead2887d61b1c5c8dfcda05124fa52d70e6e4b989b0c623cd5e6e91aaffcb"
+  },
+  "schema_version": 1,
+  "variants": {
+    "common-tail-convert-ly-2.26.0": "2ac1faf244f3bd9a1474b6395d58fed8602250f4f57d17ae757b1fdbf2911000",
+    "midi-disabled": "7a052fbfeaf7b7672efe16cbc889bfebc6cdad39ee9d3d54bd7a9a440feb7eb4"
+  }
+}

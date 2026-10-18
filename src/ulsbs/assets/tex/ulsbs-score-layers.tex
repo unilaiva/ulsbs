@@ -1,0 +1,123 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+% Request score variants and overlay their PDF layers within original system boxes.
+% Loaded only for explicitly opted-in multikey jobs, after the layer helpers.
+\directlua{ulsbs_score_layers=dofile(assert(kpse.find_file("ulsbs-score-layers.lua","tex"),
+  "ULSBS score layers Lua module not found"))}
+\AddToHook{enddocument/afterlastpage}{\directlua{ulsbs_score_layers.finish()}}
+% Generated definitions use csname so colons are safe under normal catcodes.
+\InputIfFileExists{\jobname.ulsbs-score-variants.tex}{}{}
+\ExplSyntaxOn
+\box_new:N \l_UL_score_base_box
+\box_new:N \l_UL_score_alt_box
+\box_new:N \l_UL_score_result_box
+\fp_const:Nn \c_UL_score_minimum_scale_fp {0.80}
+\fp_new:N \l_UL_score_scale_fp
+\tl_new:N \l_UL_score_key_lua_tl
+\tl_new:N \l_UL_score_targets_lua_tl
+\tl_new:N \l_UL_score_signature_tl
+\tl_new:N \l_UL_score_filename_tl
+% Request a snippet's source key and twelve target tonics, or unknown-key nulls.
+\cs_new_protected:Npn \UL_score_request:n #1
+  {
+    \UL_pdf_key_load:
+    \tl_set:Nn \l_UL_score_signature_tl {unknown}
+    \tl_set:Nn \l_UL_score_key_lua_tl {nil}
+    \tl_set:Nn \l_UL_score_targets_lua_tl {nil}
+    \bool_if:NT \l_UL_pdf_key_available_bool
+      {
+        \tl_set:Nx \l_UL_score_signature_tl
+          {\int_use:N\l_UL_pdf_key_letter_int-
+           \int_use:N\l_UL_pdf_key_pitch_int-\int_use:N\l_UL_pdf_key_minor_int}
+        \tl_set:Nx \l_UL_score_key_lua_tl
+          {\c_left_brace_str letter=\int_use:N\l_UL_pdf_key_letter_int,
+           pitch=\int_use:N\l_UL_pdf_key_pitch_int,
+           minor=\int_use:N\l_UL_pdf_key_minor_int\c_right_brace_str}
+        \tl_set:Nx \l_UL_score_targets_lua_tl {\c_left_brace_str}
+        \int_step_inline:nnn {0}{11}
+          {
+            \int_set:Nn \l_UL_pdf_target_pitch_int
+              {\int_mod:nn {\l_UL_pdf_key_pitch_int+##1}{12}}
+            \int_if_zero:nTF {##1}
+              {\int_set_eq:NN \l_UL_pdf_target_letter_int \l_UL_pdf_key_letter_int}
+              {\UL_pdf_canonical_tonic:n {\l_UL_pdf_target_pitch_int}}
+            \tl_put_right:Nx \l_UL_score_targets_lua_tl
+              {\c_left_brace_str letter=\int_use:N\l_UL_pdf_target_letter_int,
+               pitch=\int_use:N\l_UL_pdf_target_pitch_int\c_right_brace_str,}
+          }
+        \tl_put_right:Nx \l_UL_score_targets_lua_tl {\c_right_brace_str}
+      }
+    \directlua{ulsbs_score_layers.request(
+      "\luaescapestring{#1}","\luaescapestring{\UL@pdfnameprefix}",
+      "\luaescapestring{\songid}","\luaescapestring{\tl_to_str:V\songtitle}",
+      \l_UL_score_key_lua_tl,\l_UL_score_targets_lua_tl)}
+  }
+% Overlay one snippet/system/offset variant, fitting it or using original notation.
+\cs_new_protected:Npn \UL_score_alternative:nnn #1#2#3
+  {
+    \box_set_eq:NN \l_UL_score_alt_box \l_UL_score_base_box
+    \bool_if:NT \l_UL_pdf_key_available_bool
+      {
+        \cs_if_exist:cT
+          {ULScoreVariant:\UL@pdfnameprefix :#1:\l_UL_score_signature_tl :t\UL_pdf_pad:nn {2}{#3}}
+          {
+            \tl_set:Nx \l_UL_score_filename_tl
+              {\use:c {ULScoreVariant:\UL@pdfnameprefix :#1:\l_UL_score_signature_tl
+                :t\UL_pdf_pad:nn {2}{#3}}-#2}
+            \exp_args:Nx \IfFileExists {\l_UL_score_filename_tl.pdf}
+              {\hbox_set:Nn \l_UL_score_alt_box
+                {\includegraphics{\l_UL_score_filename_tl}}}
+              {\PackageWarning{ulsbs}{Missing~score~#1~system~#2~offset~#3;
+                 ~original~notation~substituted}}
+          }
+      }
+    \fp_set:Nn \l_UL_score_scale_fp {1}
+    \dim_compare:nNnTF {\box_wd:N\l_UL_score_alt_box}>{0pt}
+      {
+        \dim_compare:nNnTF
+          {\box_ht:N\l_UL_score_alt_box+\box_dp:N\l_UL_score_alt_box}>{0pt}
+          {\fp_set:Nn \l_UL_score_scale_fp
+            {min(1,
+              \dim_to_fp:n {\box_wd:N\l_UL_score_base_box}/
+                \dim_to_fp:n {\box_wd:N\l_UL_score_alt_box},
+              \dim_to_fp:n {\box_ht:N\l_UL_score_base_box+\box_dp:N\l_UL_score_base_box}/
+                \dim_to_fp:n {\box_ht:N\l_UL_score_alt_box+\box_dp:N\l_UL_score_alt_box})}}
+          {\box_set_eq:NN \l_UL_score_alt_box \l_UL_score_base_box}
+      }
+      {\box_set_eq:NN \l_UL_score_alt_box \l_UL_score_base_box}
+    % Graphic dimensions are rounded to sp; do not reject the exact 0.80 edge
+    % for sub-sp conversion noise. The applied fit itself is never rounded up.
+    \fp_compare:nNnTF {round(\l_UL_score_scale_fp,7)}<{\c_UL_score_minimum_scale_fp}
+      {\PackageWarning{ulsbs}{Score~#1~system~#2~offset~#3~is~too~small;
+         ~original~notation~substituted}
+       \box_set_eq:NN \l_UL_score_alt_box \l_UL_score_base_box}
+      {\hbox_set:Nn \l_UL_score_alt_box
+        {\scalebox{\fp_to_decimal:N\l_UL_score_scale_fp}{\box_use:N\l_UL_score_alt_box}}}
+    \hbox_set:Nn \l_UL_score_result_box
+      {\smash{\rlap{\UL_pdf_mark:nn {#3}
+        {\raisebox{\dim_eval:n {\box_ht:N\l_UL_score_base_box-\box_ht:N\l_UL_score_alt_box}}
+          {\box_use:N\l_UL_score_alt_box}}}}\box_use:N\l_UL_score_result_box}
+  }
+% Request and layer a snippet/system/file while retaining the original box size.
+\cs_new_protected:Npn \UL_score_system:nnn #1#2#3
+  {
+    \group_begin:
+    \UL_score_request:n {#1}
+    \hbox_set:Nn \l_UL_score_base_box {\includegraphics{#3}}
+    \hbox_set:Nn \l_UL_score_result_box
+      {\UL_pdf_mark:nn {0}{\box_use:N\l_UL_score_base_box}}
+    % Dispatch values are snippet prefixes, followed by the system's -N suffix.
+    \int_step_inline:nn {11}{\UL_score_alternative:nnn {#1}{#2}{##1}}
+    \leavevmode\box_use:N\l_UL_score_result_box
+    \group_end:
+  }
+% Layer systems only inside PDF songs; otherwise include the original graphic.
+\cs_set_protected:Npn \ulScoreSystem #1#2#3
+  {
+    \ifUL@pdfsong
+      \ifSB@insong
+        \UL_score_system:nnn {#1}{#2}{#3}
+      \else \includegraphics{#3}\fi
+    \else \includegraphics{#3}\fi
+  }
+\ExplSyntaxOff

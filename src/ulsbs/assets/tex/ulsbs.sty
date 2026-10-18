@@ -203,7 +203,9 @@
 \providecommand{\ulPdfTranspositionLayers}{false}
 \providecommand{\ulPdfTranspositionLayerUI}{native}
 \providecommand{\ulPdfTranspositionRequireSongIDs}{false}
+% Alternative chord-name shrinking floor; compiler option accepts [0.5, 1].
 \providecommand{\ulPdfTranspositionMinimumScale}{0.85}
+\providecommand{\ulMultikeyLilypondScores}{false}
 \newif\ifUL@pdflayers
 \ifdefstring{\ulPdfTranspositionLayers}{true}{\ifchorded\UL@pdflayerstrue\fi}{%
   \ifdefstring{\ulPdfTranspositionLayers}{false}{}{%
@@ -244,6 +246,7 @@
   \directlua{ulsbs_multikey=dofile(assert(kpse.find_file("ulsbs-multikey.lua","tex"),
     "ULSBS multikey Lua module not found"))}
   \AddToHook{enddocument/afterlastpage}{\directlua{ulsbs_multikey.finish()}}
+  \AddToHook{shipout/before}{\directlua{ulsbs_multikey.track_page(tex.box["ShipoutBox"])}}
 \fi
 \ExplSyntaxOn
 \tl_new:N \l_UL_pdf_chunk_tl
@@ -253,6 +256,8 @@
 \tl_new:N \l_UL_pdf_key_tl
 \seq_new:N \l_UL_pdf_key_seq
 \prop_new:N \g_UL_pdf_occurrences_prop
+\prop_new:N \g_UL_pdf_allocated_layers_prop
+\prop_new:N \g_UL_pdf_layer_prefixes_prop
 \tl_new:N \l_UL_pdf_source_id_tl
 \tl_new:N \l_UL_pdf_original_key_tl
 \tl_new:N \l_UL_pdf_labels_lua_tl
@@ -312,12 +317,14 @@
      {\PackageWarning{ulsbs}{Song~\tl_to_str:V\songtitle :~unsupported~key=\tl_to_str:V\key;
        ~using~current~sharp/flat~preference~for~transposition}}}
  }
+% Restore the saved tonic letter, pitch class and minor-mode tuple.
 \cs_new_protected:Npn \UL_pdf_key_use:nnn #1#2#3
  {
   \int_set:Nn \l_UL_pdf_key_letter_int {#1}
   \int_set:Nn \l_UL_pdf_key_pitch_int {#2}
   \int_set:Nn \l_UL_pdf_key_minor_int {#3}
  }
+% Load usable effective key metadata for the current song only.
 \cs_new_protected:Npn \UL_pdf_key_load:
  {
   \bool_set_false:N \l_UL_pdf_key_available_bool
@@ -327,6 +334,7 @@
        \exp_after:wN \UL_pdf_key_use:nnn \g_UL_transpose_key_tl}
   \fi
  }
+% Select a conventional target tonic spelling and accidental preference.
 \cs_new_protected:Npn \UL_pdf_canonical_tonic:n #1
  {
       \int_if_zero:nTF {\l_UL_pdf_key_minor_int}
@@ -349,6 +357,7 @@
           {\SB@prefshrpstrue}{\SB@prefshrpsfalse}
        }
  }
+% Prepare one alternative's key-aware note spelling without changing the source.
 \cs_new_protected:Npn \UL@pdfspellprepare #1
  {
   \SB@transposefactor=#1\relax
@@ -361,6 +370,7 @@
       \UL_pdf_canonical_tonic:n {\l_UL_pdf_target_pitch_int}
       \let\SB@trtrans\UL@pdftrtrans}}
  }
+% Infer the source key needed to apply a declared source-level transposition.
 \cs_new_protected:Npn \UL_pdf_source_prepare:
  {
   \UL_pdf_key_load:
@@ -380,6 +390,7 @@
     \let\SB@trtrans\UL@pdftrtrans
    }
  }
+% Scope songs' parser changes and return transposed tokens without state leakage.
 \cs_set_protected:Npn \SB@dotranspose #1
  {
   \begingroup
@@ -402,6 +413,7 @@
   \endgroup
   \SB@toks\expandafter{\UL@transposereturn}
  }
+% Build the target key badge from structured tonic/mode metadata.
 \cs_new_protected:Npn \UL_pdf_target_key:
  {
   % Derive the alternate badge from parsed metadata, not the raw token stream.
@@ -469,8 +481,10 @@
      {\UL@normaltrtrans}
    }
  }
+% Render a numeric occurrence/step component with a minimum zero-padded width.
 \cs_new:Npn \UL_pdf_pad:nn #1#2
   {\prg_replicate:nn {\int_max:nn {0}{#1-\str_count:e {\int_eval:n {#2}}}}{0}\int_eval:n {#2}}
+% Register navigation/key labels for this occurrence with the shipout collector.
 \cs_new_protected:Npn \UL_pdf_metadata_song:
  {
   \begingroup
@@ -507,6 +521,7 @@
       {"\luaescapestring{\l_UL_pdf_original_key_tl}"},\l_UL_pdf_labels_lua_tl)}
   \endgroup
  }
+% Assign this occurrence's unique layer prefix without eagerly allocating OCGs.
 \cs_new_protected:Npn \UL_pdf_song_layers:
  {
   \global\advance\UL@pdfsongcount by 1\relax
@@ -520,13 +535,22 @@
   \edef\UL@pdfnameprefix{ulsbs:transpose:v1:id:\l_UL_pdf_source_id_tl
     \int_compare:nNnT {\l_UL_pdf_occurrence_int}>{1}
       {:o\UL_pdf_pad:nn {2}{\l_UL_pdf_occurrence_int}}}
+  \prop_gput:NVx \g_UL_pdf_layer_prefixes_prop \UL@pdfsongid {\UL@pdfnameprefix}
   % songs builds the prelude after closing the song body's local group.
   \global\let\UL@pdfpreludesongid\UL@pdfsongid
   \UL_pdf_metadata_song:
-  \int_step_inline:nnn {0}{11}
+ }
+% Allocate the occurrence's twelve exclusive OCGs once when notation needs them.
+\cs_new_protected:Npn \UL_pdf_ensure_layers:
+ {
+  \prop_if_in:NVF \g_UL_pdf_allocated_layers_prop \UL@pdfsongid
+   {
+   \prop_gput:NVn \g_UL_pdf_allocated_layers_prop \UL@pdfsongid {1}
+   \int_step_inline:nnn {0}{11}
    {
     \edef\UL@pdfid{ulsbs:transpose:v1:\UL@pdfsongid :t\UL_pdf_pad:nn {2}{##1}}
-    \edef\UL@pdfname{\UL@pdfnameprefix :t\UL_pdf_pad:nn {2}{##1}}
+    \edef\UL@pdfname{\prop_item:NV \g_UL_pdf_layer_prefixes_prop \UL@pdfsongid
+      :t\UL_pdf_pad:nn {2}{##1}}
     \ifdefstring{\ulPdfTranspositionLayerUI}{hidden}
       {\def\UL@pdfshowingui{false}}{\def\UL@pdfshowingui{true}}
     \edef\UL@pdfoptions{radiobtngrps={\UL@pdfsongid},
@@ -535,9 +559,11 @@
     \ifnum##1=0\relax\def\UL@pdfinitial{1}\else\def\UL@pdfinitial{0}\fi
     % Internal references remain private sequences; exposed names use source IDs.
     \sbox\UL@pdfresultbox{\begin{ocg}[\UL@pdfoptions]{\UL@pdfname}{\UL@pdfid}
-      {\UL@pdfinitial}\end{ocg}}
+       {\UL@pdfinitial}\end{ocg}}
+    }
    }
  }
+% Save the effective key and enable layers only for a validated song ID.
 \cs_new_protected:Npn \UL@pdfsongbegin
  {
   \UL_pdf_key_save:
@@ -556,16 +582,18 @@
           ~skipping~multikey~layers~and~controls~for~this~song}}}
   \fi
  }
+% Wrap one step's actual content and record its eventual physical shipout page.
 \cs_new_protected:Npn \UL_pdf_mark:nn #1#2
  {
+  \UL_pdf_ensure_layers:
   \ocgbase_oc_bdc:n
     {\use:c {ocgxii_ocg_ulsbs:transpose:v1:\UL@pdfsongid :t\UL_pdf_pad:nn {2}{#1}}}
   % Execute only if the box is shipped, not when it is measured or discarded.
-  \int_compare:nNnT {#1}={0}
-    {\exp_args:Nx \latelua {ulsbs_multikey.mark_used("\UL@pdfsongid")}}
+  \exp_args:Nx \latelua {ulsbs_multikey.mark_used("\UL@pdfsongid")}
   #2
   \ocgbase_oc_emc:
  }
+% Render twelve alternatives while only t00 reserves layout dimensions.
 % #1 is effective musical text, #2 its typography, #3 enables chord shrinking.
 % Parser and spelling changes for alternatives are strictly local; source and
 % alternate parsing never change ambient preferences or replay data.
@@ -620,6 +648,7 @@
   \endgroup
  }
 \cs_new_eq:NN \UL@pdfvisual \UL_pdf_visual:nnn
+% Emit the pending safe chord chunk as twelve original-footprint alternatives.
 \cs_new_protected:Npn \UL@pdfchunkflush
  {
   \tl_if_empty:NF \l_UL_pdf_chunk_tl
@@ -627,10 +656,13 @@
      {\exp_not:N\UL@pdfvisual{\exp_not:V\l_UL_pdf_chunk_tl}{\exp_not:N\@firstofone}{1}}
     \tl_clear:N \l_UL_pdf_chunk_tl}
  }
+% Accumulate one token/group without re-executing notation-side effects.
 \cs_new_protected:Npn \UL@pdfchunkadd #1 {\tl_put_right:Nn \l_UL_pdf_chunk_tl {#1}}
+% Flush notation before appending content shared by all transposition steps.
 \cs_new_protected:Npn \UL@pdfsharedadd #1
  {\UL@pdfchunkflush\tl_put_right:Nn \l_UL_pdf_output_tl {#1}}
 \cs_generate_variant:Nn \regex_match:nnTF {nV}
+% Accept safe literal groups or fall back rather than replay arbitrary commands.
 \cs_new_protected:Npn \UL@pdfgroup #1
  {
   \tl_set:Nx \l_tmpa_tl {\tl_to_str:n {#1}}
@@ -640,6 +672,7 @@
     {\UL@pdfunknown{{#1}}}
     {\UL@pdfchunkadd{{#1}}\UL@pdfsplit}
  }
+% Dispatch a chord token to safe notation, shared payload, or explicit fallback.
 \cs_new_protected:Npn \UL@pdfsplittoken #1
  {
   % Test the character, not its meaning: songs rebinds active ^ for tracking
@@ -665,6 +698,7 @@
             {\UL@pdfchunkadd{#1}\UL@pdfsplit}}}}}
    }
  }
+% Preserve the complete original chord text when token splitting is unsupported.
 \cs_new_protected:Npn \UL@pdfunknown #1#2\UL@pdfsplitend
  {
   % Unknown commands may consume dimensions, optional or unbraced arguments.
@@ -674,6 +708,7 @@
   \PackageWarning{ulsbs}{Song~\UL@pdfsongid :~unsupported~chord~command/group~
     \tl_to_str:n {#1};~interactive~transposition~is~not~applied~to~this~chord~text}
  }
+% Split effective chord text into transposable chunks and unchanged shared items.
 \cs_new_protected:Npn \UL@pdfchordtext #1
  {
   \tl_clear:N \l_UL_pdf_chunk_tl
@@ -683,23 +718,37 @@
   \tl_use:N \l_UL_pdf_output_tl
  }
 \ExplSyntaxOff
+\ifdefstring{\ulMultikeyLilypondScores}{true}{%
+  \providecommand{\ulScoreSystem}[3]{\includegraphics{#3}}%
+  \ifUL@pdflayers\input{ulsbs-score-layers.tex}\fi
+}{}
+% Peek at the next token without expanding active notation/replay commands.
 \def\UL@pdfsplit{\futurelet\UL@pdfnext\UL@pdfsplitdispatch}
+% Route the peeked terminator, group, space or ordinary token to its consumer.
 \def\UL@pdfsplitdispatch{%
   \ifx\UL@pdfnext\UL@pdfsplitend\let\UL@pdfnextstep\UL@pdfsplitfinish
   \else\ifx\UL@pdfnext\bgroup\let\UL@pdfnextstep\UL@pdfsplitgroup
   \else\ifcat\noexpand\UL@pdfnext\@sptoken\let\UL@pdfnextstep\UL@pdfsplitspace
   \else\let\UL@pdfnextstep\UL@pdfsplitstep\fi\fi\fi
   \UL@pdfnextstep}
+% Finish token splitting by emitting the final pending chord chunk.
 \def\UL@pdfsplitfinish\UL@pdfsplitend{\UL@pdfchunkflush}
+% Consume a braced group while retaining its grouping boundaries.
 \def\UL@pdfsplitgroup#1{\UL@pdfgroup{#1}}
+% Consume one ordinary token through the safe-token dispatcher.
 \def\UL@pdfsplitstep#1{\UL@pdfsplittoken{#1}}
+% Preserve an already captured melody replay payload as shared content.
 \def\UL@pdfsplitpayload#1#2{\UL@pdfsharedadd{\UL@melodyreplaypayload{#1}{#2}}\UL@pdfsplit}
+% Preserve alternate-chord annotations without creating extra parser executions.
 \def\UL@pdfsplitac#1#2{\UL@pdfsharedadd{\ac{#1}{#2}}\UL@pdfsplit}
+% Preserve a notrans wrapper and its argument as one shared parser item.
 \def\UL@pdfsplitnotrans#1{\UL@pdfsharedadd{\notrans{#1}}\UL@pdfsplit}
+% Define a space-consuming scanner without losing that space to TeX arguments.
 \begingroup
 \def\:{\UL@pdfsplitspace}\expandafter\gdef\: {\UL@pdfchunkadd{ }\UL@pdfsplit}
 \endgroup
 \let\UL@normaltransposehere\transposehere
+% Apply source transposition once before layering supported song chord text.
 \renewcommand{\transposehere}[1]{%
   \ifUL@pdfchord\ifUL@pdfsong
     \ifnum\SB@transposefactor=0\relax
@@ -730,9 +779,9 @@
       {\PackageError{ulsbs}{Invalid~PDF~chord~minimum~scale}{Use~a~number~greater~than~0~and~at~most~1.}}
   \fi
 }
+\AtEndDocument{\typeout{ULSBS~PDF~transposition:~\the\UL@pdfsongcount\space registered~songs,
+  ~\int_eval:n {12*\prop_count:N\g_UL_pdf_allocated_layers_prop}\space OCGs}}
 \ExplSyntaxOff
-\AtEndDocument{\typeout{ULSBS PDF transposition: \the\UL@pdfsongcount\space songs,
-  \the\numexpr12*\UL@pdfsongcount\relax\space OCGs}}
 
 % BEGIN MAIN LANGUAGE
 
@@ -3606,10 +3655,12 @@
   \fi%
 }
 
+% Draw a fixed-size circled melody note without applying source transposition again.
 \newcommand{\UL@pdfnotecircle}[1]{%
   \begingroup\SB@transposefactor=0\relax\SB@convertnotestrue
   \makebox[0pt][l]{\@mntag}%
   \circled{\UL@normaltransposehere{#1}}\endgroup}
+% Layer melody note spellings at their original, unscaled typography and footprint.
 \newcommand{\UL@pdfnote}[1]{%
   % Resolve source transposition with canonical uppercase output, then use the
   % normal lowercase melody typography for every visual representation.

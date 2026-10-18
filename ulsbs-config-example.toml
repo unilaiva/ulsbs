@@ -88,11 +88,18 @@ audiofiles-allow-for-optional-variants = false # requires audiofiles = true
 extrainstrumentbooks = true  # default: true
 lyricbooks = true            # default: true
 fast-audio-encode = false    # default: false; if true, use faster audio encoding (limiter instead of loudnorm)
-multikey-books = true        # default: true; add a multikey PDF beside each selected non-lyrics variant
+multikey-books = false       # default: false; set true to add a multikey PDF beside each selected non-lyrics variant
 multikey-layer-ui = "native" # native (default) or hidden; hidden keeps layers discoverable
+multikey-min-chordname-scale = 0.85 # default: 0.85; number in [0.5, 1]; 1 disables chord-name shrinking
+# Applies to alternative TeX chord names only; original layout, melody hints,
+# key badges and LilyPond score-image fitting are unchanged. Long names may overhang.
 multikey-require-song-ids = false # fail multikey jobs on missing/invalid IDs; CLI: --require-song-ids
 # IDs use lowercase letters, digits and dashes. Without strict validation,
 # missing/invalid IDs skip a song's layers with a warning. Source files are not rewritten.
+multikey-lilypond-scores = false # experimental opt-in; only for non-lyrics multikey PDFs
+# Supports standard single-/multi-system snippets with validated musical breaks.
+# Unsupported/failed offsets fall back to the complete original score.
+# Valid alternatives use the persistent home cache; ordinary/lyrics PDFs are unchanged.
 # Normal profile inheritance applies: profiles can enable or disable extras,
 # including enabling them when the root multikey-books setting is false.
 # --no-multikey and -q/--quick disable extra multikey PDFs for one invocation.

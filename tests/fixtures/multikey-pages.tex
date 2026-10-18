@@ -1,0 +1,47 @@
+\documentclass[paper={a5paper},maintitle={Page Dependencies}]{ulsbs-songbook}
+\newsavebox{\DelayedOriginal}
+\newsavebox{\DelayedAlternative}
+\newsavebox{\DiscardedNotation}
+\ExplSyntaxOn
+\cs_new_eq:NN \MarkLayer \UL_pdf_mark:nn
+\ExplSyntaxOff
+\begin{document}
+\pagestyle{empty}
+Preliminary page.
+\clearpage
+\pagenumbering{roman}
+\begin{songs}{}
+\beginsong{Shared First}[id={shared}]
+\beginverse
+\[<C D>C]First song.
+\endverse
+\global\setbox\DelayedOriginal\hbox{\MarkLayer{0}{Original delayed content}}
+\global\setbox\DelayedAlternative\hbox{\MarkLayer{11}{Hidden delayed content}}
+\endsong
+\beginsong{Shared Second}[id={shared}]
+\beginverse
+\[G]Second song on the same page.
+\endverse
+\endsong
+\beginsong{Lyrics Only}[id={lyrics-only}]
+\beginverse
+No pitched annotations.
+\endverse
+\endsong
+\beginsong{Discarded Box}[id={discarded}]
+\setbox\DiscardedNotation\hbox{\MarkLayer{0}{Never shipped}}
+\beginverse
+No shipped pitched annotations.
+\endverse
+\endsong
+\end{songs}
+\clearpage
+This intervening page has no optional content.
+\clearpage
+\pagenumbering{arabic}
+Only a hidden alternative appears on this page: \copy\DelayedAlternative
+\clearpage
+Original content placed after later song headers: \copy\DelayedOriginal
+\clearpage
+The hidden box is reused: \copy\DelayedAlternative
+\end{document}

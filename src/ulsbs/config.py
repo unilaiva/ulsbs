@@ -106,9 +106,12 @@ class Config:
     midifiles_allow_for_optional_variants: bool = False
     audiofiles_allow_for_optional_variants: bool = False
     fast_audio_encode: bool = False
-    multikey_books: bool = True
+    multikey_books: bool = False
     multikey_layer_ui: str = "native"
     multikey_require_song_ids: bool = False
+    multikey_min_chordname_scale: float = 0.85
+    # Opt-in; used only when producing non-lyrics multikey PDFs.
+    multikey_lilypond_scores: bool = False
 
     # Container resources (GiB)
     # NOTE: container_memory_unlimited is only used to decide whether to pass
@@ -597,6 +600,8 @@ _ALLOWED_FILE_KEYS: Set[str] = {
     "multikey_books",
     "multikey_layer_ui",
     "multikey_require_song_ids",
+    "multikey_min_chordname_scale",
+    "multikey_lilypond_scores",
     # Files
     "songbooks",
     "common_deploy_icons",
@@ -675,6 +680,7 @@ def _resolve_profile_data(
     seen: Set[str] = set()
 
     def rec(name: str) -> Dict[str, Any]:
+        """Resolve a profile's inheritance and merge policy, rejecting cycles."""
         if name in seen:
             raise ValueError(f"Inheritance cycle detected at profile '{name}'")
         if name not in profiles:
@@ -751,6 +757,14 @@ def build_config(
             data["multikey_require_song_ids"], bool
         ):
             raise ValueError("multikey-require-song-ids must be a boolean")
+        if "multikey_lilypond_scores" in data and not isinstance(
+            data["multikey_lilypond_scores"], bool
+        ):
+            raise ValueError("multikey-lilypond-scores must be a boolean")
+        if "multikey_min_chordname_scale" in data:
+            value = data["multikey_min_chordname_scale"]
+            if type(value) not in (int, float) or not 0.5 <= value <= 1:
+                raise ValueError("multikey-min-chordname-scale must be a number between 0.5 and 1 (inclusive)")
         if "multikey_layer_ui" in data and data["multikey_layer_ui"] not in (
             "native", "hidden"
         ):

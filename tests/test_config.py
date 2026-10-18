@@ -43,26 +43,102 @@ class MultikeyConfigTests(unittest.TestCase):
 
     def test_defaults(self) -> None:
         cfg = self.build("")
-        self.assertTrue(cfg.multikey_books)
+        self.assertFalse(cfg.multikey_books)
+        self.assertFalse(Config().multikey_books)
         self.assertEqual(cfg.multikey_layer_ui, "native")
         self.assertFalse(cfg.multikey_require_song_ids)
         self.assertFalse(Config().multikey_require_song_ids)
+        self.assertFalse(cfg.multikey_lilypond_scores)
+        self.assertFalse(Config().multikey_lilypond_scores)
+        self.assertEqual(cfg.multikey_min_chordname_scale, 0.85)
+        self.assertEqual(Config().multikey_min_chordname_scale, 0.85)
+
+    def test_chordname_scale_accepts_numeric_bounds_and_normalized_keys(self) -> None:
+        for separator in ("-", "_"):
+            option = "multikey-min-chordname-scale".replace("-", separator)
+            for value in (0.5, 0.85, 1, 1.0):
+                for prefix in ("", "[profiles.default]\n"):
+                    with self.subTest(separator=separator, value=value, prefix=prefix):
+                        cfg = self.build(prefix + f"{option} = {value}\n")
+                        self.assertEqual(cfg.multikey_min_chordname_scale, value)
+                        self.assertFalse(cfg.multikey_books)
+
+    def test_chordname_scale_inherits_and_profiles_can_override_it(self) -> None:
+        text = ('multikey-min-chordname-scale = 0.5\n'
+                '[profiles.base]\nmultikey-min-chordname-scale = 0.7\n'
+                '[profiles.inherited]\ninherit-from = "base"\n'
+                '[profiles.child]\ninherit-from = "inherited"\n'
+                'multikey-min-chordname-scale = 1\n')
+        self.assertEqual(self.build(text).multikey_min_chordname_scale, 0.5)
+        self.assertEqual(self.build(text, "inherited").multikey_min_chordname_scale, 0.7)
+        self.assertEqual(self.build(text, "child").multikey_min_chordname_scale, 1)
+
+    def test_chordname_scale_rejects_non_numeric_nonfinite_and_out_of_range_values(self) -> None:
+        for value in ('"0.85"', "true", "false", "0.4999", "1.0001", "0", "-1",
+                      "nan", "+nan", "inf", "+inf", "-inf", "[]", "{}"):
+            for prefix in ("", "[profiles.default]\n"):
+                with self.subTest(value=value, prefix=prefix):
+                    with self.assertRaisesRegex(ValueError, "multikey-min-chordname-scale"):
+                        self.build(prefix + f"multikey-min-chordname-scale = {value}\n")
+
+    def test_lilypond_scores_boolean_settings(self) -> None:
+        for separator in ("-", "_"):
+            option = "multikey-lilypond-scores".replace("-", separator)
+            for enabled in (False, True):
+                for prefix in ("", "[profiles.default]\n"):
+                    with self.subTest(separator=separator, enabled=enabled, prefix=prefix):
+                        cfg = self.build(prefix + f"{option} = {str(enabled).lower()}\n")
+                        self.assertEqual(cfg.multikey_lilypond_scores, enabled)
+
+    def test_lilypond_scores_profile_inheritance_and_overrides(self) -> None:
+        for root, parent, child in ((False, True, False), (True, False, True)):
+            with self.subTest(root=root, parent=parent, child=child):
+                text = (
+                    f'multikey-lilypond-scores = {str(root).lower()}\n'
+                    '[profiles.base]\n'
+                    f'multikey-lilypond-scores = {str(parent).lower()}\n'
+                    '[profiles.inherited]\ninherit-from = "base"\n'
+                    '[profiles.child]\ninherit-from = "inherited"\n'
+                    f'multikey-lilypond-scores = {str(child).lower()}\n'
+                )
+                self.assertEqual(self.build(text).multikey_lilypond_scores, root)
+                self.assertEqual(
+                    self.build(text, "inherited").multikey_lilypond_scores, parent
+                )
+                self.assertEqual(self.build(text, "child").multikey_lilypond_scores, child)
 
     def test_explicit_settings_and_normalized_keys(self) -> None:
         for separator in ("-", "_"):
-            with self.subTest(separator=separator):
-                cfg = self.build(
-                    f'multikey{separator}books = false\n'
-                    f'multikey{separator}layer{separator}ui = "hidden"\n'
-                    f'multikey{separator}require{separator}song{separator}ids = true\n'
-                )
-                self.assertFalse(cfg.multikey_books)
-                self.assertEqual(cfg.multikey_layer_ui, "hidden")
-                self.assertTrue(cfg.multikey_require_song_ids)
+            for enabled in (False, True):
+                with self.subTest(separator=separator, enabled=enabled):
+                    cfg = self.build(
+                        f'multikey{separator}books = {str(enabled).lower()}\n'
+                        f'multikey{separator}layer{separator}ui = "hidden"\n'
+                        f'multikey{separator}require{separator}song{separator}ids = true\n'
+                    )
+                    self.assertEqual(cfg.multikey_books, enabled)
+                    self.assertEqual(cfg.multikey_layer_ui, "hidden")
+                    self.assertTrue(cfg.multikey_require_song_ids)
 
-    def test_hidden_ui_keeps_companions_enabled(self) -> None:
+    def test_hidden_ui_does_not_enable_companions(self) -> None:
         cfg = self.build('multikey-layer-ui = "hidden"\n')
+        self.assertFalse(cfg.multikey_books)
+        cfg = self.build('multikey-books = true\nmultikey-layer-ui = "hidden"\n')
         self.assertTrue(cfg.multikey_books)
+
+    def test_score_opt_in_does_not_enable_companions(self) -> None:
+        cfg = self.build('multikey-lilypond-scores = true\n')
+        self.assertTrue(cfg.multikey_lilypond_scores)
+        self.assertFalse(cfg.multikey_books)
+
+    def test_root_opt_ins_are_inherited_by_profiles(self) -> None:
+        text = ('multikey-books = true\nmultikey-lilypond-scores = true\n'
+                '[profiles.default]\n[profiles.astral]\n[profiles.dev]\n')
+        for profile in ("default", "astral", "dev"):
+            with self.subTest(profile=profile):
+                cfg = self.build(text, profile)
+                self.assertTrue(cfg.multikey_books)
+                self.assertTrue(cfg.multikey_lilypond_scores)
 
     def test_profile_inheritance_and_disable(self) -> None:
         cfg = self.build(
@@ -102,7 +178,8 @@ class MultikeyConfigTests(unittest.TestCase):
 
     def test_child_positive_settings_override_parent_negations(self) -> None:
         for option in (
-            "multikey-books", "multikey-require-song-ids", "create-printouts", "json"
+            "multikey-books", "multikey-require-song-ids", "multikey-lilypond-scores",
+            "create-printouts", "json"
         ):
             for separator in ("-", "_"):
                 with self.subTest(option=option, separator=separator):
@@ -131,6 +208,12 @@ class MultikeyConfigTests(unittest.TestCase):
             "multikey-require-song-ids = 0",
             "multikey-require-song-ids = []",
             'no-multikey-require-song-ids = "true"',
+            'multikey-lilypond-scores = "false"',
+            "multikey-lilypond-scores = 0",
+            "multikey-lilypond-scores = 1.0",
+            "multikey-lilypond-scores = []",
+            "multikey-lilypond-scores = {}",
+            'no-multikey-lilypond-scores = "true"',
             'multikey-layer-ui = "other"',
             "multikey-layer-ui = false",
             "multikey-layer-ui = []",
@@ -214,7 +297,7 @@ class MultikeyConfigTests(unittest.TestCase):
                 args = parser.parse_args(["--require-song-ids"])
                 cfg = self.build("[profiles.default]\n" + setting, args_ns=args)
                 self.assertTrue(cfg.multikey_require_song_ids)
-                self.assertTrue(cfg.multikey_books)
+                self.assertFalse(cfg.multikey_books)
         cfg = self.build("multikey-require-song-ids = true", args_ns=parser.parse_args([]))
         self.assertTrue(cfg.multikey_require_song_ids)
 
@@ -288,7 +371,9 @@ class MultikeyConfigTests(unittest.TestCase):
                             definitions = (
                                 f"\\newcommand{{\\ulPdfTranspositionLayers}}{{{value}}}\n"
                                  f"\\newcommand{{\\ulPdfTranspositionLayerUI}}{{{ui}}}\n"
-                                 "\\newcommand{\\ulPdfTranspositionRequireSongIDs}{false}\n"
+                                   "\\newcommand{\\ulPdfTranspositionRequireSongIDs}{false}\n"
+                                   "\\newcommand{\\ulPdfTranspositionMinimumScale}{0.85}\n"
+                                  "\\newcommand{\\ulMultikeyLilypondScores}{false}\n"
                             )
                             self.assertTrue(result.startswith(definitions))
                             self.assertLess(
@@ -310,6 +395,21 @@ class MultikeyConfigTests(unittest.TestCase):
                                 else:
                                     self.assertEqual(result, definitions + source)
         self.assertEqual(doc.read_text(encoding="utf-8"), source)
+
+    def test_chordname_scale_is_supplied_before_the_document_class(self) -> None:
+        doc = self.root / "scale_A5.tex"
+        doc.write_text("\\documentclass{ulsbs-songbook}\n", encoding="utf-8")
+        for scale in (0.5, 0.85, 1):
+            cfg = replace(Config(), multikey_books=True, multikey_min_chordname_scale=scale)
+            for variant in ("default", "lyrics", "charango", "bassclef"):
+                for multikey in (False, True):
+                    with self.subTest(scale=scale, variant=variant, multikey=multikey):
+                        directory = self.root / f"{scale}-{variant}-{multikey}"
+                        directory.mkdir()
+                        job = Job(doc, doc.stem, variant, directory, multikey=multikey)
+                        text = make_variant_tex(job, cfg).read_text(encoding="utf-8")
+                        macro = f"\\newcommand{{\\ulPdfTranspositionMinimumScale}}{{{scale}}}"
+                        self.assertLess(text.index(macro), text.index("\\documentclass"))
 
     def test_strict_id_policy_is_supplied_before_the_document_class(self) -> None:
         doc = self.root / "strict_A5.tex"

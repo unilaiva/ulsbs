@@ -1,12 +1,15 @@
 -- SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 -- SPDX-License-Identifier: GPL-3.0-or-later
--- Lyric-safe chord fitting and a shipout-derived multikey manifest in XMP.
+-- Fit alternate chords within lyric space and track physical-page usage for
+-- the multikey manifest, embedded in PDF XMP and written as a JSON sidecar.
 
 local M = {}
 local songs, by_id = {}, {}
 local finished = false
+local shipping_page
 local sp_per_bp = 65536 * 72.27 / 72
 
+-- Raise a consistently prefixed error at the caller's location.
 local function fail(message)
   error("ULSBS multikey: " .. message, 2)
 end
@@ -21,6 +24,7 @@ local glue_id = node.id("glue")
 local kern_id = node.id("kern")
 local whatsit_id = node.id("whatsit")
 local matrix_subtype = node.subtype("pdf_setmatrix")
+local late_lua_subtype = node.subtype("late_lua")
 
 -- Attributes survive the copies and nested boxes used by songs and melody
 -- annotations. Tag only the explicit alternate wrapper, not its descendants.
@@ -42,6 +46,7 @@ function M.fit_chords(box_number, lyric_width, minimum_scale)
   if not chord or lyric_width <= chord.width then return end
   local candidates, rightmost = {}, 0
 
+  -- Collect alternate wrappers and the rightmost non-chord content position.
   local function visit(box, x)
     for n in node.traverse(box.head) do
       if n.id == hlist_id then
@@ -83,6 +88,7 @@ function M.fit_chords(box_number, lyric_width, minimum_scale)
   end
 end
 
+-- Encode a JSON string with valid UTF-8 and XML-compatible Unicode values.
 local function json_string(value)
   if type(value) ~= "string" then
     fail("expected a string")
@@ -96,6 +102,7 @@ local function json_string(value)
       fail("manifest strings must not contain Unicode surrogates")
     end
   end
+  -- Escape JSON delimiters and control bytes without altering UTF-8 bytes.
   local escaped = value:gsub('[%z\1-\31\\"]', function(char)
     if char == '"' then return '\\"' end
     if char == '\\' then return '\\\\' end
@@ -107,11 +114,13 @@ local function json_string(value)
   return '"' .. escaped .. '"'
 end
 
+-- Encode an optional string, using JSON null for an absent value.
 local function nullable_string(value)
   if value == nil then return "null" end
   return json_string(value)
 end
 
+-- Encode a finite number in trimmed fixed-point JSON notation.
 local function number(value)
   if type(value) ~= "number" or value ~= value or math.abs(value) == math.huge then
     fail("expected a finite number")
@@ -120,6 +129,7 @@ local function number(value)
   return string.format("%.8f", value):gsub("0+$", ""):gsub("%.$", "")
 end
 
+-- Resolve a registered occurrence while the manifest is still writable.
 local function song_for(internal_id)
   local song = by_id[internal_id]
   if not song then fail("unknown internal song ID " .. tostring(internal_id)) end
@@ -158,14 +168,74 @@ function M.begin_song(internal_id, song_id, occurrence, layer_prefix, original_k
     key_labels = labels,
     layer_prefix = layer_prefix,
     has_transposable_content = false,
+    layer_pages = {},
   }
   songs[#songs + 1] = song
   by_id[internal_id] = song
 end
 
--- Call only from late Lua inside the actual marked-content box, not while sizing.
-function M.mark_used(internal_id)
-  song_for(internal_id).has_transposable_content = true
+-- Resolve and validate a zero-based page index within physical shipout.
+local function physical_page_index(absolute_shipout_counter)
+  if shipping_page == nil then
+    fail("marked content outside physical page shipout (reusable PDF forms are unsupported)")
+  end
+  local page_index = status.total_pages
+  if absolute_shipout_counter ~= nil then
+    page_index = absolute_shipout_counter - 1
+  end
+  if type(page_index) ~= "number" or page_index < 0 or page_index % 1 ~= 0 then
+    fail("tracking requires a physical shipout page index")
+  end
+  if page_index ~= shipping_page then fail("inconsistent physical shipout page index") end
+  return page_index
+end
+
+-- Page-list sentinels exclude PDF form serialization, whose late Lua runs once
+-- per form, not once per placement. Imported graphics remain inside our marks.
+function M.start_page()
+  if shipping_page ~= nil then fail("nested physical page shipout") end
+  shipping_page = status.total_pages
+end
+
+-- Clear the physical-page sentinel after that page's late Lua has run.
+function M.stop_page()
+  if shipping_page == nil then fail("physical page shipout was not tracked") end
+  shipping_page = nil
+end
+
+-- Reject untrackable leader content and bracket the shipout list with sentinels.
+function M.track_page(box)
+  if not box then fail("missing physical shipout box") end
+  -- LuaTeX suppresses late Lua in leaders. Refuse those placements rather than
+  -- silently omit their dependencies; ordinary copied boxes execute normally.
+  -- Recursively detect usage markers inside leaders, including nested boxes.
+  local function check_leaders(list, in_leader)
+    for n in node.traverse(list) do
+      if n.id == hlist_id or n.id == vlist_id then
+        check_leaders(n.head, in_leader)
+      elseif n.id == glue_id and n.leader then
+        check_leaders(n.leader, true)
+      elseif in_leader and n.id == whatsit_id and n.subtype == late_lua_subtype
+        and type(n.data) == "string" and n.data:find("ulsbs_multikey.mark_used", 1, true) then
+        fail("transposable content in TeX leaders has unknown page dependencies")
+      end
+    end
+  end
+  check_leaders(box.head, false)
+  local first = node.new("whatsit", "late_lua")
+  first.data = "ulsbs_multikey.start_page()"
+  local last = node.new("whatsit", "late_lua")
+  last.data = "ulsbs_multikey.stop_page()"
+  box.head = node.insert_before(box.head, box.head, first)
+  box.head = node.insert_after(box.head, node.tail(box.head), last)
+end
+
+-- Every alternative records its actual shipout, including hidden content and
+-- copied boxes. OCG allocation and discarded measurement boxes record nothing.
+function M.mark_used(internal_id, absolute_shipout_counter)
+  local song = song_for(internal_id)
+  song.layer_pages[physical_page_index(absolute_shipout_counter)] = true
+  song.has_transposable_content = true
 end
 
 -- Call from late Lua at the header anchor, immediately after primitive savepos.
@@ -180,46 +250,52 @@ function M.anchor(internal_id, absolute_shipout_counter)
   else
     x, y = tex.lastxpos, tex.lastypos
   end
-  local page_index = status.total_pages
-  if absolute_shipout_counter ~= nil then
-    page_index = absolute_shipout_counter - 1
-  end
-  if type(page_index) ~= "number" or page_index < 0 or page_index % 1 ~= 0 then
-    fail("anchor requires a physical shipout page index")
-  end
+  local page_index = physical_page_index(absolute_shipout_counter)
   number(x)
   number(y)
   song.page_index = page_index
   song.anchor = { x = x / sp_per_bp, y = y / sp_per_bp }
 end
 
+-- Serialize transposable occurrences with sorted, validated dependency pages.
 local function manifest()
   local records = {}
-  for i, song in ipairs(songs) do
-    local labels = "null"
-    if song.key_labels then
-      local entries = {}
-      for k = 1, 12 do entries[k] = json_string(song.key_labels[k]) end
-      labels = "[" .. table.concat(entries, ",") .. "]"
+  for _, song in ipairs(songs) do
+    if song.has_transposable_content then
+      local pages = {}
+      for page in pairs(song.layer_pages) do
+        if page >= status.total_pages then fail("dependency page was not shipped") end
+        pages[#pages + 1] = page
+      end
+      table.sort(pages)
+      if #pages == 0 then fail("transposable occurrence has no dependency pages") end
+      local labels = "null"
+      if song.key_labels then
+        local entries = {}
+        for k = 1, 12 do entries[k] = json_string(song.key_labels[k]) end
+        labels = "[" .. table.concat(entries, ",") .. "]"
+      end
+      local anchor = "null"
+      if song.anchor then
+        anchor = '{"x":' .. number(song.anchor.x) .. ',"y":' .. number(song.anchor.y) .. '}'
+      end
+      records[#records + 1] = '{"song_id":' .. json_string(song.song_id)
+        .. ',"occurrence":' .. number(song.occurrence)
+        .. ',"original_key":' .. nullable_string(song.original_key)
+        .. ',"key_labels":' .. labels
+        .. ',"layer_prefix":' .. json_string(song.layer_prefix)
+        .. ',"page_index":' .. (song.page_index and number(song.page_index) or "null")
+        .. ',"anchor":' .. anchor
+        .. ',"layer_page_indices":[' .. table.concat(pages, ",") .. ']'
+        .. ',"has_transposable_content":' .. tostring(song.has_transposable_content) .. '}'
     end
-    local anchor = "null"
-    if song.anchor then
-      anchor = '{"x":' .. number(song.anchor.x) .. ',"y":' .. number(song.anchor.y) .. '}'
-    end
-    records[i] = '{"song_id":' .. json_string(song.song_id)
-      .. ',"occurrence":' .. number(song.occurrence)
-      .. ',"original_key":' .. nullable_string(song.original_key)
-      .. ',"key_labels":' .. labels
-      .. ',"layer_prefix":' .. json_string(song.layer_prefix)
-      .. ',"page_index":' .. (song.page_index and number(song.page_index) or "null")
-      .. ',"anchor":' .. anchor
-      .. ',"has_transposable_content":' .. tostring(song.has_transposable_content) .. '}'
   end
-  return '{"has_multikey_info":true,"multikey_info":{"schema_version":1,'
+  return '{"has_multikey_info":true,"multikey_info":{"schema_version":2,'
     .. '"layer_protocol":"ulsbs:transpose:v1","coordinate_space":"pdf-user-space","songs":['
     .. table.concat(records, ",") .. ']}}'
 end
 
+-- Write the compile-status sidecar, checking both writing and closing errors.
 local function write_status(json)
   local filename = tex.jobname .. ".ulsbs-multikey.json"
   local file, message = io.open(filename, "wb")
@@ -242,6 +318,7 @@ end
 -- Run after the final page has shipped. Standard PDF Info is deliberately untouched.
 function M.finish()
   if finished then return end
+  if shipping_page ~= nil then fail("physical page shipout did not finish") end
   if type(pdf.getcatalog) ~= "function" or type(pdf.setcatalog) ~= "function" then
     fail("LuaTeX catalog inspection and update APIs are required")
   end

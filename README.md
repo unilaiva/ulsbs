@@ -40,7 +40,6 @@ For a real-world example of a repository using ULSBS, see:
   - [Host build (`--no-container`)](#host-build---no-container)
   - [Platform-specific setup examples](#platform-specific-setup-examples)
 - [Configuration](#configuration)
-  - [Multikey PDF editions](#multikey-pdf-editions)
 - [Writing songbooks](#writing-songbooks)
   - [General structure](#general-structure)
   - [`ulsbs-songbook` document class options](#ulsbs-songbook-document-class-options)
@@ -54,6 +53,7 @@ For a real-world example of a repository using ULSBS, see:
   - [Full melodies with Lilypond](#full-melodies-with-lilypond)
   - [Tags](#tags)
   - [Extra variants](#extra-variants)
+  - [Multikey PDF editions](#multikey-pdf-editions)
   - [Creating song selections](#creating-song-selections)
 - [Utilities](#utilities)
   - [`ulsbs-bookmeta`](#ulsbs-bookmeta)
@@ -483,91 +483,6 @@ Precedence is, from lowest to highest:
 - profile config
 - environment variables
 - CLI flags
-
-### Multikey PDF editions
-
-By default, every selected non-lyrics variant produces an ordinary PDF and an
-additional multikey PDF. In a compatible viewer, readers can select a different
-key for each song through its PDF layer controls. The ordinary PDF remains the
-conventional edition without interactive layers.
-
-```toml
-multikey-books = true
-multikey-layer-ui = "native"
-```
-
-- `multikey-books` is a boolean, default `true`. It follows normal profile
-  inheritance: a profile may enable or disable companions, including enabling
-  them when the root setting is `false`.
-- `multikey-layer-ui` accepts `native` (default) or `hidden`. Hidden mode keeps
-  layers available for programmatic discovery and switching, but requests that
-  viewers hide the native layer list. Viewer support varies.
-- `multikey-require-song-ids` is a boolean, default `false`. Enable it or use
-  `--require-song-ids` to fail multikey builds on missing or invalid song IDs.
-- Musical variant selection is unchanged. Multikey editions do not select extra
-  instrument variants, and lyrics-only output never gets a multikey edition.
-
-Use `--no-multikey` to disable companions for a single invocation. Quick mode
-(`-q`/`--quick`) also disables multikey companions, regardless of the configured
-default, along with its other reduced-output settings.
-
-The `MULTIKEY` marker precedes the musical variant and paper suffix:
-
-| Selected variant | Ordinary PDF | Additional multikey PDF |
-|---|---|---|
-| Main | `book_A5.pdf` | `multikey/book_MULTIKEY_A5.pdf` |
-| Charango | `book_CHARANGO_A5.pdf` | `multikey/book_MULTIKEY_CHARANGO_A5.pdf` |
-| Bass clef | `book_BASSCLEF_A5.pdf` | `multikey/book_MULTIKEY_BASSCLEF_A5.pdf` |
-
-Ordinary PDFs remain at the root under `result/` and, when enabled, `deploy/`;
-multikey PDFs go into their `multikey/` subdirectories. With JSON export enabled,
-each multikey PDF also gets a matching JSON
-companion, reusing the ordinary variant's metadata and media links. Multikey
-jobs do not create extra printouts, MIDI, audio, or cover images.
-All JSON sidecars stay in `json/`.
-Existing flat multikey files from earlier builds are not automatically deleted.
-
-Give each song a stable `id=` containing lowercase letters, digits and dashes.
-Layers use this ID rather than the printed song number. Repeated songs may keep
-the same ID: each occurrence receives independent layers and its own UI position.
-Without a valid ID, a song still prints normally but gets no interactive layers;
-compilation warns, or fails the multikey job when strict ID validation is enabled.
-Existing ordinary metadata validation may still reject malformed IDs.
-Run your ID-assignment tool before compiling; compilation does not rewrite sources.
-Quick mode produces no multikey books and therefore does not enforce this policy.
-
-Multikey PDFs contain key-selection metadata with display labels and header
-positions. Book JSON files expose `has_multikey_info` and `multikey_info`:
-ordinary files use `false` and `null`, while multikey files carry the same
-multikey payload as their PDF. See the
-[viewer integration contract](ARCHITECTURE.md#viewer-integration).
-
-Transposition covers verse chords, inline `\ac` references, pitched melody
-hints, and the declared `key=` badge. Non-default key badges use dark red by
-default and show `⮁` before the key label. The symbol is also available separately
-as `\symudarrow`. Override `transposedkeycolor` with `\colorlet` or `\definecolor`. Recommended
-singing keys (`gk=`), standalone `\altchords`, prose, chord diagrams, and
-LilyPond scores do not switch.
-
-The stock bass-clef setup hides all transposable annotations. Its multikey
-companion therefore has no visible key-switching effect unless those annotations
-are enabled; the bass-clef scores themselves remain unchanged.
-
-Original notation determines layout and default viewing/printing. Alternative
-chord labels may shrink or overflow without reflowing lyrics. Multikey books
-take longer to compile and require `ocgx2`, supplied by the supported toolchain.
-Layer controls and original-only printing depend on the viewer; hidden notation
-may appear in search, copy/paste, or accessibility output. Use the ordinary PDF
-for conventional printing and maximum viewer compatibility.
-
-For manual compilation, the public LaTeX flags remain
-`\ulPdfTranspositionLayers` (`false` by default) and
-`\ulPdfTranspositionLayerUI` (`native` by default). To enable layers, define
-`\newcommand{\ulPdfTranspositionLayers}{true}` before `\documentclass` (or
-before `\usepackage{ulsbs}` with another class). The pipeline supplies these
-flags itself, enabling layers only for multikey jobs; do not duplicate its
-definitions in source files. See [Architecture](ARCHITECTURE.md) for the layer
-protocol, manual-build reruns, layout rules, and detailed viewer limitations.
 
 Some useful environment variables:
 
@@ -1082,6 +997,43 @@ respective exports. Multikey editions never generate MIDI or audio regardless of
 Audio still requires intermediate MIDI and internal song metadata: `--no-midi`
 disables exported MIDI files, not the MIDI needed to encode enabled audio.
 Likewise, disabling JSON export does not remove metadata needed for audio.
+
+### Multikey PDF editions
+
+Optional `_MULTIKEY` editions include all twelve keys as PDF layers, so readers
+can choose a key independently for each song in a compatible viewer. Chords,
+melody hints and key labels switch together; supported LilyPond notation can
+switch too. Ordinary PDFs remain unchanged.
+
+Enable these editions in `ulsbs-config.toml` (both options default to `false`):
+
+```toml
+multikey-books = true
+multikey-lilypond-scores = true
+```
+
+Each selected non-lyrics variant gets an additional PDF in `result/multikey/`
+and, when deployment is enabled, `deploy/multikey/`. For example,
+`book_A5.pdf` gets `multikey/book_MULTIKEY_A5.pdf`. Matching JSON exports stay
+in `json/`; no extra MIDI, audio or printouts are generated.
+
+Give songs stable `id=` values and accurate `key=` metadata. LilyPond transposition
+supports the standard ULSBS head/tail snippets; unsupported scores or keys that
+cannot be engraved safely retain the original notation with a warning. Builds
+take longer, but successful score alternatives are cached for later builds.
+
+Other optional settings:
+
+- `multikey-layer-ui = "native"` shows the viewer's layer list; `"hidden"` hides
+  it for viewers with their own key controls.
+- `multikey-min-chordname-scale = 0.85` limits chord-name shrinking (range
+  `0.5` to `1`); use `1` to disable shrinking. Long names may then overhang.
+- `multikey-require-song-ids = true` makes missing or invalid song IDs an error.
+
+Use `--no-multikey` or `--quick` to skip these editions for a build. Viewers
+vary in their layer support; use the ordinary PDF for conventional printing.
+See [Architecture](ARCHITECTURE.md#multikey-books) for implementation details,
+viewer integration and cache maintenance.
 
 ### Creating song selections
 

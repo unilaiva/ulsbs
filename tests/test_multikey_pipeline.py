@@ -46,6 +46,7 @@ class MultikeyPipelineTests(unittest.TestCase):
         self.paths = SimpleNamespace(project_root=self.root, result_dir=self.result)
         self.cfg = replace(
             Config(),
+            multikey_books=True,
             runtime=SimpleNamespace(project_paths=self.paths, in_container=False),
             deploy_dir=self.deploy,
             midifiles_allow_for_optional_variants=True,
@@ -59,6 +60,17 @@ class MultikeyPipelineTests(unittest.TestCase):
         directory = self.root / (variant + ("-multikey" if multikey else ""))
         directory.mkdir(exist_ok=True)
         return Job(self.doc, self.doc.stem, variant, directory, multikey=multikey)
+
+    def test_lilypond_score_opt_in_only_reaches_multikey_non_lyrics_jobs(self) -> None:
+        for enabled, books, variant, multikey in product(
+                (False, True), (False, True), ("default", "lyrics", "charango", "bassclef"), (False, True)):
+            with self.subTest(enabled=enabled, books=books, variant=variant, multikey=multikey):
+                cfg = replace(self.cfg, multikey_lilypond_scores=enabled, multikey_books=books)
+                job = self.job(variant, multikey)
+                text = pipeline.make_variant_tex(job, cfg).read_text(encoding="utf-8")
+                expected = enabled and books and multikey and variant != "lyrics"
+                self.assertIn(r"\newcommand{\ulMultikeyLilypondScores}{" + str(expected).lower() + "}", text)
+                self.assertEqual(r"\providecommand{\ulScoreSystem}" in text, expected)
 
     def test_multikey_skips_all_ancillary_outputs_even_when_enabled(self) -> None:
         for variant in ("default", "charango", "bassclef"):
@@ -267,7 +279,7 @@ class MultikeyPipelineTests(unittest.TestCase):
     def test_compile_captures_renderer_payload_only_when_sink_requested(self) -> None:
         job = self.job(multikey=True)
         basename = build_job_basename(job)
-        payload = {"schema_version": 1, "layer_protocol": "ulsbs:transpose:v1",
+        payload = {"schema_version": 2, "layer_protocol": "ulsbs:transpose:v1",
                    "coordinate_space": "pdf-user-space", "songs": []}
         (job.compile_dir / f"{basename}.pdf").write_bytes(b"%PDF-test")
         manifest = job.compile_dir / f"{basename}.ulsbs-multikey.json"
@@ -303,6 +315,35 @@ class MultikeyPipelineTests(unittest.TestCase):
         shutil.rmtree(job.compile_dir)
         self.assertEqual(sink, {job: payload})
         self.assertFalse((self.result / "json").exists())
+
+    def test_compile_forwards_verbose_to_score_generation(self) -> None:
+        job = self.job(multikey=True)
+        pipeline.prepare_compile_dir(self.ui, EngineAssets(), self.cfg, job)
+        basename = build_job_basename(job)
+        manifest = job.compile_dir / f"{basename}.ulsbs-multikey.json"
+
+        def latex(*args, **kwargs):
+            manifest.write_text('{"has_multikey_info": true, "multikey_info": {"songs": []}}')
+            (job.compile_dir / f"{basename}.pdf").write_bytes(b"%PDF-test")
+            return self.doc, 4
+
+        resultlist.initialize(self.result, "score-verbosity")
+        self.addCleanup(resultlist.delete)
+        for verbose in (False, True):
+            with self.subTest(verbose=verbose), \
+                    patch.object(pipeline, "prepare_compile_dir"), \
+                    patch.object(pipeline, "build_include_paths", return_value=({}, [], [])), \
+                    patch.object(pipeline, "step_lilypond_book", return_value=(
+                        job.compile_dir / f"{basename}.tex", self.doc, 2)), \
+                    patch.object(pipeline, "step_texlua_indices", return_value=3), \
+                    patch.object(pipeline, "step_lualatex_pass", side_effect=latex), \
+                    patch.object(pipeline, "step_pdf_fonts", return_value=5), \
+                    patch.object(pipeline, "analyze_warnings", return_value=0), \
+                    patch("ulsbs.lilypond_scores.prepare_scores", return_value={}), \
+                    patch("ulsbs.lilypond_scores.generate_scores") as generate:
+                cfg = replace(self.cfg, multikey_lilypond_scores=True, verbose=verbose)
+                self.assertEqual(pipeline.compile_one_job(self.ui, Mock(), cfg, job), 0)
+                generate.assert_called_once_with(self.ui, job, basename, {}, {}, [], verbose=verbose)
 
     def test_final_status_is_required_before_any_multikey_publication(self) -> None:
         payload = {"songs": []}
@@ -413,11 +454,12 @@ class MultikeyPipelineTests(unittest.TestCase):
                 ordinary = self.job(variant)
                 multikey = self.job(variant, multikey=True)
                 mk_finished = threading.Event()
-                payload = {"schema_version": 1, "layer_protocol": "ulsbs:transpose:v1",
+                payload = {"schema_version": 2, "layer_protocol": "ulsbs:transpose:v1",
                            "coordinate_space": "pdf-user-space", "songs": [
                                {"song_id": "song", "occurrence": 1, "original_key": "Am",
                                 "key_labels": ["Am", "Bbm"], "layer_prefix": "ulsbs:transpose:v1:id:song",
                                 "page_index": 3, "anchor": {"x": 12.5, "y": 300},
+                                "layer_page_indices": [3, 4],
                                 "has_transposable_content": True}]}
                 metadata = {
                     "book_info": {"maintitle": "Full book", "variant": variant,

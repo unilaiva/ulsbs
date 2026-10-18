@@ -82,6 +82,7 @@ atexit.register(_restore_cursor_on_exit)
 
 
 def _detect_spinner_supported() -> bool:
+    """Cache whether stdout and environment settings allow a terminal spinner."""
     global _spinner_supported
     if _spinner_supported is not None:
         return _spinner_supported
@@ -102,6 +103,7 @@ def _detect_spinner_supported() -> bool:
 
 
 def _patch_streams_for_spinner() -> None:
+    """Wrap stdout and stderr so regular output cooperates with the spinner."""
     global _original_stdout, _original_stderr, _stdout_wrapper, _stderr_wrapper
     if isinstance(sys.stdout, _SpinnerStream) and isinstance(sys.stderr, _SpinnerStream):
         return
@@ -179,6 +181,7 @@ def _clear_current_line_unlocked() -> None:
 
 
 def _draw_spinner_frame_unlocked(initial: bool) -> None:
+    """Redraw the spinner line, disabling it on errors; caller holds the output lock."""
     global _spinner_last_width, _spinner_active
     try:
         text = _spinner_frame_text_unlocked()
@@ -202,6 +205,7 @@ class _SpinnerStream:
     """
 
     def __init__(self, wrapped: TextIO, is_stderr: bool) -> None:
+        """Store the wrapped stream and initialize per-thread line tracking."""
         self._wrapped = wrapped
         self._is_stderr = is_stderr
         # Track whether the next non-empty write begins a new terminal line.
@@ -228,6 +232,7 @@ class _SpinnerStream:
             self._at_line_start = last_pos == len(s) - 1
 
     def write(self, s: str) -> int:
+        """Write text while keeping active spinner and concurrent output lines separate."""
         if not s:
             return 0
         if not _spinner_active:
@@ -297,21 +302,25 @@ class _SpinnerStream:
             return n
 
     def flush(self) -> None:
+        """Flush the wrapped stream, ignoring stream errors."""
         try:
             self._wrapped.flush()
         except Exception:
             pass
 
     def isatty(self) -> bool:  # pragma: no cover - thin wrapper
+        """Return the wrapped stream's TTY status, or False if unavailable."""
         try:
             return self._wrapped.isatty()
         except Exception:
             return False
 
     def fileno(self) -> int:  # pragma: no cover - thin wrapper
+        """Return the wrapped stream's file descriptor."""
         return self._wrapped.fileno()
 
     def __getattr__(self, name: str) -> object:
+        """Delegate unhandled attribute lookups to the wrapped stream."""
         return getattr(self._wrapped, name)
 
 
@@ -468,6 +477,7 @@ class UI:
         """
 
         def clamp(cols: int) -> int:
+            """Constrain the column count to the supported wrapping range."""
             return max(MIN_COLS, min(cols, MAX_COLS))
 
         # Highest priority: explicit override via env var

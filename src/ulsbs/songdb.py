@@ -412,9 +412,11 @@ class SongInfo:
     translations: List[Translation] = field(default_factory=list)
 
     def set_midi_result_file_relative(self, path: Path) -> None:
+        """Set the MIDI output path relative to the global result directory."""
         self.midi_result_file_relative = path
 
     def set_audio_result_file_relative(self, path: Path) -> None:
+        """Set the audio output path relative to the global result directory."""
         self.audio_result_file_relative = path
 
 
@@ -584,6 +586,7 @@ class SongbookData:
         """
 
         def _default(obj: Any) -> Any:
+            """Serialize paths as POSIX strings and reject other unsupported JSON values."""
             if isinstance(obj, Path):
                 return obj.as_posix()
             raise TypeError("Object of type %s is not JSON-serialisable" % type(obj).__name__)
@@ -671,6 +674,7 @@ class SongbookData:
             return self
 
         def _keep(song: SongInfo) -> bool:
+            """Return whether the song has an ID in the requested set."""
             return song.id is not None and song.id in wanted
 
         new_songs_without = [s for s in self.songs_without_chapter if _keep(s)]
@@ -736,9 +740,11 @@ class SongbookData:
         """
 
         def _song_count() -> int:
+            """Count songs across chapters and the unchaptered collection."""
             return len(self.songs_without_chapter) + sum(len(c.songs) for c in self.chapters)
 
         def _format_audio_link_plain(link: AudioLink) -> str:
+            """Format a plain-text audio URL with its available title, key, and pitch."""
             extras: List[str] = []
             if link.title:
                 extras.append(link.title)
@@ -751,6 +757,7 @@ class SongbookData:
             return link.url
 
         def _format_audio_link_md(link: AudioLink) -> str:
+            """Format a clickable Markdown audio URL with optional title, key, and pitch."""
             # Use angle brackets to make bare URLs clickable.
             url = f"<{link.url}>"
             extras: List[str] = []
@@ -764,18 +771,21 @@ class SongbookData:
             return f"{url}{extras_str}"
 
         def _append_verses_plain(lines: List[str], verses: List[List[str]]) -> None:
+            """Append lyric lines with a blank line between verses."""
             for vi, verse in enumerate(verses):
                 lines.extend(verse)
                 if vi != len(verses) - 1:
                     lines.append("")
 
         def _verses_to_text_block(verses: List[List[str]]) -> str:
+            """Join lyric lines into a text block with blank lines between verses."""
             blocks: List[str] = []
             for verse in verses:
                 blocks.append("\n".join(verse))
             return "\n\n".join(blocks)
 
         def _append_song(lines: List[str], song: SongInfo) -> None:
+            """Append a song's metadata, lyrics, and translations in the selected format."""
             # Title
             if markdown:
                 lines.append(f"### SONG: {song.title}")
@@ -1043,6 +1053,7 @@ def _tex_to_plain_text(text: str) -> str:
     )
 
     def _macro_with_args_repl(match: re.Match) -> str:
+        """Replace a matched macro with nonempty arguments that are not TeX lengths."""
         braces = match.group("braces")
         if not braces:
             return " "
@@ -2137,6 +2148,7 @@ def build_song_database(
         beginsong_header_end: int,
         raw_block: str,
     ) -> None:
+        """Extract and normalize a song block, then append it to the current collection."""
         nonlocal current_songnum, order_counter
 
         raw_title = title.strip()
@@ -2229,6 +2241,7 @@ def build_song_database(
             current_chapter.songs.append(song)
 
     def process_file(path: Path, *, is_root: bool = False) -> None:  # noqa: C901
+        """Collect metadata recursively from a TeX file, skipping cyclic include chains."""
         nonlocal current_chapter, current_songnum, current_song_in_progress, order_counter
 
         path = path.resolve()

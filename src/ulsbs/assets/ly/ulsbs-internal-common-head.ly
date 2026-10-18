@@ -3,6 +3,12 @@
     %
     % Internal common LilyPond header and helpers.
     % This file is part of the 'ulsbs' package.
+    %
+    % Covered by assets/lilypond-score-cache-assets.json.
+    % After changing this file, run ulsbs-score-cache-assets --rewrite
+    % or from the engine root:
+    % PYTHONPATH=src python3 -m ulsbs.lilypond_score_cache --rewrite
+    % See ARCHITECTURE.md#trusted-cache-assets for converted-tail variants.
 
     % Lilypond version:
     \version "2.24.4"

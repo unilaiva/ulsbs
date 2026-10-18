@@ -28,6 +28,7 @@ ulsbs-ly2tex = "ulsbs.tools.ly2tex:main"
 ulsbs-migrate-syntax-v1 = "ulsbs.tools.migrate_syntax_v1:main"
 ulsbs-migrate-melody-syntax = "ulsbs.tools.migrate_syntax_v1:main"
 ulsbs-test = "ulsbs.testing:main"
+ulsbs-score-cache-assets = "ulsbs.lilypond_score_cache:main"
 
 [project.urls]
 Homepage = "https://github.com/unilaiva/unilaiva-songbook"

@@ -381,7 +381,7 @@ class PdfTranspositionLayerIntegrationTests(unittest.TestCase):
         pdf_command(pdf, ["qpdf", "--check", "{pdf}"])
 
     def test_chord_scaling_respects_natural_width_minimum_and_empty_original(self) -> None:
-        for minimum in (0.85, 0.95):
+        for minimum in (0.85, 0.95, 1):
             with self.subTest(minimum=minimum):
                 output, _ = compile_fixture(
                     "pdf-transposition-scaling",
@@ -412,6 +412,19 @@ class PdfTranspositionLayerIntegrationTests(unittest.TestCase):
                 if minimum == 0.85:
                     self.assertGreater(wider, 0, "Exercise proportional shrinking above the floor")
                 self.assertIn("ULSBS-GROUP-SIDEEFFECT:1", output)
+
+    def test_chord_minimum_one_disables_lyric_space_refitting(self) -> None:
+        output, _ = compile_fixture(
+            "pdf-transposition-lyric-space", passes=2,
+            preamble="\\def\\ulPdfTranspositionMinimumScale{1}\n",
+        )
+        samples = re.findall(
+            r"ULSBS-FIT:([a-z]+):(\d+):(\d+):(-?\d+):([\d.]+);",
+            output.replace("\n", ""),
+        )
+        self.assertEqual(len(samples), 198)
+        self.assertTrue(any(int(natural) > int(original) for _, original, natural, _, _ in samples))
+        self.assertTrue(all(float(scale) == 1 for _, _, _, _, scale in samples))
 
     def test_chords_use_spare_lyric_width_without_changing_layout(self) -> None:
         output, enabled = compile_fixture("pdf-transposition-lyric-space", passes=3)

@@ -69,9 +69,14 @@ The queue rejects duplicate publication paths before starting jobs: independent
 locks cannot prevent two sources/editions from overwriting the same artifact.
 PDF directory separation does not eliminate collisions in the shared JSON folder.
 
-`multikey-books` defaults to `true` and follows normal profile inheritance.
+`multikey-books` defaults to `false` and follows normal profile inheritance.
 Profiles may override it in either direction, including root `false` to child
 `true`. `multikey-layer-ui` is `native` by default and also accepts `hidden`.
+`multikey-min-chordname-scale` defaults to the existing TeX floor, `0.85`, and
+accepts finite numeric TOML values in `[0.5, 1]`, rejecting booleans and strings.
+It follows the same root/profile inheritance and is supplied before class loading
+as `\ulPdfTranspositionMinimumScale`. A value of `1` prevents chord-name scaling
+both during initial overlay construction and late Lua lyric-space fitting.
 
 The CLI `--no-multikey` override disables companions, and `-q`/`--quick` also
 forces `multikey-books` off for that invocation.
@@ -122,6 +127,8 @@ The pipeline defines `\ulPdfTranspositionLayers`, `\ulPdfTranspositionLayerUI`,
 and `\ulPdfTranspositionRequireSongIDs` before loading the class/package.
 Layers are `true` only for multikey jobs and `false` for ordinary and lyrics
 jobs. Manual LaTeX compilation defaults to layers `false` and UI `native`.
+Manual builds may define `\newcommand{\ulPdfTranspositionLayers}{true}` before
+class/package loading; pipeline-driven sources must not duplicate its definitions.
 
 A companion candidate whose source initializes lyric-only mode or does not load
 the renderer explicitly reports disabled capability. It is skipped without
@@ -147,15 +154,292 @@ streams was rejected: PDF.js accepted it, but Poppler reported syntax errors,
 and PDF rewriting could not safely renumber those embedded references. A clean
 `qpdf --check` alone is not sufficient evidence of correct layer rendering.
 
+### Opt-in score layers
+
+`multikey-lilypond-scores` defaults to `false` and only affects multikey,
+non-lyrics jobs. Originals still use the normal LilyPond pipeline. The focused
+`lilypond_scores.py` module wraps generated per-system graphics inclusions with
+snippet identities while preserving their existing inter-system break tokens.
+Repeated references to the same system retain their original placements.
+
+The existing first LuaLaTeX draft pass writes `<job>.ulsbs-scores.json` through
+`ulsbs-score-layers.tex` and `ulsbs-score-layers.lua`. This private request
+manifest contains the runtime song occurrence, effective tonic/mode, and twelve
+structured target tonics obtained from the existing TeX spelling policy. There
+is no raw song-key parser and no additional TeX pass. Between draft and full
+passes, Python engraves supported alternatives and writes
+`<job>.ulsbs-score-variants.tex` plus `<job>.ulsbs-score-results.json` diagnostics.
+Stale dispatch/request files are cleared before draft collection.
+
+Recognized head/tail snippets without additional custom includes are eligible.
+Native `\transpose` assignments are inserted before the tail consumes the
+already-defined music variables. Structured `ly:make-pitch` operands avoid
+interpreting generated intervals under a source's custom note-name language.
+The shortest signed interval is tried first, then its octave equivalent on
+failure. Every system PDF must be valid and fit both original dimensions at a
+uniform scale of at least 0.80, with no enlargement or recognized omitted-tab
+diagnostic. Failure of any system rejects the complete score for that offset;
+other successful offsets remain available. Custom/unresolved-key scores fall back.
+Alternative engravings force the C diagnostic locale, so localized hosts cannot
+silently bypass warning-based tablature validation.
+
+An omitted-tab diagnostic rejects that candidate even when LilyPond exits zero.
+A successful octave retry is normal operation, not a warning. If both candidates
+fail, the original notation remains and the job warns once per song occurrence
+and distinct final failure reason, combining score identities and listing the
+affected `tNN (target)` selections. Different occurrences and failure reasons
+remain separate. `--verbose` enables DEBUG candidate failures/log paths,
+successful octave retries, and the engraving/cache/success/fallback summary;
+ordinary output contains no per-offset progress or summary. The private
+`<job>.ulsbs-score-results.json` retains every attempt and its individual reason,
+including first-octave failures that are recovered by the next candidate.
+
+For enabled jobs only, the pipeline appends `ulsbs-score-boundaries.ily` to the
+copied common tail. Its `grob-transformer` composes with existing
+`System.after-line-breaking` callbacks rather than replacing them, leaving t00
+music and drawing unchanged. `<snippet>.ulsbs-boundaries` records exact rational
+main/grace moments at both ends of every system during original engraving.
+Python validates contiguous ordered boundaries against the original graphics
+inventory. All candidates receive a parallel structured timing voice with
+automatic line breaks disabled; multi-system originals also supply forced
+`LineBreakEvent`s at their internal boundaries. A single-system original needs
+the same line lock: transposed accidentals/chord labels can otherwise wrap it
+into two systems even when the notation fits the original footprint after scaling.
+This does not parse or change staff sizes: head defaults and effective
+`\setStaffSize` overrides remain authoritative. There is no automatic staff-size
+search on count mismatch; exact replay and whole-offset fallback remain required.
+Candidate boundaries must exactly equal the originals, not merely have the same
+count.
+Pickups, initial grace music, and internal breaks at negative grace moments are
+supported. Replay groups endpoints sharing a main time into one bare structured
+`GraceMusic` branch: forced breaks and rational skips advance from the earliest
+requested negative grace moment to zero. An ordinary break at that same main
+time follows outside the grace block. The original music tree is not rewritten
+or unfolded. Positive grace-time boundaries and nonzero final grace moments
+remain explicit fallbacks. Incompatible repeats/custom timing also fall back if
+replay does not reproduce the authoritative full main/grace boundary sequence.
+
+Full passes overlay each system in its existing occurrence-specific OCGs using
+the original box dimensions and baseline; alternatives never enlarge or reserve
+additional layout space. Score overlays reuse the public OCG names and metadata
+contract described below, including their shipped page dependencies.
+The original LilyPond justification settings are retained, including per-snippet
+overrides; both standard heads explicitly set `ragged-right = ##f` and
+`ragged-last = ##f`. This does not guarantee equal rendered staff lengths after
+overlay fitting. If the alternative is taller, the uniform fit can be limited by
+the original height and shrink its horizontal extent too. Stretching only the
+horizontal PDF axis would distort notation; fitting width alone could overlap
+adjacent content. Equal visual widths would require a separate native spacing
+refit with per-system validation, not another justification flag.
+If a validated graphic later disappears or no longer fits, the TeX renderer's
+last-resort per-system guard substitutes that original system; Python validation
+normally rejects the entire offset before dispatch. Native LilyPond spelling
+can retain double accidentals that the TeX labels simplify.
+`ulsbs-score-variants/` remains disposable job-local output, not evidence of a
+cache hit. `lilypond_score_cache.py` maintains a separate content-addressed cache
+under `$XDG_CACHE_HOME/ulsbs/lilypond-scores` (or `~/.cache`), with an absolute
+`ULSBS_SCORE_CACHE_DIR` override. The normal container already mounts its home
+on the persistent home-cache volume. Keys include source and recursive include
+contents, tuning, geometry, original musical boundaries, signed/spelled interval,
+transformation semantics and version, LilyPond executable/version/data, fonts
+and rendering-related environment. Job-local paths normalize to `$JOB`;
+container hostnames, build IDs and source-copy timestamps do not invalidate
+entries. Unresolved/dynamic dependencies or unaudited Scheme conservatively
+disable caching while retaining ordinary engraving and validation.
+
+The standard container runner mounts the named Docker/Podman volume
+`ulsbs-compiler-homecache` at `/home/ulsbs` and sets `HOME` accordingly. Score
+entries therefore normally live at `/home/ulsbs/.cache/ulsbs/lilypond-scores`.
+The project, temp output and Python sources are separate bind mounts. Container
+removal and job-temp cleanup preserve the named volume; the existing image
+rebuild path attempts to remove the whole volume, which also contains other
+home caches. No new cache-specific mount is required.
+
+The CLI-only `--clear-score-cache` option is forwarded through the host wrapper
+and executes once in the actual compilation environment, after plan/tool
+validation and before starting jobs. With `--no-container` it uses the host cache;
+with the normal container it uses the cache inside that volume. `cache_root()`
+resolves the same environment-specific override/default as normal reads/writes.
+Missing caches are a no-op. Clearing preserves the root, unrelated files and
+in-progress `.publish-*` directories, and removes only completed hash-named
+directories with recognized flat cache contents. Unrelated hash-named regular
+files cause refusal before anything is deleted. Corrupt manifests are removable;
+symlink targets are never traversed and symlinked roots/unrecognized entry
+contents are refused. Failure is fatal for this explicit request, unlike an
+ordinary nonfatal cache miss. Help, shell and deploy-only modes do not clear.
+This is not a global cache lock: another running compiler can republish entries;
+avoid concurrent builds when requiring a reliably cold run.
+
+#### Trusted Cache Assets
+
+Trusted hashes live in the packaged `assets/lilypond-score-cache-assets.json`
+(in the checkout, `src/ulsbs/assets/lilypond-score-cache-assets.json`), not in
+Python's former `_TRUSTED_ASSETS` set. The manifest has `schema_version: 1`, an
+`assets` map from bundled source filenames to SHA-256 digests, and a `variants`
+map from reviewed generated-variant labels to SHA-256 digests. The shipped
+variants include `common-tail-convert-ly-2.26.0` and `midi-disabled`.
+Runtime validates the manifest; a missing or malformed file makes score caching
+ineligible with a nonfatal warning, never automatic approval. Unknown asset
+digests likewise disable caching, not engraving or validation.
+
+This trust record is neither a security sandbox nor a LilyPond-version allowlist.
+Toolchain fingerprints automatically invalidate entries when the executable,
+version, data or other keyed toolchain inputs change.
+The two explicitly recognized pipeline mutations are normalized for this trust
+check only; their full modified bytes are still part of the cache fingerprint.
+A LilyPond upgrade alone needs no manifest edit. If an upgrade also requires
+changed assets or different `convert-ly` output, review and explicitly approve
+those exact file contents before expecting cache reuse for them.
+
+Use the read-only developer audit command after changing assets or running
+`convert-ly`:
+
+```bash
+# Installed command: audit all bundled .ly/.ily assets.
+ulsbs-score-cache-assets
+
+# Audit a copied/mutated job asset directory or an individual converted tail.
+ulsbs-score-cache-assets /path/to/job/ulsbs-assets/ly
+ulsbs-score-cache-assets /path/to/converted-tail.ly
+
+# From the engine checkout, without reinstalling entry points.
+PYTHONPATH=src python3 -m ulsbs.lilypond_score_cache
+
+# Inside a normal compiler shell (PYTHONPATH is already configured).
+python3 -m ulsbs.lilypond_score_cache /path/to/job/ulsbs-assets/ly
+```
+
+Each line reports `TRUSTED` or `UNTRUSTED`, the audit SHA-256 digest and the path.
+Directory arguments scan their immediate `.ly` and `.ily` files. The audit
+normalizes only the same two approved pipeline mutations used by cache
+eligibility; its digest can therefore differ from raw `sha256sum` output for
+mutated job copies. The complete modified bytes remain fingerprinted separately.
+Exit status is 0 when all files match audited hashes, 1 for unknown hashes, and
+2 for unreadable/missing inputs or an asset directory without `.ly`/`.ily` files.
+Without `--rewrite`, the command is read-only and never approves hashes or edits
+the manifest. It checks hash membership, not whole-score cache eligibility or
+the safety of arbitrary code. Neither audit nor rewrite executes LilyPond,
+Scheme, or `convert-ly`.
+
+Before approving changes, inspect the source diffs and all dependencies, ensure
+that executable Scheme has no untracked file/environment inputs. `--rewrite` records the maintainer's
+explicit approval; it does not verify code safety. All 21 bundled `.ly`/`.ily`
+source headers carry maintenance notes with rewrite instructions.
+
+After that review, regenerate the source records from the ULSBS source root:
+
+```bash
+# Source-root invocation avoids an entry point that may require installation.
+PYTHONPATH=src python3 -m ulsbs.lilypond_score_cache --rewrite
+
+# Equivalent installed entry point (uses sources bundled next to that tool).
+ulsbs-score-cache-assets --rewrite
+```
+
+`--rewrite` always reads the bundled sources next to the tool, never positional
+paths. It atomically replaces the entire `assets` map with current source
+records, removing obsolete source records while preserving named `variants`.
+The optional `--manifest FILE` selects the manifest used for audit or the output
+manifest for rewrite, for developer workflows; it does not change which bundled
+sources rewrite approves.
+
+For a generated common-tail variant, convert a copy separately, review its diff
+and dependencies before approval. For example,
+using `convert-ly` 2.26.0 from the ULSBS source root:
+
+```bash
+cp src/ulsbs/assets/ly/ulsbs-internal-common-tail.ly /path/to/converted-tail.ly
+convert-ly -f2.24.4 -e /path/to/converted-tail.ly
+# Only after reviewing the conversion and its dependencies:
+PYTHONPATH=src python3 -m ulsbs.lilypond_score_cache --rewrite --variant common-tail-convert-ly-2.26.0=/path/to/converted-tail.ly
+```
+
+`--variant NAME=FILE` is allowed only with `--rewrite`. It adds or replaces the
+reviewed generated variant by label; all other variants are retained. Manually
+remove obsolete named variants from the manifest after review. A variant rewrite
+also refreshes all bundled source records, so review those sources too. Do not
+approve every reported hash merely to silence a warning.
+After regenerating hashes, run the cache and relevant native score regressions,
+audit the sources again, and review the manifest diff before committing.
+
+When a score-generation job has requests, it audits the job's copied bundled
+asset directory once. Each unknown asset produces one warning with its filename,
+audit hash and maintenance command, not eleven warnings per score or repeated
+occurrence. Audit failures are nonfatal warnings; ordinary source/dependency
+eligibility checks remain authoritative. Known instrument/boundary mutations and
+audited converted tails do not warn. The pipeline's exact comment-only
+MIDI-disabled replacement is recorded as the `midi-disabled` variant. Ordinary
+editions and jobs not generating score alternatives do not run this check.
+Changed custom song Scheme retains
+the existing debug diagnostics rather than being presented as bundled-asset drift.
+
+The manifest workflow changes trust-record maintenance, not the two recognized
+mutation normalizations or cache fingerprint semantics. `--clear-score-cache`
+and the named home-cache volume retain the behavior described above.
+
+#### Cache Validation
+
+Only successful, musically validated alternatives are published. Publication
+uses a private staging directory and atomic rename; concurrent first writers
+cannot expose partial entries. Manifests and every artifact carry content
+hashes, and restored PDFs, logs, crops, scales and musical boundaries are
+revalidated. Files are copied, not hard-linked, into the job. Missing/corrupt or
+unwritable entries are nonfatal cache misses; failed attempts are not cached.
+Originals are still engraved normally. The result manifest reports actual
+`engravings` and `cache_hits` separately from requested candidate `attempts`.
+Warm processing uses a fresh `_lp-source` directory containing the configured
+main input and engine asset aliases, not processed song imports. Both source
+discovery and LilyPond's LaTeX geometry probe exclude the job's generated
+root/content/include search paths. Probe outputs stay inside the job; source
+directories need not be writable. `_lp` is cleared before each invocation.
+
+The private `lilypond_book.py` launcher runs the installed Python lilypond-book
+script with its recursive `do_file` traversal guarded by normalized output
+document path. LilyPond 2.24 and 2.26 otherwise concatenate repeated visits into
+the same generated TeX file. Processing each output once preserves every TeX
+input command, so repeated runtime song occurrences remain independent without
+duplicating the imported file's content. The launcher does not change snippets,
+musical transformations, or installed toolchain files.
+
+Each successful run writes `<job>.ulsbs-lilypond-systems.json`, a private array
+of job-relative current systems fragments. Score preparation uses this inventory
+instead of mistaking old, removed snippets for current candidates. Retained
+graphics are working files, not cache entries. Warm tests cover source and
+dependency edits, preamble geometry changes, removals, repeated/nested inputs,
+engine aliases, source-tree cleanliness, and fatal original engraving failure.
+Source include paths are supplied to lilypond-book itself as well as its
+engraving subprocess, so external `\lilypondfile` inputs resolve from original
+sources. External snippets use the same content-hashed output naming as inline
+snippets. `--use-source-file-names` is deliberately absent: with the shared
+engraving/output directory, LilyPond does not create the renamed files, leaving
+dangling TeX references. Hashed naming also avoids collisions between different
+external scores sharing a basename. Tests resolve actual graphics through TeX
+and verify independent edits of such external scores.
+Native integration tests cover page-spanning multi-system overlays, exact
+boundary replay, original callback preservation, note-name language changes,
+major/minor/chromatic material, source transposition, slash chords, both voices,
+charango tunings, bass clef, tablature retries, and fresh-directory cache reuse.
+
 ### Layer protocol
 
-Each song with a valid `\beginsong` `id=` gets twelve optional-content groups.
+Layers transpose verse chords, inline `\ac` references, pitched melody hints and
+the declared `key=` badge. Recommended singing keys (`gk=`), standalone
+`\altchords`, prose and chord diagrams do not switch. LilyPond notation switches
+only with the separate score opt-in. The stock bass-clef setup hides transposable
+annotations, so its companion has no visible switching effect unless annotations
+or score transposition are enabled. Original notation determines layout and
+default viewing/printing; hidden notation may still appear in search, copy/paste
+or accessibility output. The ordinary PDF is the conventional printing fallback.
+
+Each retained transposable occurrence with a valid `\beginsong` `id=` has twelve
+mutually exclusive optional-content groups (OCGs).
 IDs follow the existing lowercase `[a-z0-9-]+` convention. First occurrences use
 `ulsbs:transpose:v1:id:example-song:t00` through `:t11`. Repeating that ID appends
 `:o02`, `:o03`, etc. before `:tNN`, for example
 `ulsbs:transpose:v1:id:example-song:o02:t05`. Occurrence padding is at least two
-digits, not a limit of 99. Different occurrences are independent, even when their
-original keys differ. Printed song numbers are never part of this identity.
+digits, not a limit of 99. Each exact name is `layer_prefix + ":tNN"` and is
+unique across repeated occurrences. Different occurrences are independent, even
+when their original keys differ. Printed song numbers are never part of this identity.
 
 A private document sequence still identifies TeX/PDF objects, but is not the
 exposed layer name or a public song ID. Missing/invalid IDs keep ordinary
@@ -165,10 +449,16 @@ validation; ordinary editions are unaffected. ID assignment is an explicit
 source-editing preflight, not a compilation-worker side effect.
 
 `t00` is the effective notation after the user's source-level transposition at
-that occurrence. `t01` through `t11` add semitone offsets to that notation.
-Each song has an independent radio-button group; switching one song must not
-alter another. Initially only `t00` is visible. Print usage and automatic-state
+that occurrence. `t01` through `t11` add semitone offsets modulo an octave to
+that notation. Each occurrence has an independent radio-button group; switching
+one occurrence must not alter another. Initially only `t00` is visible. Print usage and automatic-state
 policies select original notation rather than the screen-selected alternative.
+
+Creation is lazy: the first generated transposable box allocates the occurrence's
+OCG family. An occurrence that generates no such box allocates no family. Boxes
+later discarded may leave unused OCGs, but only actual shipped marked content
+retains an occurrence in the metadata `songs` array; unused OCG declarations do
+not create manifest records.
 
 `native` exposes the layer list. `hidden` changes native panel exposure without
 removing groups, stable names, radio groups, or programmatic switching. Neither
@@ -188,7 +478,7 @@ The following illustrates the envelope; position values depend on layout:
 {
   "has_multikey_info": true,
   "multikey_info": {
-    "schema_version": 1,
+    "schema_version": 2,
     "layer_protocol": "ulsbs:transpose:v1",
     "coordinate_space": "pdf-user-space",
     "songs": [{
@@ -198,6 +488,7 @@ The following illustrates the envelope; position values depend on layout:
       "key_labels": ["Am", "B♭m", "Bm", "Cm", "C♯m", "Dm", "D♯m", "Em", "Fm", "F♯m", "Gm", "G♯m"],
       "layer_prefix": "ulsbs:transpose:v1:id:example-song",
       "page_index": 5,
+      "layer_page_indices": [5, 6],
       "anchor": {"x": 397.125, "y": 554.375},
       "has_transposable_content": true
     }]
@@ -219,9 +510,39 @@ top tag row. It exists even without a key or any tags. Zero-size late-Lua marker
 capture actual shipout positions without reserving layout space. No UI widget is
 drawn in the PDF. Unshipped headers have `null` positions.
 
+`layer_page_indices` is required for every song entry: a sorted, unique array of
+zero-based physical PDF page indices containing actual shipped `/OC`
+marked content for that occurrence. It is the union across all twelve alternatives,
+not just the default or currently visible layer. Different songs may share any
+of these pages. It does not replace or change the navigation `page_index` or
+`anchor`. Tracking follows actual shipout, not generated measurement boxes,
+header ranges, or the next song's position. Incomplete or inconsistent tracking
+is fatal; the compiler must not guess page ranges.
+
+`UL_pdf_mark:nn` is the shared marked-content emitter for chords, melody hints,
+key badges and opt-in LilyPond systems. Every alternative contains a late-Lua
+page marker. Page-list sentinels delimit actual physical shipout, excluding
+reusable PDF form serialization, which executes late Lua once per form rather
+than once per page placement. Wrapping transposable ULSBS content in such forms
+is unsupported and fails compilation; imported LilyPond graphics inside the
+outer marked-content wrapper remain supported. TeX leaders suppress late Lua;
+the shipout list check rejects transposable content inside leaders rather than
+silently omitting dependencies. Ordinary copied boxes are supported. No separate
+production PDF analysis pass is needed.
+
+The twelve layer names are derived from `layer_prefix`; there is no need to
+duplicate them or repeat the occurrence's union page array for every step.
+
 `has_transposable_content` records actual shipped marked content, not measurement
-boxes. It is false for the stock bass-clef setup and other styles that hide every
-eligible annotation. A manifest can be present without any usable controls.
+boxes. The field is preserved and is `true` with nonempty `layer_page_indices`
+for every retained entry; occurrences without shipped transposable content are
+omitted from `songs`. If a false entry
+is ever present, its `layer_page_indices` must be `[]`. An enabled manifest may
+therefore have an empty `songs` array, for example when the stock bass-clef setup
+hides every eligible annotation and score transposition is disabled.
+
+Schema 2 changes the metadata contract only: `layer_protocol` remains
+`ulsbs:transpose:v1`, and the XMP property and namespace remain unchanged.
 
 The backend writes the same envelope to a temporary `.ulsbs-multikey.json` compile
 artifact. Python captures it before cleanup. Exported ordinary book JSON has
@@ -238,15 +559,21 @@ malformed artifact is an error, not evidence that the renderer is disabled.
 ### Viewer integration
 
 1. Read XMP from the opened PDF, or use the matching exported JSON. Check
-   `has_multikey_info`, `schema_version`, and `layer_protocol` before using it.
+   `has_multikey_info`, require `schema_version === 2`, and check `layer_protocol`
+   before using it. Validate each required `layer_page_indices` as sorted, unique,
+   integer page indices within the document, consistent with
+   `has_transposable_content`.
 2. For each positioned entry with `has_transposable_content: true`, create a
    selector using `key_labels` or offset labels. Keep repeated occurrences separate.
 3. Resolve all twelve exact names `layer_prefix + ":t" + String(offset).padStart(2, "0")`
    against the viewer's optional-content groups. Never assume PDF object IDs equal
    names, and never select by `song_id` or prefix matching alone.
 4. Turn on the selected group and turn off the other eleven in that family only.
-   Apply the updated configuration to the viewer and rerender affected visible
-   pages; songs can span pages beyond the header's `page_index`.
+   Apply the updated configuration and invalidate every page in that occurrence's
+   `layer_page_indices`, including cached pages not currently visible. Rerender
+   visible affected pages now; off-screen affected pages must use the new state
+   when next rendered. Keep invalidation page-local, not document-wide, and do
+   not infer ranges from the header's `page_index` or the next song's header.
 5. Transform the anchor with the actual page viewport. Do not treat it as CSS
    pixels, percentages, or a top-left coordinate. Widget dimensions and clamping
    remain viewer policy; use text content, not HTML interpolation, for labels.
@@ -261,7 +588,8 @@ const raw = metadata?.get("ulsbs:multikey");
 let envelope = null;
 try { envelope = raw ? JSON.parse(raw) : null; } catch { /* no multikey UI */ }
 const info = envelope?.has_multikey_info ? envelope.multikey_info : null;
-// Proceed only for schema_version === 1 and the supported layer_protocol.
+// Proceed only for schema_version === 2 and the supported layer_protocol;
+// validate layer_page_indices and the other entry fields before creating UI.
 
 const config = await pdfDocument.getOptionalContentConfig({ intent: "display" });
 const groups = typeof config.getGroups === "function"
@@ -274,7 +602,8 @@ function selectOffset(song, offset) {
   if (!Number.isInteger(offset) || offset < 0 || offset > 11 ||
       ids.some(id => id === undefined)) throw new Error("Invalid multikey selection");
   ids.forEach((id, n) => config.setVisibility(id, n === offset));
-  // Rerender visible page views using this updated optional-content config.
+  // Invalidate all song.layer_page_indices, including off-screen cached pages.
+  // Rerender visible affected views using this updated optional-content config.
 }
 
 // Use the viewport of pdfDocument.getPage(song.page_index + 1), including its
@@ -282,8 +611,9 @@ function selectOffset(song, offset) {
 const [left, top] = viewport.convertToViewportPoint(song.anchor.x, song.anchor.y);
 ```
 
-Changing layers does not change scores, TAB, or audio. Printing should use a fresh
-`intent: "print"` configuration, not the modified display configuration, to keep
+Changing layers also switches opted-in score/TAB alternatives, but never audio.
+Scores remain unchanged when score transposition is disabled. Printing should
+use a fresh `intent: "print"` configuration, not the modified display configuration, to keep
 the original-only print policy.
 
 ### Notation state and layout
@@ -297,23 +627,28 @@ Interactive content comprises verse chords, inline verse `\ac` references,
 pitched primary and secondary melody hints, and the declared prelude `key=`
 badge. Beat marks and unpitched markers remain shared. General prose, explanations,
 chord diagrams, `gk=` recommendations, standalone `\altchords`, and LilyPond
-scores remain outside interactive transposition. Standalone alternate chord sets
-retain their existing authoring/transposition API.
+scores remain outside interactive transposition by default; the opt-in score
+layers described above reuse the same occurrence-specific OCGs. Standalone
+alternate chord sets retain their existing authoring/transposition API.
 
 The stock bass-clef post-setup disables chords and pitched hints, which also
-hides the key badge. Its multikey edition currently declares layers without
-rendering content in them. This is valid optional-content structure, but offers
-no visible switching until eligible annotations are enabled. Do not confuse
-unused layer declarations with dangling resource references or transpose scores
-as a workaround without an explicit change in scope.
+hides the key badge. Without opt-in score layers or reenabled annotations, its
+occurrences generate no transposable boxes, allocate no OCG families, and are
+omitted from `songs`. More generally, discarded boxes can allocate unused OCGs
+without creating manifest entries. Do not confuse such unused declarations with
+dangling resource references.
 
 Only original notation determines box dimensions, advance, line breaks, and
 pagination. Alternative labels are drawn in the original box. Narrower or equal
 labels keep their scale; wider labels shrink proportionally, bounded by
 `\ulPdfTranspositionMinimumScale` (default `0.85`, valid range greater than zero
-and at most one). If that floor is insufficient, labels may overflow without
+and at most one for manual TeX; the compiler's `multikey-min-chordname-scale`
+option restricts this to `[0.5, 1]`). A floor of `1` leaves every alternative
+chord label at natural size. If that floor is insufficient, labels may overflow without
 reflow. Empty/zero-width originals must not cause division by zero. Melody
 circles retain their geometry; the pitched glyph changes inside the circle.
+The setting does not affect key-badge typography or LilyPond's independent
+whole-score image fit floor.
 
 The prelude badge uses the already-effective declared key, without reapplying
 the user's source offset. Alternative badges keep a fixed right edge, with only
@@ -423,8 +758,8 @@ Paired-edition validation also covered the default, charango, and bass-clef
 variants. All visible word positions matched at 0.01 pt precision. Default and
 charango each had an 18-pixel raster difference around one superscript on page 8
 at 72 dpi; every other page matched exactly. Bass-clef pages matched exactly,
-with the empty-layer limitation described above. These small raster differences
-must not be reported as strict pixel equality.
+with no visible key-switching effect in that configuration. These small raster
+differences must not be reported as strict pixel equality.
 
 The maintained toolchain supplies `ocgx2` through `texlive-latex-extra`. No
 separate PDF post-processing tool is required to create the layers.

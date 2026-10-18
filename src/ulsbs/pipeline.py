@@ -16,6 +16,7 @@ import re
 import shlex
 import shutil
 import signal
+import sys
 import threading
 import traceback
 from dataclasses import dataclass
@@ -103,6 +104,7 @@ class CompileError(RuntimeError):
     """Error during a compile step; may carry a path to a log file."""
 
     def __init__(self, message: str, log_path: Path | None = None) -> None:
+        """Store the compile error message and optional diagnostic log path."""
         super().__init__(message)
         self.log_path = log_path
 
@@ -346,6 +348,7 @@ def build_include_paths(cfg: Config, job: Job) -> tuple[dict[str, str], list[str
 
 
 def _midi_audio_enabled(cfg: Config, job: Job) -> tuple[bool, bool]:
+    """Return effective MIDI/audio export flags, disabling both for multikey jobs."""
     if job.multikey:
         return False, False
     optional = job.variant != "default"
@@ -410,6 +413,10 @@ def make_variant_tex(job: Job, cfg: Config) -> Path:
         f"\\newcommand{{\\ulPdfTranspositionLayers}}{{{layers_value}}}\n"
         f"\\newcommand{{\\ulPdfTranspositionLayerUI}}{{{cfg.multikey_layer_ui}}}\n"
         f"\\newcommand{{\\ulPdfTranspositionRequireSongIDs}}{{{'true' if cfg.multikey_require_song_ids else 'false'}}}\n"
+        f"\\newcommand{{\\ulPdfTranspositionMinimumScale}}{{{cfg.multikey_min_chordname_scale}}}\n"
+        f"\\newcommand{{\\ulMultikeyLilypondScores}}{{{'true' if layers and cfg.multikey_lilypond_scores else 'false'}}}\n"
+        + (r"\providecommand{\ulScoreSystem}[3]{\includegraphics{#3}}" + "\n"
+           if layers and cfg.multikey_lilypond_scores else "")
         + (MULTIKEY_DISABLED_FALLBACK_TEX if layers else "")
         + read_text(src)
     )
@@ -483,8 +490,8 @@ def step_lilypond_book(
     step: int,
 ) -> tuple[Path, Path, int]:
     """
-    Run lilypond-book in the job directory, but output into a dedicated subdir
-    to avoid "Output would overwrite input file" errors.
+    Process original sources, never a previous build's generated TeX imports.
+    A private launcher prevents upstream concatenation of repeated imports.
 
     Returns:
       - Path to the processed .tex in the job root (after overlay-moving _lp)
@@ -493,31 +500,52 @@ def step_lilypond_book(
     """
     txt_doc = ui.fmt_doc(job)
     lp_out = job.compile_dir / "_lp"
+    safe_rm_tree(lp_out)
     ensure_dir(lp_out)
 
     log_path = job.compile_dir / f"{step:02d}_lilypond.log"
     ui.exec_line(f"{txt_doc} {ui.fmt_step(step)} lilypond-book")
 
-    # We run in the job dir, and pass the input file name (must be present there).
-    cwd = job.compile_dir
-    input_arg = input_tex.name
+    # Generated imports in the job root/content/include shadow real sources on
+    # warm builds. Keep job-local engine assets, but resolve imports from source.
+    source_env = env.copy()
+    generated_paths = {str(job.compile_dir / part) for part in (
+        "", CONTENT_DIRNAME, f"{CONTENT_DIRNAME}/img", INCLUDE_DIRNAME, f"{INCLUDE_DIRNAME}/img",
+    )}
+    # Preserve explicit engine aliases without re-exposing generated song TeX.
+    source_aliases = job.compile_dir / "_lp-source"
+    safe_rm_tree(source_aliases)
+    ensure_dir(source_aliases)
+    source_input = source_aliases / input_tex.name
+    shutil.copy2(input_tex, source_input)
+    for name in ("ulsbs", _JOB_ULSBS_ASSETS_DIRNAME):
+        target = job.compile_dir / name
+        if target.is_dir():
+            ensure_symlink(source_aliases / name, target, fallback_copy=True)
+    for variable in ("TEXINPUTS", "LUAINPUTS"):
+        source_env[variable] = ":".join([
+            str(source_aliases),
+            *(part for part in source_env.get(variable, "").split(":") if part not in generated_paths),
+        ])
 
-    process_cmd = shlex.join(["lilypond", *lp_include_args, "-dno-point-and-click"])
+    process_cmd = shlex.join(["lilypond", *lp_include_args, "-I", str(source_aliases), "-dno-point-and-click"])
     args = [
-        "lilypond-book",
+        sys.executable,
+        str(Path(__file__).with_name("lilypond_book.py")),
         "-f",
         "latex",
         "--latex-program=lualatex",
         "--pdf",
         f"--process={process_cmd}",
+        *lp_include_args,
         "--output",
         str(lp_out),
-        "--use-source-file-names",
-        input_arg,
+        str(source_input.resolve()),
     ]
 
     try:
-        run_cmd(args, cwd=cwd, stdout_path=log_path, stderr_to_stdout=True, check=True, env=env)
+        run_cmd(args, cwd=source_aliases, stdout_path=log_path,
+                stderr_to_stdout=True, check=True, env=source_env)
     except Exception:
         if ABORT_EVENT.is_set():
             raise KeyboardInterrupt() from None
@@ -533,6 +561,18 @@ def step_lilypond_book(
         else:
             raise CompileError("lilypond-book did not produce expected .tex", log_path)
 
+    # Record only this run's fragments, so removed snippets cannot become active
+    # score candidates merely because their old graphics remain in the job root.
+    write_text(job.compile_dir / (input_tex.stem + ".ulsbs-lilypond-systems.json"), json.dumps([
+        fragment.relative_to(lp_out).as_posix() for fragment in sorted(lp_out.rglob("*-systems.tex"))
+    ]) + "\n")
+    # Do not let overlay_tree replace engine directory aliases with empty real
+    # directories after moving their children through the symlink.
+    for alias in ("ulsbs/assets", "ulsbs/src/ulsbs/assets"):
+        generated, target = lp_out / alias, job.compile_dir / alias
+        if generated.is_dir() and target.is_symlink():
+            overlay_tree(generated, target.resolve(), move=True)
+            safe_rm_tree(generated)
     # Overlay-move everything lilypond-book produced in job/_lp into the job root.
     overlay_tree(lp_out, job.compile_dir, move=True)
     try:
@@ -1356,13 +1396,19 @@ def compile_one_job(
                 f"JSON={'companion' if job.multikey and cfg.json else cfg.json}, "
                 f"covers={not job.multikey and cfg.coverimage and bool(which('pdftoppm'))}; "
                 f"layers={layers}"
-                + (f", strict IDs={cfg.multikey_require_song_ids}, layer UI={cfg.multikey_layer_ui}"
+                + (f", strict IDs={cfg.multikey_require_song_ids}, layer UI={cfg.multikey_layer_ui}, "
+                   f"min chord scale={cfg.multikey_min_chordname_scale:g}"
                    if layers else "")
             )
         input_tex = make_variant_tex(job, cfg)
         env: dict[str, str]
         lp_include_args: list[str]
         env, lp_include_args, db_include_paths = build_include_paths(cfg=cfg, job=job)
+        if job.multikey and cfg.multikey_books and cfg.multikey_lilypond_scores and job.variant != "lyrics":
+            # Capture the authoritative breaks while engraving t00, not in a
+            # second approximation of the original's layout.
+            tail = job.compile_dir / _JOB_ULSBS_ASSETS_DIRNAME / "ly" / "ulsbs-internal-common-tail.ly"
+            write_text(tail, read_text(tail) + '\n\\include "ulsbs-score-boundaries.ily"\n')
 
         # Step counter for log numbering
         step = 1
@@ -1384,6 +1430,12 @@ def compile_one_job(
         cwd = job.compile_dir
         ensure_dir(pdf_dir)
 
+        score_sources = None
+        if job.multikey and cfg.multikey_books and cfg.multikey_lilypond_scores and job.variant != "lyrics":
+            from .lilypond_scores import prepare_scores
+
+            score_sources = prepare_scores(cwd, basename)
+
         # 2) lualatex pass 1 (draftmode)
         try:
             last_tex_log, step = step_lualatex_pass(
@@ -1391,6 +1443,11 @@ def compile_one_job(
             )
         except CompileError as ce:
             die_log(ui, cfg, job, cwd=cwd, message=str(ce), log_path=ce.log_path)
+
+        if score_sources is not None:
+            from .lilypond_scores import generate_scores
+
+            generate_scores(ui, job, basename, score_sources, env, lp_include_args, verbose=cfg.verbose)
 
         # 3) indices (if not selection)
         if not basename.startswith(SELECTION_FNAME_PREFIX):
@@ -1537,6 +1594,7 @@ def run_jobs_parallel(
     stop_requested = {"value": False}
 
     def handle_sigint(signum, frame):
+        """Request cooperative job cancellation without raising in the signal handler."""
         ABORT_EVENT.set()
         stop_requested["value"] = True
         # Don't raise here; let the main loop notice and cancel futures.

@@ -7,13 +7,13 @@ the extension is released.
 
 ### Added
 
-- Separate `_MULTIKEY` PDFs in `multikey/` with per-song key selection for non-lyrics variants;
-  ordinary PDFs remain layer-free. See [Multikey PDF editions](README.md#multikey-pdf-editions).
-- `multikey-books`, `multikey-layer-ui`, and `--no-multikey` controls. Quick
-  builds skip multikey output.
-- Song-ID-based layers, independent repeated-song controls, and embedded multikey
-  metadata shared with JSON companions. `--require-song-ids` enables strict validation.
-- An [architecture reference](ARCHITECTURE.md) for implementation details.
+- Optional `_MULTIKEY` PDFs with independent per-song key selection, native or
+  programmatic layer controls, configurable chord-name shrinking, optional strict
+  song-ID validation, and page-aware JSON metadata (schema 2). Enable with
+  `multikey-books = true`; ordinary PDFs
+  remain layer-free. See [Multikey PDF editions](README.md#multikey-pdf-editions).
+- Opt-in LilyPond score transposition with validated persistent caching,
+  original-score fallback, `--clear-score-cache`, and asset audit/rewrite tools.
 - `+` modifier for `\beginverse`, enabling the larger melody-note line spacing
   previously selected by a separate verse command. It composes with the
   existing unnumbered `*` modifier and `[n]` indentation as
@@ -26,10 +26,9 @@ the extension is released.
   Host builds require `pikepdf` 8+; rebuild existing compiler images after upgrading. See
   [requirements](README.md#requirements).
 - Source and multikey transposition follow `key=`, preserving scale degrees and
-  chromatic alterations.
-- All books use three LuaLaTeX passes (draft, full, full). Non-original key tags
-  use a red transpose indicator; detailed job settings are shown only with `--verbose`.
-- Avoid unnecessary MIDI generation for multikey and optional editions while
+  chromatic alterations; non-original key badges use a red transpose indicator.
+- Builds use three LuaLaTeX passes, show detailed job settings only with
+  `--verbose`, and avoid unnecessary MIDI generation for optional editions while
   preserving audio dependencies and explicit optional-variant export settings.
 - `ulsbs-migrate-syntax-v1` now converts legacy melody-spaced verse delimiters
   to `\beginverse+...\endverse` while preserving numbering and indentation.

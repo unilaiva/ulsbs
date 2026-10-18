@@ -31,6 +31,7 @@ class MultikeyJobTests(unittest.TestCase):
         self.doc.write_text(self.source, encoding="utf-8")
         self.cfg = replace(
             Config(),
+            multikey_books=True,
             songbooks=(self.doc,),
             runtime=SimpleNamespace(project_paths=SimpleNamespace(project_root=self.root)),
         )
@@ -60,6 +61,13 @@ class MultikeyJobTests(unittest.TestCase):
                         (self.doc.stem, edition_dir),
                     )
         self.assertEqual(self.doc.read_text(encoding="utf-8"), self.source)
+
+    def test_package_defaults_create_only_ordinary_jobs(self) -> None:
+        cfg = replace(Config(), songbooks=(self.doc,), runtime=self.cfg.runtime)
+        jobs = build_job_queue(cfg)
+        self.assertEqual([(job.variant, job.multikey) for job in jobs], [
+            ("default", False), ("lyrics", False), ("charango", False), ("bassclef", False),
+        ])
 
     def test_companions_follow_selection_without_new_variant_comments(self) -> None:
         for marker, variants in (

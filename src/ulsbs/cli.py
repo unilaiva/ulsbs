@@ -74,6 +74,8 @@ def build_arg_parser(ui: UI) -> argparse.ArgumentParser:
     p.add_argument("--sequential", action="store_true", help="Do not compile in parallel (to conserve memory)")
     p.add_argument("--max-parallel", type=int, metavar="N", default=0, help="Maximum number of parallel jobs (0 = auto)")
     p.add_argument("--keep-temp", action="store_true", help="Do not clean temp directory even after successful compilation")
+    p.add_argument("--clear-score-cache", action="store_true",
+                   help="Clear persistent LilyPond score-cache entries before compiling (in the compiler container when used)")
     p.add_argument("--max-log-lines", type=int, metavar="N", default=None, help="Maximum error log lines to display (0..1000, default 20)")
     p.add_argument("--deploy-dir", metavar="DIR", help="Override deploy directory (must exist when set; default is <project root>/deploy)")
 
@@ -108,6 +110,7 @@ def print_plan_summary(
     """Print a short summary of the planned compilation run."""
 
     def _yn(v: bool) -> str:
+        """Format a boolean as a colorized YES or NO label."""
         return ui.colorize("YES" if v else "NO", ui.C_LBLUE)
 
     songbooks_count = len(cfg.songbooks)
@@ -135,6 +138,7 @@ def print_plan_summary(
     ui.plain(f"  - Create multikey books: {_yn(cfg.multikey_books)}")
     if cfg.multikey_books:
         ui.plain(f"      - Layer UI: {ui.colorize(cfg.multikey_layer_ui, ui.C_LBLUE)}")
+        ui.plain(f"      - Minimum chord-name scale: {cfg.multikey_min_chordname_scale:g}")
         ui.plain(f"      - Require song IDs (strict publishing): {_yn(cfg.multikey_require_song_ids)}")
     ui.plain(f"  - Extract covers as images: {_yn(cfg.coverimage)}")
     ui.plain(f"  - Create JSON metadata: {_yn(cfg.json)}")
@@ -225,6 +229,7 @@ def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
         # an existing config file, since that would mix project-root
         # selection with explicit documents.
         def _is_root_selector(path: Path) -> bool:
+            """Check whether a path selects a project directory or existing config file."""
             return path.is_dir() or (path.name == CONFIG_FILENAME and path.is_file())
 
         if any(_is_root_selector(p) for p in raw_paths):
@@ -389,6 +394,17 @@ def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
         return 1
 
     require_tools()
+
+    if ns.clear_score_cache:
+        # Run only in the actual compiler environment, after container delegation
+        # and special-mode exits, once before any parallel jobs start.
+        from .lilypond_score_cache import clear_cache
+        try:
+            root, removed = clear_cache()
+        except (OSError, ValueError) as error:
+            ui.error_line(f"Failed to clear LilyPond score cache: {error}")
+            return 1
+        ui.info_line(f"LilyPond score cache cleared: {removed} entries ({root})")
 
     ensure_dir(cfg.runtime.project_paths.temp_dir)
     ensure_dir(cfg.runtime.project_paths.result_dir)
