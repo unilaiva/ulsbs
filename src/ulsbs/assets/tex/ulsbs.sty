@@ -690,7 +690,8 @@
             {\UL@pdfchunkadd{#1}\UL@pdfsplit}
             {\token_if_cs:NTF #1
             {\clist_if_in:nnTF
-              {\shrp,\flt,\textdegree,\textsuperscript,\textsubscript,\up,
+              {\shrp,\flt,\symdim,\symhalfdim,\textdegree,
+               \textsuperscript,\textsubscript,\up,
                \kern,\hspace,\hphantom,\phantom,\strut,\relax,
                \smraiseopenparen,\smraisecloseparen}
               {#1}{\UL@pdfchunkadd{#1}\UL@pdfsplit}
@@ -1461,97 +1462,108 @@
 \DeclareMicrotypeSetDefault[protrusion,spacing]{mosttext}
 
 % fontspec: setup fonts
-\setmainfont[Ligatures=TeX,
-             UprightFont=*-Medium,
-             BoldFont=*-ExtraBold,
-             ItalicFont = *-MediumItalic,
-             BoldItalicFont = *-ExtraBoldItalic,
-             FontFace = {sl}{\shapedefault}{*-Medium},
-             FontFace = {sl}{it}{*-MediumItalic},
-             FontFace = {b}{\shapedefault}{*-ExtraBold},
-             FontFace = {b}{it}{*-ExtraBoldItalic}]
-            {Noto Serif}
-\setsansfont[Ligatures=TeX,
-             UprightFont=*-Medium,
-             BoldFont=*-ExtraBold,
-             ItalicFont = *-MediumItalic,
-             BoldItalicFont = *-ExtraBoldItalic,
-             FontFace = {sl}{\shapedefault}{*-Medium},
-             FontFace = {sl}{it}{*-MediumItalic},
-             FontFace = {b}{\shapedefault}{*-ExtraBold},
-             FontFace = {b}{it}{*-ExtraBoldItalic}]
-            {Noto Sans}
-\setmonofont[Ligatures=TeX,
-             Scale=MatchLowercase,
-             UprightFont=*-Medium,
-             BoldFont=*-ExtraBold,
-             FontFace = {sl}{\shapedefault}{*-Medium},
-             FontFace = {b}{\shapedefault}{*-ExtraBold}]
-            {Noto Sans Mono} % italic not available for mono
-\newfontfamily{\serifheavyfont}[Ligatures=TeX,
-             UprightFont=*-Bold,
-             BoldFont=*-Black,
-             ItalicFont = *-BoldItalic,
-             BoldItalicFont = *-BlackItalic,
-             FontFace = {sl}{\shapedefault}{*-Bold},
-             FontFace = {sl}{it}{*-BoldItalic},
-             FontFace = {b}{\shapedefault}{*-Black},
-             FontFace = {b}{it}{*-BlackItalic}]
-            {Noto Serif}
-\newfontfamily{\sansheavyfont}[Ligatures=TeX,
-             UprightFont=*-Bold,
-             BoldFont=*-Black,
-             ItalicFont = *-BoldItalic,
-             BoldItalicFont = *-BlackItalic,
-             FontFace = {sl}{\shapedefault}{*-Bold},
-             FontFace = {sl}{it}{*-BoldItalic},
-             FontFace = {b}{\shapedefault}{*-Black},
-             FontFace = {b}{it}{*-BlackItalic}]
-            {Noto Sans}
-% Noto Symbols: https://fonts.google.com/noto/specimen/Noto+Sans+Symbols/glyphs
-\newfontfamily{\symbolfont}[Ligatures=TeX,
-                            UprightFont=*-Medium,
-                            BoldFont=*-ExtraBold,
-                            ItalicFont=*-Medium,
-                            BoldItalicFont=*-ExtraBold,
-                            FontFace = {sl}{\shapedefault}{*-Medium},
-                            FontFace = {b}{\shapedefault}{*-ExtraBold}]
-                           {Noto Sans Symbols} % italic not available
-\newfontfamily{\symbolheavyfont}[Ligatures=TeX,
-                            UprightFont=*-Bold,
-                            BoldFont=*-Black,
-                            ItalicFont=*-Bold,
-                            BoldItalicFont=*-Black,
-                            FontFace = {sl}{\shapedefault}{*-Bold},
-                            FontFace = {b}{\shapedefault}{*-Black}]
-                           {Noto Sans Symbols} % italic not available
-% Noto Symbols 2: https://fonts.google.com/noto/specimen/Noto+Sans+Symbols+2/glyphs
-\newfontfamily{\symboliifont}[Ligatures=TeX,
-                              UprightFont=*-Regular,
-                              BoldFont=*-Regular,
-                              ItalicFont=*-Regular,
-                              BoldItalicFont=*-Regular]
-                             {Noto Sans Symbols2} % weights and italic not available
-\newfontfamily{\persianfont}[Script=Arabic,
-                             Ligatures=TeX,
-                             UprightFont=*-Medium,
-                             BoldFont=*-ExtraBold,
-                             ItalicFont=*-Medium,
-                             BoldItalicFont=*-ExtraBold,
-                             FontFace = {sl}{\shapedefault}{*-Medium},
-                             FontFace = {b}{\shapedefault}{*-ExtraBold}]
-                            {Noto Sans Arabic} % italic not available
-\newfontfamily{\persianfontsf}[Script=Arabic,
-                               Ligatures=TeX,
-                               UprightFont=*-Medium,
-                               BoldFont=*-ExtraBold,
-                               ItalicFont=*-Medium,
-                               BoldItalicFont=*-ExtraBold,
-                               FontFace = {sl}{\shapedefault}{*-Medium},
-                               FontFace = {b}{\shapedefault}{*-ExtraBold}]
-                              {Noto Sans Arabic} % italic not available
 
-% Sets sans-serif as the default font family everywhere:
+\newfontfamily{\ulnotoseriffont}[ % Noto Serif
+  NFSSFamily=ulnotoserif,
+  Ligatures=TeX,
+  UprightFont=*-Medium,
+  BoldFont=*-ExtraBold,
+  ItalicFont=*-MediumItalic,
+  BoldItalicFont=*-ExtraBoldItalic,
+  FontFace={sl}{\shapedefault}{*-Medium},
+  FontFace={sl}{it}{*-MediumItalic},
+  FontFace={b}{\shapedefault}{*-ExtraBold},
+  FontFace={b}{it}{*-ExtraBoldItalic}
+]{Noto Serif}
+\newfontfamily{\ulnotosansfont}[ % Noto Sans
+  NFSSFamily=ulnotosans,
+  Ligatures=TeX,
+  UprightFont=*-Medium,
+  BoldFont=*-ExtraBold,
+  ItalicFont=*-MediumItalic,
+  BoldItalicFont=*-ExtraBoldItalic,
+  FontFace={sl}{\shapedefault}{*-Medium},
+  FontFace={sl}{it}{*-MediumItalic},
+  FontFace={b}{\shapedefault}{*-ExtraBold},
+  FontFace={b}{it}{*-ExtraBoldItalic}
+]{Noto Sans}
+\newfontfamily{\ulnotomonofont}[ % Noto Sans Mono
+  NFSSFamily=ulnotomono,
+  Ligatures=TeX,
+  Scale=MatchLowercase,
+  UprightFont=*-Medium,
+  BoldFont=*-ExtraBold,
+  FontFace={sl}{\shapedefault}{*-Medium},
+  FontFace={b}{\shapedefault}{*-ExtraBold}
+]{Noto Sans Mono}
+\newfontfamily{\ulserifheavyfont}[ % Noto Serif, heavy
+  Ligatures=TeX,
+  UprightFont=*-Bold,
+  BoldFont=*-Black,
+  ItalicFont = *-BoldItalic,
+  BoldItalicFont = *-BlackItalic,
+  FontFace = {sl}{\shapedefault}{*-Bold},
+  FontFace = {sl}{it}{*-BoldItalic},
+  FontFace = {b}{\shapedefault}{*-Black},
+  FontFace = {b}{it}{*-BlackItalic}
+]{Noto Serif}
+\newfontfamily{\ulsansheavyfont}[ % Noto Sans, heavy
+  Ligatures=TeX,
+  UprightFont=*-Bold,
+  BoldFont=*-Black,
+  ItalicFont = *-BoldItalic,
+  BoldItalicFont = *-BlackItalic,
+  FontFace = {sl}{\shapedefault}{*-Bold},
+  FontFace = {sl}{it}{*-BoldItalic},
+  FontFace = {b}{\shapedefault}{*-Black},
+  FontFace = {b}{it}{*-BlackItalic}
+] {Noto Sans}
+\newfontfamily{\ulsymbolfont}[ % Noto Symbols: https://fonts.google.com/noto/specimen/Noto+Sans+Symbols/glyphs
+  Ligatures=TeX,
+  UprightFont=*-Medium,
+  BoldFont=*-ExtraBold,
+  ItalicFont=*-Medium,
+  BoldItalicFont=*-ExtraBold,
+  FontFace = {sl}{\shapedefault}{*-Medium},
+  FontFace = {b}{\shapedefault}{*-ExtraBold}
+  % italic not available
+]{Noto Sans Symbols}
+\newfontfamily{\ulsymbolheavyfont}[ % Noto Symbols, heavy
+  Ligatures=TeX,
+  UprightFont=*-Bold,
+  BoldFont=*-Black,
+  ItalicFont=*-Bold,
+  BoldItalicFont=*-Black,
+  FontFace = {sl}{\shapedefault}{*-Bold},
+  FontFace = {b}{\shapedefault}{*-Black}
+  % italic not available
+]{Noto Sans Symbols}
+\newfontfamily{\ulsymboliifont}[ % Noto Symbols 2: https://fonts.google.com/noto/specimen/Noto+Sans+Symbols+2/glyphs
+  Ligatures=TeX,
+  UprightFont=*-Regular,
+  BoldFont=*-Regular,
+  ItalicFont=*-Regular,
+  BoldItalicFont=*-Regular
+]{Noto Sans Symbols2} % weights and italic not available
+\newfontfamily{\persianfont}[ % Noto Sans Arabic for Persian language
+  Script=Arabic,
+  Ligatures=TeX,
+  UprightFont=*-Medium,
+  BoldFont=*-ExtraBold,
+  ItalicFont=*-Medium,
+  BoldItalicFont=*-ExtraBold,
+  FontFace = {sl}{\shapedefault}{*-Medium},
+  FontFace = {b}{\shapedefault}{*-ExtraBold}
+  % italic not available
+] {Noto Sans Arabic}
+\let\persianfontsf\persianfont % Persian: use the same serif font in sans-serif contexts
+\let\persianfonttt\persianfont % Persian: use the same serif font in monospace contexts
+
+% Document font defaults
+\renewcommand{\rmdefault}{ulnotoserif}
+\renewcommand{\sfdefault}{ulnotosans}
+\renewcommand{\ttdefault}{ulnotomono}
+% Use sans-serif as the document's default family
 \renewcommand{\familydefault}{\sfdefault}
 
 % Language settings: set other languages
@@ -1564,18 +1576,41 @@
 \setotherlanguage[numerals=eastern]{persian}
 
 % newunicodechar (symbols):
-\newunicodechar{❶}{{\symbolfont ❶}}\newcommand\symone{❶}
-\newunicodechar{❷}{{\symbolfont ❷}}\newcommand\symtwo{❷}
-\newunicodechar{❸}{{\symbolfont ❸}}\newcommand\symthree{❸}
-\newunicodechar{❹}{{\symbolfont ❹}}\newcommand\symfour{❹}
-\newunicodechar{✝}{{\symbolfont ✝}}\newcommand\symcross{✝}
-\newunicodechar{☨}{{\symbolfont ☨}}\newcommand\symsdcross{☨}
-\newunicodechar{⌣}{{\symbolfont ⌣}}\newcommand\symsmilearc{⌣}
-\newunicodechar{⭠}{{\symboliifont ⭠}}\newcommand\symlarrow{⭠}
-\newunicodechar{⭢}{{\symboliifont ⭢}}\newcommand\symrarrow{⭢}
-\newunicodechar{⮀}{{\symboliifont ⮀}}\newcommand\symlrarrow{⮀}
-\newunicodechar{⮁}{{\symboliifont ⮁}}\newcommand\symudarrow{⮁}
-\newunicodechar{⮞}{{\symboliifont ⮞}}\newcommand\symrarrowhead{⮞}
+\newunicodechar{❶}{{\ulsymbolfont ❶}}\newcommand\symone{❶}
+\newunicodechar{❷}{{\ulsymbolfont ❷}}\newcommand\symtwo{❷}
+\newunicodechar{❸}{{\ulsymbolfont ❸}}\newcommand\symthree{❸}
+\newunicodechar{❹}{{\ulsymbolfont ❹}}\newcommand\symfour{❹}
+\newunicodechar{✝}{{\ulsymbolfont ✝}}\newcommand\symcross{✝}
+\newunicodechar{☨}{{\ulsymbolfont ☨}}\newcommand\symsdcross{☨}
+\newunicodechar{⌣}{{\ulsymbolfont ⌣}}\newcommand\symsmilearc{⌣}
+\newunicodechar{⭠}{{\ulsymboliifont ⭠}}\newcommand\symlarrow{⭠}
+\newunicodechar{⭢}{{\ulsymboliifont ⭢}}\newcommand\symrarrow{⭢}
+\newunicodechar{⮀}{{\ulsymboliifont ⮀}}\newcommand\symlrarrow{⮀}
+\newunicodechar{⮁}{{\ulsymboliifont ⮁}}\newcommand\symudarrow{⮁}
+\newunicodechar{⮞}{{\ulsymboliifont ⮞}}\newcommand\symrarrowhead{⮞}
+
+\newcommand*{\UL@degreechar}{\char"00B0\relax}
+\newsavebox{\UL@dimbox}
+
+% Diminished: small raised circle.
+\DeclareRobustCommand{\symdim}{%
+  {\ulnotosansfont\mdseries\upshape\UL@degreechar}%
+}
+
+% Half-diminished: scaled and raised ø, matching ° dimensions.
+% Requires graphix for \scalebox
+\DeclareRobustCommand{\symhalfdim}{%
+  \begingroup
+  \ulnotosansfont\mdseries\upshape
+  \sbox{\UL@dimbox}{\UL@degreechar}%
+  \leavevmode
+  \raisebox{.40em}[\ht\UL@dimbox][\dp\UL@dimbox]{%
+    \makebox[\wd\UL@dimbox][c]{%
+      \scalebox{.65}{\char"00F8\relax}%
+    }%
+  }%
+  \endgroup
+}
 
 % Allow further emergency stretching to fix some "overfull hbox" situations.
 % See: https://www.tex.ac.uk/FAQ-overfull.html
@@ -1685,8 +1720,8 @@
 \pretocmd{\SB@boxup}{\UL@pdfsongfalse}{}{%
   \PackageError{ulsbs}{Could not exclude prose notes from PDF layers}{Check the bundled songs version.}}
 % songs: use real sharp and flat symbols from Noto Symbol font:
-\renewcommand{\sharpsymbol}{\textsuperscript{{\symbolfont♯}}}%
-\renewcommand{\flatsymbol}{\raise.5ex\hbox{\SB@flatsize{{\symbolfont♭}}}}%
+\renewcommand{\sharpsymbol}{\textsuperscript{{\ulsymbolfont♯}}}%
+\renewcommand{\flatsymbol}{\raise.5ex\hbox{\SB@flatsize{{\ulsymbolfont♭}}}}%
 % songs: adjust baseline distance within lyric lines to not stretch
 \baselineadj=0pt plus 0pt minus 0pt
 % songs: Verse separation +/-; +/- 0 would be best, but in some cases a song can
@@ -2381,14 +2416,14 @@
 
 % Returns the chapter symbol as a text symbol. Renew to change.
 \providecommand\ulChapterSymbol{%
-  {\symboliifont 🟒}%
+  {\ulsymboliifont 🟒}%
 }
 
 \def\currentchaptercolor{white}
 
 % Outputs the chapter symbol defined above in color; the mandatory parameter
 % is the color name.
-\newcommand\ul@coloredchaptersymbol[1]{%
+\newcommand\UL@coloredchaptersymbol[1]{%
   {\textcolor{#1}\ulChapterSymbol}%
 }
 
@@ -2441,11 +2476,11 @@
       \imagecc[1]{#5}%
     }%
   }{% no image given, use symbol instead
-    \def\smallchapterimage{\ul@coloredchaptersymbol{#4}}%
+    \def\smallchapterimage{\UL@coloredchaptersymbol{#4}}%
     \def\largechapterimage{%
       \vfill\vspace{-1em}%
       \begin{center}%
-        \fontsize{108pt}{128pt}\ul@coloredchaptersymbol{#4}%
+        \fontsize{108pt}{128pt}\UL@coloredchaptersymbol{#4}%
       \end{center}%
       \vfill%
     }%
@@ -2517,7 +2552,7 @@
   \hfill\@gtctext{#1} \@gtctext{#2} \@gtctext{#3} \@gtctext{#4}\par%
 }
 % Used by \goto?? commands:
-\newcommand{\@gtctext}[1]{{\normalsize\bfseries{\symboliifont➞} \textit{#1}\ldots}}
+\newcommand{\@gtctext}[1]{{\normalsize\bfseries{\ulsymboliifont➞} \textit{#1}\ldots}}
 
 % This command will make a small horizontal space. Use this in the beginning
 % of each line you want to indent. The optional parameter specifies the indent
@@ -3511,7 +3546,7 @@
 % Setup the style for the melody note name "text". Renew this macro in the
 % beginning of your document to set custom style. This will be called each
 % time the melody note circle is drawn. This can be set for individual notes,
-% too. If left empty, \scriptsize\mdseries\sansheavyfont will be used.
+% too. If left empty, \scriptsize\mdseries\ulsansheavyfont will be used.
 \providecommand{\mnsymbolstyle}{}
 
 % Setup the style for the small tags put in front of melody note circles. This
@@ -3611,7 +3646,7 @@
 
 % Base style for the melody note name symbol, appended with \mnsymbolstyle:
 \newcommand{\@mnsymbolstyle}{%
-  \scriptsize\mdseries\sansheavyfont%
+  \scriptsize\mdseries\ulsansheavyfont%
   \ifUL@altmnstyle%
     \color{melodynotealtcolor}%
   \else%
@@ -3622,8 +3657,8 @@
 
 % Sharp and flat symbols for note circles: adjust their height and kerning
 % for a better fit within the circle.
-\newcommand{\@mnsharpsymbol}{\raise-.25ex\hbox{\textsuperscript{{\kern-0.05em\symbolfont♯}}}}%
-\newcommand{\@mnflatsymbol}{\raise.4ex\hbox{\SB@flatsize{{\kern-0.05em\symbolfont♭}}}}
+\newcommand{\@mnsharpsymbol}{\raise-.25ex\hbox{\textsuperscript{{\kern-0.05em\ulsymbolfont♯}}}}%
+\newcommand{\@mnflatsymbol}{\raise.4ex\hbox{\SB@flatsize{{\kern-0.05em\ulsymbolfont♭}}}}
 
 % Outputs an encircled melody note, internal
 %   - optional parameter: rise the note above text (chord line) by this amount,

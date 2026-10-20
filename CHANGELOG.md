@@ -7,6 +7,7 @@ the extension is released.
 
 ### Added
 
+- Add `\symdim` and `\symhalfdim` macros for diminished and half-diminished chords.
 - Optional `_MULTIKEY` PDFs with independent per-song key selection, native or
   programmatic layer controls, configurable chord-name shrinking, optional strict
   song-ID validation, and page-aware JSON metadata (schema 2). Enable with
