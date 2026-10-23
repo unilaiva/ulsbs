@@ -393,7 +393,9 @@ def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
         ui.error_line(f"Compilation plan error: {ex}")
         return 1
 
-    require_tools()
+    # Range extraction needs qpdf only for multikey builds; ordinary builds keep
+    # their existing tool requirements.
+    require_tools(multikey=cfg.multikey_books)
 
     if ns.clear_score_cache:
         # Run only in the actual compiler environment, after container delegation

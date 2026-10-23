@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Native standard-tail compatibility and independently spelled musical pitches."""
+"""Native score-assembly compatibility and independently spelled musical pitches."""
 
 from __future__ import annotations
 
@@ -121,10 +121,17 @@ class LilyPondScoreMusicIntegrationTests(unittest.TestCase):
         self.env = dict(os.environ)
         self.includes = ["-I", str(self.assets)]
 
+    def capture_boundaries(self):
+        # Match job-local instrumentation: explicit assemblies consume the head
+        # only; normal tails also preserve callbacks declared after the head.
+        for name in ("ulsbs-internal-common-head.ly", "ulsbs-internal-common-tail.ly"):
+            asset = self.assets / name
+            asset.write_text(asset.read_text() + '\n\\include "ulsbs-score-boundaries.ily"\n')
+
     def logged_run(self, command, **kwargs):
         source = Path(command[-1])
         text = source.read_text()
-        position = re.search(r'\\include "ulsbs-include-tail[^"\n]*\.ly"', text).start()
+        position = re.search(r'\\include "ulsbs-include-tail[^"\n]*\.ly"|\\score\b', text).start()
         # Inject only into the file actually passed to LilyPond, after _engrave
         # has inserted its transpose assignments. Restore the uninstrumented source.
         source.write_text(text[:position] + DUMP + text[position:])
@@ -134,12 +141,12 @@ class LilyPondScoreMusicIntegrationTests(unittest.TestCase):
             source.write_text(text)
 
     def original(self, name, music, tail="ulsbs-include-tail-notab.ly", settings="",
-                 supported=True):
+                 supported=True, headers=1):
         source = self.root / f"{name}.ly"
         source.write_text(
-            '\\include "ulsbs-include-head.ly"\n'
-            '\\paper { line-width = 140\\mm }\n' + settings + "\n" + music + "\n"
-            + f'\\include "{tail}"\n'
+            '\\include "ulsbs-include-head.ly"\n' * headers
+            + '\\paper { line-width = 140\\mm }\n' + settings + "\n" + music + "\n"
+            + (f'\\include "{tail}"\n' if tail else "")
         )
         log = source.with_suffix(".log")
         result = self.logged_run(
@@ -264,8 +271,7 @@ theChords = \chordmode { a1:m/e }
         self.assertEqual(list(self.root.rglob("*.midi")), [])
 
     def test_single_system_replay_prevents_rewrapping_and_preserves_staff_size(self):
-        tail = self.assets / "ulsbs-internal-common-tail.ly"
-        tail.write_text(tail.read_text() + '\n\\include "ulsbs-score-boundaries.ily"\n')
+        self.capture_boundaries()
         score, original_log = self.original("single-system", r'''
 theMelody = { \autoLineBreaksOff \key c \major
   \repeat unfold 8 { c''4 d'' e'' f'' } }
@@ -303,6 +309,102 @@ theChords = \chordmode { c1 }
         self.assertIsNotNone(graphic, (reason, log.read_text()))
         self.assert_music(log, "melody", "b ais a b", (71, 70, 69, 71))
 
+    def test_head_capture_supports_named_assemblies_and_duplicate_headers(self):
+        self.capture_boundaries()
+        melody = r'''
+theMelody = { \autoLineBreaksOff \key c \major \time 4/4
+  e''4 f'' g'' a'' | \break b''4 a'' g'' e'' | }
+theLyricsOne = \lyricmode { one two three four five six seven eight }
+theLyricsTwo = \lyricmode { red blue green gold white black brown gray }
+theChords = \chordmode { c1 g1 }
+'''
+        between = r'''
+\score {
+  <<
+    \new ChordNames { \theChords }
+    \new Staff { \clef "treble" \new Voice = "theVoice" { \theMelody } }
+    \new Lyrics \lyricsto "theVoice" { \theLyricsOne }
+    \include "ulsbs-internal-scorepart-tabstaff.ly"
+    \new Lyrics \lyricsto "theVoice" { \theLyricsTwo }
+  >>
+  \layout { }
+}
+\include "ulsbs-internal-score-midi.ly"
+'''
+        grouped = r'''
+\score {
+  <<
+    \new ChordNames { \theChords }
+    \new StaffGroup \with {
+      \override StaffGrouper.staffgroup-staff-spacing.padding = #4
+    } <<
+      \new Staff { \clef "treble" \transpose c' c \new Voice = "theVoice" { \theMelody } }
+      \include "ulsbs-internal-scorepart-tabstaff.ly"
+      \new TabStaff {
+        \tabFullNotation \stemDown
+        \clef "moderntab" \set minimumFret = #7 \transpose c' c \theMelody
+      }
+    >>
+  >>
+  \layout { }
+}
+\include "ulsbs-internal-score-midi.ly"
+'''
+        expected = ((Fraction(0), Fraction(0), Fraction(1), Fraction(0)),
+                    (Fraction(1), Fraction(0), Fraction(2), Fraction(0)))
+        midi = (76, 77, 79, 81, 83, 81, 79, 76)
+        cases = (("between", melody + between, None),
+                 ("grouped", melody + grouped, None),
+                 ("duplicate", melody,
+                  "ulsbs-include-tail-lyricsbetween.ly"))
+        for name, music, tail in cases:
+            with self.subTest(assembly=name):
+                score, original_log = self.original(name, music, tail=tail,
+                                                   headers=2 if name == "duplicate" else 1, settings=r'''
+\include "lilypond-book-preamble.ly"
+\paper { line-width = 100\mm ragged-right = ##t ragged-last = ##t }
+''')
+                self.assertEqual(len(score.graphics), 2)
+                self.assertEqual(score.boundaries, expected)
+                self.assertEqual(len(score.source.with_suffix(".ulsbs-boundaries")
+                                     .read_text().splitlines()), 2)
+                self.assert_music(original_log, "melody", "e f g a b a g e", midi)
+                originals = {path: path.read_bytes() for path in (
+                    score.source, score.source.with_suffix(".ulsbs-boundaries"),
+                    *(self.root / (graphic + ".pdf") for graphic in score.graphics))}
+                request = {"schema_version": 1, "requests": [{
+                    "snippet_id": score.identity,
+                    "layer_prefix": f"ulsbs:transpose:v1:id:{name}",
+                    "song_id": name, "title": "Generic two-system score",
+                    "key": key("c", 0), "targets": [key(row[0]) for row in MAJOR_TARGETS],
+                }]}
+                (self.root / "music.ulsbs-scores.json").write_text(json.dumps(request))
+                with patch.object(lilypond_scores, "run_cmd", side_effect=self.logged_run):
+                    lilypond_scores.generate_scores(
+                        Mock(), SimpleNamespace(compile_dir=self.root), "music",
+                        {score.identity: score}, self.env, self.includes)
+                report = json.loads((self.root / "music.ulsbs-score-results.json").read_text())
+                self.assertEqual(report["successful_offsets"], 11, report)
+                self.assertEqual(report["fallback_offsets"], 0, report)
+                for outcome in report["scores"][0]["offsets"]:
+                    with self.subTest(offset=outcome["offset"]):
+                        self.assertEqual(outcome["status"], "transposed", outcome)
+                        stem = self.root / outcome["graphic"]
+                        self.assertEqual(lilypond_scores._boundaries(
+                            stem.with_suffix(".ulsbs-boundaries")), expected)
+                        self.assertEqual(len(list(stem.parent.glob(stem.name + "-[0-9]*.pdf"))), 2)
+                        transformed = stem.with_suffix(".ly").read_text()
+                        original = originals[score.source].decode()
+                        self.assertTrue(transformed.startswith(original[:score.tail_position]))
+                        self.assertTrue(transformed.endswith(original[score.tail_position:]))
+                        pitches = self.pitches(stem.with_suffix(".log"), "melody")
+                        signed = outcome["attempts"][-1]["interval"]
+                        self.assertEqual([60 + 12 * octave + NATURALS[letter] + accidental // 2
+                                          for octave, letter, accidental in pitches],
+                                         [number + signed for number in midi])
+                self.assertEqual({path: path.read_bytes() for path in originals}, originals)
+        self.assertEqual(list(self.root.rglob("*.midi")), [])
+
     def test_boundary_capture_preserves_existing_original_callback(self):
         settings = r'''
 \layout { \context { \Score
@@ -313,8 +415,7 @@ theChords = \chordmode { c1 }
 '''
         music = "theMelody = { c''4 d'' e'' f'' }"
         plain, plain_log = self.original("callback-plain", music, settings=settings)
-        tail = self.assets / "ulsbs-internal-common-tail.ly"
-        tail.write_text(tail.read_text() + '\n\\include "ulsbs-score-boundaries.ily"\n')
+        self.capture_boundaries()
         captured, captured_log = self.original("callback-captured", music, settings=settings)
         self.assertEqual(plain_log.read_text().count("ULSBS-EXISTING-CALLBACK"), 1)
         self.assertEqual(captured_log.read_text().count("ULSBS-EXISTING-CALLBACK"), 1)
@@ -325,8 +426,7 @@ theChords = \chordmode { c1 }
             self.assertEqual(before.pages[0].Contents.read_bytes(), after.pages[0].Contents.read_bytes())
 
     def test_initial_grace_with_pickup_volta_lyrics_and_tabs(self):
-        tail = self.assets / "ulsbs-internal-common-tail.ly"
-        tail.write_text(tail.read_text() + '\n\\include "ulsbs-score-boundaries.ily"\n')
+        self.capture_boundaries()
         # Firmeza-like timing: the only grace boundary is the very first moment.
         score, original_log = self.original("initial-grace", r'''
 theMelody = \relative c'' {
@@ -383,8 +483,7 @@ theChords = \chordmode { s8 | f2 c | f c | f4 c f c | f2.~ f8 }
         self.assertEqual(list(self.root.rglob("*.midi")), [])
 
     def test_internal_grace_replay_preserves_notes_lyrics_and_tablature_events(self):
-        tail = self.assets / "ulsbs-internal-common-tail.ly"
-        tail.write_text(tail.read_text() + '\n\\include "ulsbs-score-boundaries.ily"\n')
+        self.capture_boundaries()
         settings = r'''
 \include "lilypond-book-preamble.ly"
 \layout { \context { \Score

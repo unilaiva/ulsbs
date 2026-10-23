@@ -8,13 +8,18 @@ the extension is released.
 ### Added
 
 - Add `\symdim` and `\symhalfdim` macros for diminished and half-diminished chords.
-- Optional `_MULTIKEY` PDFs with independent per-song key selection, native or
+- Optional MULTIKEY editions with independent per-song key selection, native or
   programmatic layer controls, configurable chord-name shrinking, optional strict
-  song-ID validation, and page-aware JSON metadata (schema 2). Enable with
-  `multikey-books = true`; ordinary PDFs
-  remain layer-free. See [Multikey PDF editions](README.md#multikey-pdf-editions).
-- Opt-in LilyPond score transposition with validated persistent caching,
-  original-score fallback, `--clear-score-cache`, and asset audit/rewrite tools.
+  song-ID validation, and page-aware JSON metadata. Enable with
+  `multikey-books = true`; ordinary PDFs remain layer-free. Each edition provides
+  a `_MULTIKEY_RANGES.json` entry point and layered page-range PDFs in `multikey/`,
+  with `_MULTIKEY` appended after the ordinary filename stem, for example
+  `Book_A5_MULTIKEY_RANGE_1-50.pdf`. Range sizing is configurable with
+  `multikey-max-pages-per-range` (50) and `multikey-target-max-range-bytes`
+  (33554432, 32 MiB). Book metadata uses `multikey_json_file`; PDFs contain no
+  embedded JSON. See [Multikey PDF editions](README.md#multikey-pdf-editions).
+- Opt-in LilyPond score transposition for MULTIKEY editions, with validated persistent
+  caching, original-score fallback, `--clear-score-cache`, and asset audit/rewrite tools.
 - `+` modifier for `\beginverse`, enabling the larger melody-note line spacing
   previously selected by a separate verse command. It composes with the
   existing unnumbered `*` modifier and `[n]` indentation as
@@ -28,9 +33,11 @@ the extension is released.
   [requirements](README.md#requirements).
 - Source and multikey transposition follow `key=`, preserving scale degrees and
   chromatic alterations; non-original key badges use a red transpose indicator.
-- Builds use three LuaLaTeX passes, show detailed job settings only with
-  `--verbose`, and avoid unnecessary MIDI generation for optional editions while
-  preserving audio dependencies and explicit optional-variant export settings.
+- Builds normally use three LuaLaTeX passes, with bounded extra passes only when
+  references or MULTIKEY resources need to settle. MULTIKEY draft compilation
+  avoids unused alternate visuals while preserving full twelve-key PDF output.
+  Detailed job settings require `--verbose`; optional editions avoid unnecessary
+  MIDI generation while preserving audio dependencies and explicit export settings.
 - `ulsbs-migrate-syntax-v1` now converts legacy melody-spaced verse delimiters
   to `\beginverse+...\endverse` while preserving numbering and indentation.
 - Song metadata extraction and the VS Code extension now recognize every

@@ -3,9 +3,78 @@
 This reference describes ULSBS internals and implementation contracts. For writing
 sources and compiling books, start with the [README](README.md).
 
+- [Developer Navigation](#developer-navigation)
+- [Fixed Policies and Version Ownership](#fixed-policies-and-version-ownership)
+- [PDF Font Sharing](#pdf-font-sharing)
+- [Multikey Books](#multikey-books)
+  - [Build jobs and publication](#build-jobs-and-publication)
+  - [PDF passes and resources](#pdf-passes-and-resources)
+  - [Opt-in score layers](#opt-in-score-layers)
+  - [Layer protocol](#layer-protocol)
+  - [External multikey manifest](#external-multikey-manifest)
+  - [Range index protocol v1](#range-index-protocol-v1)
+  - [Viewer integration](#viewer-integration)
+  - [Notation state and layout](#notation-state-and-layout)
+  - [Key spelling](#key-spelling)
+  - [Viewer compatibility](#viewer-compatibility)
+  - [Validation and performance](#validation-and-performance)
+- [Syntax Migration](#syntax-migration)
+- [Testing](#testing)
+
+## Developer Navigation
+
+The main entry points for extending or debugging the engine are:
+
+| Area | Source |
+|---|---|
+| Document class and author-overridable styles | `src/ulsbs/assets/tex/ulsbs-songbook.cls`, `src/ulsbs/assets/tex/ulsbs.sty` |
+| Instrument-variant post-setup files | `src/ulsbs/assets/tex/` |
+| CLI and public configuration | `src/ulsbs/cli.py`, `src/ulsbs/config.py`, `ulsbs-config-example.toml` |
+| Build orchestration and jobs | `src/ulsbs/pipeline.py`, `src/ulsbs/jobs.py` |
+| Range extraction and validation | `src/ulsbs/multikey_ranges.py` |
+| Family installation and deployment | `src/ulsbs/multikey_publish.py`, `src/ulsbs/deploy.py` |
+| Score alternatives and persistent cache | `src/ulsbs/lilypond_scores.py`, `src/ulsbs/lilypond_score_cache.py` |
+| Shared engine policies | `src/ulsbs/constants.py` |
+
+The executable wrappers are `ulsbs-compile`, `ulsbs-bookmeta`,
+`ulsbs-midi2audio`, `ulsbs-ly2tex`, `ulsbs-migrate-syntax-v1`, and `ulsbs-test`.
+The [README](README.md) documents their author-facing use; release procedures
+are in [MAINTAINERS.md](MAINTAINERS.md).
+
+## Fixed Policies and Version Ownership
+
+`src/ulsbs/constants.py` owns these fixed engine policies. They are not TOML,
+environment, or CLI settings:
+
+| Constant | Value | Purpose |
+|---|---|---|
+| `LILYPOND_SCORE_MIN_SCALE` | `0.60` | Minimum uniform fit accepted for an alternative score image |
+| `MULTIKEY_MIN_QPDF_VERSION` | `(12, 2, 0)` | Minimum supported qpdf version, in addition to runtime output validation |
+| `LUALATEX_MAX_EXTRA_PASSES` | `2` | Shared extra-full-pass budget for reference and optional-content convergence |
+| `MULTIKEY_INDEX_MAX_BYTES` | `4 * 1024 * 1024` | Protocol-v1 bound on the entire UTF-8 index, including its manifest |
+
+These policies differ from public configuration such as
+`multikey-min-chordname-scale`, `multikey-max-pages-per-range`, and
+`multikey-target-max-range-bytes`. The score-image fit floor is not a creator
+knob, and the chord-name setting does not alter it. Internal fitting policy can
+change in future engine builds; its value participates in score-cache identity
+and generated TeX bindings so that cache validation and rendering agree without
+manual cache clearing. The index size bound is instead a producer/consumer
+format agreement, not a PDF-size limit or viewer memory budget. Raising that
+bound requires consumer agreement; merely changing an engine constant is not a
+compatible format migration.
+
+Keep module-owned protocol, cache schema, and transformation-semantic versions
+near their owners rather than hoisting them into `constants.py`.
+`multikey_ranges.py` retains `PROTOCOL`; `lilypond_score_cache.py` retains
+`SCHEMA_VERSION` and `IMPLEMENTATION_VERSION`. Their version changes have
+different compatibility or cache-invalidation meanings from a fitting threshold
+or tool-version floor. Cross-component policy is shared; local version identities
+remain local.
+
 ## PDF Font Sharing
 
-All published jobs run `pipeline.py:step_pdf_fonts` after the third and final
+All published jobs run `pipeline.py:step_pdf_fonts` after the final
 LuaLaTeX pass, before publishing the job PDF to `result/`. The step calls
 `pdf_fonts.py:deduplicate_fonts` on the canonical job PDF, so publication,
 printouts, and cover extraction all consume the same validated artifact. It also
@@ -50,7 +119,7 @@ and atomic replacement/failure behavior. Pipeline tests cover publication order,
 failure handling, and multikey publication. `tests/test_pdf_fonts_integration.py`
 exercises real cold/warm lilypond-book and LuaLaTeX builds, comparing rendered
 pixels and text geometry, checking embedded fonts, and preserving staged sources
-and media mappings. Multikey integration checks embedded JSON and all twelve
+and media mappings. Multikey integration checks the external manifest and all twelve
 key selections, requiring both identical baseline/candidate pixels and visible
 differences between key selections. Rendering comparisons are regression checks,
 not part of every production build's runtime validation. Savings depend on exact
@@ -65,9 +134,29 @@ non-lyrics variant has an ordinary job and, when `multikey-books` is enabled, a
 multikey job for the same source and variant. Lyrics-only jobs remain ordinary.
 The existing `ULSBS-EXTRA-VARIANTS` comment selects instrument variants.
 
+Ordinary and multikey compilations run independently in the same bounded
+worker pool, including for a single book. `compile_one_job` returns a
+`CompilationResult` containing its warning count and next numbered step;
+multikey compilation leaves the optimized master private and does not yet
+report job success. Once both matching compilations succeed, including ordinary
+media and JSON export, the coordinator submits `finish_multikey_job` to that
+same pool. It calls `step_multikey_ranges` to read the final-pass sidecar,
+extract and validate ranges, copy the family to `result/multikey/` with the index
+last, and update the ordinary JSON reference. Only then is the multikey job
+successful. Failed compilations prevent publication, and a missing ordinary
+edition fails its companion without starting it.
+
+There is no global end-of-build packaging barrier: ready pairs can publish while
+unrelated compilations continue. Pool capacity still bounds active work, and
+workers never wait on other jobs, including with a single worker. Each phase
+uses the existing per-job lock; packaging reacquires it after compilation. No
+shared manifest-payload sink or additional locking mechanism is required.
+
 The queue rejects duplicate publication paths before starting jobs: independent
 locks cannot prevent two sources/editions from overwriting the same artifact.
-PDF directory separation does not eliminate collisions in the shared JSON folder.
+Ordinary jobs reserve their PDF and optional `json/` export paths. Multikey jobs
+reserve `multikey/<stem>_RANGES.json` regardless of `cfg.json`; that mandatory
+index owns the whole range family, not a full PDF or a companion JSON export.
 
 `multikey-books` defaults to `false` and follows normal profile inheritance.
 Profiles may override it in either direction, including root `false` to child
@@ -81,27 +170,109 @@ both during initial overlay construction and late Lua lyric-space fitting.
 The CLI `--no-multikey` override disables companions, and `-q`/`--quick` also
 forces `multikey-books` off for that invocation.
 
-Result mapping distinguishes multikey PDFs with `RESULT_TYPE_MULTIKEY_PDF`.
-Their names put `MULTIKEY` before the musical variant and paper suffix:
+`build_job_basename` first applies `build_variant_basename` with the ordinary
+musical variant, then appends `_MULTIKEY` after the complete ordinary stem.
+The same stem identifies the index and its range family:
 
-| Variant | Ordinary result | Multikey result |
+| Variant | Ordinary result | Multikey entry point |
 |---|---|---|
-| Main | `book_A5.pdf` | `multikey/book_MULTIKEY_A5.pdf` |
-| Charango | `book_CHARANGO_A5.pdf` | `multikey/book_MULTIKEY_CHARANGO_A5.pdf` |
-| Bass clef | `book_BASSCLEF_A5.pdf` | `multikey/book_MULTIKEY_BASSCLEF_A5.pdf` |
+| Main | `Book_A5.pdf` | `multikey/Book_A5_MULTIKEY_RANGES.json` |
+| Charango | `Book_CHARANGO_A5.pdf` | `multikey/Book_CHARANGO_A5_MULTIKEY_RANGES.json` |
+| Bass clef | `Book_BASSCLEF_A5.pdf` | `multikey/Book_BASSCLEF_A5_MULTIKEY_RANGES.json` |
 
-Ordinary PDFs remain at the `result/` and deploy roots. Multikey PDFs are routed
-to their respective `multikey/` subdirectories using `RESULT_TYPE_MULTIKEY_PDF`;
-result-list entries retain the basename rather than embedding the subdirectory.
-Multikey jobs
-never generate printouts, MIDI, audio, or cover images. When JSON export is
-enabled, the coordinator publishes matching multikey JSON under the existing
-`json/` directory, after all ordinary jobs finish. It copies the successful
-ordinary variant's full metadata and final media links, then adds the renderer's
-multikey payload. It never rebuilds or exports those media for the companion.
-Only current-run successful JSON is used; stale files are not a fallback.
-JSON companions remain in `json/`, not `multikey/`. Their media references are
-relative to the result/deploy root, not the multikey PDF's directory.
+Ordinary PDFs remain at the `result/` and deploy roots. Only the entry point and
+range PDFs are published in their respective `multikey/` subdirectories. For
+example, `Book_CHARANGO_A5_MULTIKEY_RANGE_1-50.pdf` is a range, not a full book.
+The full layered PDF remains a temporary extraction source and is never a
+published dependency. There is no full-book multikey JSON companion in `json/`.
+Ordinary JSON exports remain there with existing media/path conventions.
+New book/variant metadata emits `multikey_json_file` referencing the completed
+index, never the old `multikey_file`, and omits it when multikey is disabled.
+Generated ordinary `book_info.multikey_json_file` is result-root-relative
+(`multikey/Book_A5_MULTIKEY_RANGES.json`); website catalog variant values remain
+basenames resolved against the site's multikey directory.
+Multikey jobs never generate printouts, MIDI, audio, or cover images.
+
+`multikey-max-pages-per-range` defaults to `50` and
+`multikey-target-max-range-bytes` defaults to `33554432` (32 MiB). Both require
+positive TOML integers, reject booleans/floats/strings, accept dashed or
+snake_case keys and follow existing file/profile inheritance. They do not
+enable multikey themselves. The index is mandatory even with JSON export off.
+
+Split nominal page intervals by physical pages, not songs. Extract from the
+unchanged master, measure actual bytes and bisect oversized intervals until
+they fit or contain one page. Warn for a single oversized page but retain it
+with its true size. Every enabled package has at least one range, including
+small books and empty song collections with a cover; zero-page output fails.
+
+Packaging uses `constants.py:MULTIKEY_MIN_QPDF_VERSION` as its tool-version floor
+and supports the bundled Ubuntu qpdf 12.2.0 without upgrading it, plus runtime
+qualification of every output. Host evidence also uses 12.4.2; a version
+floor alone does not prove correct catalog, resources, geometry or link preservation. Record the
+actual version in the index. Use argument arrays equivalent to:
+
+```sh
+qpdf "temp/Book_A5_MULTIKEY.pdf" --deterministic-id --pages . 1-50 -- "staging/Book_A5_MULTIKEY_RANGE_1-50.pdf"
+qpdf --check "staging/Book_A5_MULTIKEY_RANGE_1-50.pdf"
+```
+
+Do not substitute `--empty --pages` or `--split-pages`: the tested shortcuts
+lost the OCG catalog. Keep all twelve exact layer names, View/default states,
+fixed layers, font/image/resource closure, vector/text content, transparency,
+page boxes, rotation and UserUnit. Retaining unused global OCG declarations is
+acceptable; retaining unrequested page objects or most of the master is not.
+Successful qpdf syntax checking alone does not establish equivalent appearance.
+
+Compare effective printed page labels after qpdf rebases their number tree.
+Preserve the existing read-only PGF workaround widgets and their appearance
+resources; only off-range widgets disappear from the extracted AcroForm field
+list. Editable forms and unsupported actions fail packaging. Hyperref's initial
+GoTo view is not a Link annotation: when it points outside the range and qpdf
+has replaced only that target page with null, remove the invalid startup action
+using structured PDF tooling. This expected range normalization is quiet;
+unexpected action changes still fail validation. Do not remove useful links,
+outlines, or their appearances to avoid retained-page/resource validation.
+
+The Ubuntu integration tests compile generic LilyPond content, deduplicate fonts
+before extraction, and compare all twelve selected keys against the optimized
+master. Cold and warm measurements with qpdf 12.2.0 were identical: 148400-byte
+baseline master, 105781-byte optimized master, and two one-page ranges of 93708
+and 101920 bytes. Each range independently embeds the needed Noto Sans and
+Emmentaler fonts. These are qualification fixtures, not a real-large-book size
+or mobile-memory guarantee; shared resources can increase the aggregate bytes.
+
+A separate private 462-page build was qualified with qpdf 12.2.0 after the
+long-header anchor regression was fixed. Its ordinary PDF was 21659093 bytes,
+optimized layered master 41755668 bytes, and index 130563 bytes. Ten ranges
+(50-page nominal limit, final 12-page range) measured 723080 to 11962236 bytes,
+all below the 32 MiB target. All 1573 named destinations matched the ordinary
+PDF exactly. Only measurements are documented here; no private music or PDFs
+are included in public fixtures or release assets.
+
+Validate ordinary/intermediate identity and geometry, the finalized manifest,
+all staged range resources/layers/links, exact coverage, and final hashes before
+publication. Publish ranges first and the index last, then metadata referencing
+that complete package. Follow failed-build policy without a misleading partial
+index, stale-package fallback or full-PDF fallback. Clean obsolete generated
+ranges only from the build's own inventory, never unrelated files.
+
+`multikey_publish.py:publish_package` revalidates the complete staged index,
+range sizes/hashes, and paired ordinary PDF before changing destinations.
+It copies through destination-local temporary files, retains byte-identical
+outputs, and installs ranges before the index. Replaced files and obsolete-range
+deletions have backups; installation exceptions, including interrupts, trigger
+rollback. Cleanup recognizes only safe range basenames from that edition's
+previous index, not neighboring files. Unreadable or oversized old inventories
+conservatively leave orphan ranges rather than authorize a directory sweep.
+
+Deployment preflights package identities before copying anything and can include
+the paired ordinary PDF in the same rollback boundary. Result-list records and
+ordinary JSON references remain the caller's responsibility. Index-last ordering
+and rollback do not provide atomic multi-file visibility to concurrent HTTP
+readers. A live site needs an atomic edition-directory deployment for a consistent
+ordinary-PDF/index/ranges snapshot. The packager rejects unsupported numeric or
+direct-page Link destinations rather than attempting automatic normalization;
+the protocol's permitted normalization is not an implemented fallback.
 
 Multikey jobs suppress even intermediate LilyPond MIDI generation, not merely
 its publication. Ordinary optional variants suppress that MIDI
@@ -137,8 +308,17 @@ enabled renderer whose valid songs currently hide every annotation.
 
 ### PDF passes and resources
 
-All jobs use three LuaLaTeX passes: one draft pass followed by two full passes.
+Jobs normally use three LuaLaTeX passes: one draft followed by two full passes.
 Song indices are generated between the first and second passes.
+
+In engine `-draftmode`, MULTIKEY builds construct only the original (`t00`)
+visual boxes. These alone determine width, height, depth, and page breaking;
+eleven zero-extent alternate chord/key/score boxes would be discarded without
+producing a PDF. The draft still registers all layer groups, measures headers,
+collects all twelve target keys, and writes the original score requests and index
+data. Full PDF-producing passes always construct every alternative. This private
+renderer flag follows LuaTeX's native `\draftmode` parameter, not the document's
+`draft` option or the graphics package's placeholder mode.
 
 Draft mode omits image objects. Consequently, PDF object numbers recorded in a
 draft run cannot safely describe final optional-content page resources. The
@@ -146,6 +326,34 @@ second full pass resolves resources against the preceding full run. This also
 keeps the final reference-resolution pass consistent for ordinary books. Manual
 layer-enabled builds must likewise rerun full, non-draft LuaLaTeX until
 references settle; counting draft runs as equivalent is unsafe.
+
+Before font deduplication, all jobs inspect the latest completed TeX log for
+explicit LaTeX/rerunfilecheck/hyperref/lastpage reference-rerun requests.
+Ordinary warnings, package-loading text, and undefined references without an
+explicit rerun request retain their existing policy. MULTIKEY jobs additionally
+inspect page and nested Form property resources without decoding their drawings.
+If a cached reference resolves to a stream or another non-dictionary, or the log
+requests another pass, rerun only LuaLaTeX. Both checks share the
+`constants.py:LUALATEX_MAX_EXTRA_PASSES` budget (two additional full passes),
+stopping as soon as they settle. This does not repeat
+LilyPond engraving or index generation. The latest log and fresh shipout manifest
+remain authoritative. Persistent failure stops the job; the later complete
+layer/resource validation is never bypassed. A generic regression changes object
+allocation across three passes and verifies recovery on a fourth. A separate
+ordinary-book test checks TOC, generated song index, and named page references:
+pass-three and pass-four text geometry and destination coordinates match.
+
+A read-only audit of one retained corpus run found no final reference-rerun
+requests in 33 ordinary editions (12 still requested a rerun after pass two).
+Only two of 33 MULTIKEY editions had invalid property resources: the verde and
+completa bass-clef editions. Default completa passed. These observations are not
+a guarantee about future inputs or a rule based on book size.
+
+Each completed numbered LuaLaTeX log includes `ULSBS wall time` for that command.
+Private `*.ulsbs-score-results.json` diagnostics separately record
+`elapsed_seconds` for between-pass score generation/cache work. These are wall
+times, including scheduling contention, not isolated CPU measurements. They do
+not enter the published manifest or change its reproducibility.
 
 The renderer uses `ocgx2`/`ocgbase` named `/Properties` resources for marked
 content. Every `/OC` marked-content name must resolve to an actual catalog OCG.
@@ -166,25 +374,50 @@ The existing first LuaLaTeX draft pass writes `<job>.ulsbs-scores.json` through
 `ulsbs-score-layers.tex` and `ulsbs-score-layers.lua`. This private request
 manifest contains the runtime song occurrence, effective tonic/mode, and twelve
 structured target tonics obtained from the existing TeX spelling policy. There
-is no raw song-key parser and no additional TeX pass. Between draft and full
+is no Python parser for raw song-key strings or dedicated request-collection pass.
+The effective-key policy currently supports major/minor keys; unsupported modal
+metadata remains original-only rather than being reinterpreted as another key.
+Between draft and full
 passes, Python engraves supported alternatives and writes
 `<job>.ulsbs-score-variants.tex` plus `<job>.ulsbs-score-results.json` diagnostics.
-Stale dispatch/request files are cleared before draft collection.
+Stale dispatch/request files are cleared before draft collection. Preparation
+writes a policy-only bindings header for that first pass; generation replaces it
+with the same policy header followed by accepted variant dispatch definitions.
 
-Recognized head/tail snippets without additional custom includes are eligible.
-Native `\transpose` assignments are inserted before the tail consumes the
-already-defined music variables. Structured `ly:make-pitch` operands avoid
+Recognized head/tail snippets and narrowly matched explicit named-variable score
+assemblies are eligible, including contiguous duplicate identical headers.
+The supported assemblies retain their named lyrics, fixed octave shifts, grouped
+staves, numeric engraving settings, and original layout. Additional unknown
+includes, arbitrary score expressions, and multiple explicit score blocks remain
+fallbacks. Native `\transpose` assignments are inserted before the tail or score
+assembly consumes the already-defined music variables. Structured `ly:make-pitch` operands avoid
 interpreting generated intervals under a source's custom note-name language.
-The shortest signed interval is tried first, then its octave equivalent on
-failure. Every system PDF must be valid and fit both original dimensions at a
-uniform scale of at least 0.80, with no enlargement or recognized omitted-tab
-diagnostic. Failure of any system rejects the complete score for that offset;
-other successful offsets remain available. Custom/unresolved-key scores fall back.
+The shortest signed interval is tried first, then its opposite-octave equivalent
+on failure. For positive shortest intervals, a third candidate one octave above
+the preferred interval covers high/reentrant instrument tunings. Negative
+shortest intervals already receive an upper candidate on the second attempt.
+Every system PDF must be valid and fit both original dimensions at a
+uniform scale of at least `constants.py:LILYPOND_SCORE_MIN_SCALE` (`0.60`), with no enlargement or
+recognized omitted-tab diagnostic. Failure of any system rejects the complete
+score for that offset; other successful offsets remain available.
+Custom/unresolved-key scores fall back.
 Alternative engravings force the C diagnostic locale, so localized hosts cannot
 silently bypass warning-based tablature validation.
 
+`constants.py:LILYPOND_SCORE_MIN_SCALE` is the single fitting-policy value. Python checks it when
+accepting notation, passes it explicitly to cache publication, includes it in
+candidate cache keys, and writes it as `\ulScoreMinimumScale` in both draft and
+final TeX bindings. The TeX overlay consumes that value instead of maintaining
+another threshold. A policy change therefore selects different cache entries
+and applies to physical fitting in subsequent builds without clearing the cache.
+TeX allows at most one scaled point of dimension-conversion noise per axis at
+the exact threshold. The applied scale is never rounded up; Python and cache
+validation still check the original PDF dimensions against the policy directly.
+Standalone TeX without bindings has no generated alternatives and retains the
+original notation at unity; that fallback is not a second shrinking policy.
+
 An omitted-tab diagnostic rejects that candidate even when LilyPond exits zero.
-A successful octave retry is normal operation, not a warning. If both candidates
+A successful octave retry is normal operation, not a warning. If all candidates
 fail, the original notation remains and the job warns once per song occurrence
 and distinct final failure reason, combining score identities and listing the
 affected `tNN (target)` selections. Different occurrences and failure reasons
@@ -194,8 +427,11 @@ ordinary output contains no per-offset progress or summary. The private
 `<job>.ulsbs-score-results.json` retains every attempt and its individual reason,
 including first-octave failures that are recovered by the next candidate.
 
-For enabled jobs only, the pipeline appends `ulsbs-score-boundaries.ily` to the
-copied common tail. Its `grob-transformer` composes with existing
+For enabled jobs only, the pipeline appends `ulsbs-score-boundaries.ily` to both
+copied common head and tail. Heads cover explicit assemblies with no tail;
+tails preserve callbacks defined later by the source. The listener deduplicates
+physical systems when repeated includes install nested callbacks.
+Its `grob-transformer` composes with existing
 `System.after-line-breaking` callbacks rather than replacing them, leaving t00
 music and drawing unchanged. `<snippet>.ulsbs-boundaries` records exact rational
 main/grace moments at both ends of every system during original engraving.
@@ -464,13 +700,15 @@ not create manifest records.
 removing groups, stable names, radio groups, or programmatic switching. Neither
 mode requires JavaScript or interactive form controls for transposition.
 
-### Embedded multikey metadata
+### External multikey manifest
 
-The LuaLaTeX backend embeds UTF-8 JSON in XMP property `ulsbs:multikey`, namespace
-`urn:ulsbs:multikey:1`. This stream is self-contained and does not rely on a JSON
-sidecar. Standard PDF Info fields remain unchanged. An existing catalog XMP
-writer is rejected rather than silently overwritten; integrating competing XMP
-writers requires an explicit merge strategy.
+The separate ranges index is the only authority for ULSBS book/MULTIKEY JSON.
+The manifest comes from finalized compiler/build data and actual final-pass
+pagination and UI control anchors. It is not recovered from a PDF, inferred from
+song headers or independently maintained. Neither ordinary, range nor temporary
+layered PDFs embed ULSBS JSON through `ulsbs:multikey` XMP, custom Info fields,
+attachments or any other channel. Ordinary title/author/rights metadata and the
+actual OCG declarations remain intact.
 
 The following illustrates the envelope; position values depend on layout:
 
@@ -541,25 +779,81 @@ is ever present, its `layer_page_indices` must be `[]`. An enabled manifest may
 therefore have an empty `songs` array, for example when the stock bass-clef setup
 hides every eligible annotation and score transposition is disabled.
 
-Schema 2 changes the metadata contract only: `layer_protocol` remains
-`ulsbs:transpose:v1`, and the XMP property and namespace remain unchanged.
-
-The backend writes the same envelope to a temporary `.ulsbs-multikey.json` compile
-artifact. Python captures it before cleanup. Exported ordinary book JSON has
-`has_multikey_info: false` and `multikey_info: null`; exported multikey book JSON
-retains ordinary book metadata and adds the exact embedded `multikey_info`
-object with `has_multikey_info: true`. Full book metadata is not embedded in
-ordinary PDFs. Embedding multikey metadata requires no extra PDF postprocessing
-stage; font sharing is the separate step described above and preserves that metadata.
+The nested manifest retains schema 2 and `layer_protocol: "ulsbs:transpose:v1"`;
+the outer range index has its own protocol version 1. The backend writes the
+envelope to a temporary `.ulsbs-multikey.json` compile artifact. Python captures
+and validates this finalized data before cleanup and packages it in the index.
+Ordinary book JSON retains `has_multikey_info: false` and `multikey_info: null`.
 
 Each LuaLaTeX pass first removes any prior renderer artifact. Disabled capability
-writes a current-run `false`/`null` envelope without adding XMP; a missing or
+writes a current-run `false`/`null` envelope; a missing or
 malformed artifact is an error, not evidence that the renderer is disabled.
+
+### Range index protocol v1
+
+The entry point is UTF-8 JSON bounded to 4 MiB by
+`constants.py:MULTIKEY_INDEX_MAX_BYTES`; nested schema-v2 manifest bounds and
+validation still apply. This producer/consumer bound requires agreement before
+being raised, unlike an internal score-fitting policy. Its exact fields are:
+
+| Field | Contract |
+|---|---|
+| `format` | Literal `"ulsbs:multikey-ranges"` |
+| `schema_version` | Integer `1` |
+| `page_count` | Positive global physical page count, identical in ordinary and intermediate PDFs |
+| `max_pages_per_range` | Configured positive integer page maximum |
+| `target_max_range_bytes` | Configured positive integer byte target |
+| `link_policy` | Literal `"canonical-names-v1"`, only after strict validation |
+| `canonical` | `{ "file": "Book_A5.pdf", "byte_length": <positive integer>, "sha256": <digest> }` describing the paired ordinary output |
+| `geometry` | One `{ "view": [x1, y1, x2, y2], "rotation": 0, "user_unit": 1 }` per global page |
+| `manifest` | Finalized `{ "has_multikey_info": true, "multikey_info": <schema-v2 object> }` envelope described above |
+| `ranges` | Nonempty ordered array of range descriptors below |
+| `packaging` | `{ "tool": "qpdf", "tool_version": <actual version string> }` |
+
+Each range descriptor contains exactly `file`, `first_page`, `last_page`,
+`page_count`, `byte_length` and `sha256`. For example its filename can be
+`Book_A5_MULTIKEY_RANGE_1-50.pdf`, with endpoints 1 and 50 and page count 50.
+Endpoints are unpadded decimal **1-based inclusive physical pages**, never
+printed labels or zero-based indices. Ranges cover `1..page_count` exactly once,
+without gaps, overlap or blank padding. Each local page count equals
+`last_page - first_page + 1` and its actual PDF page count. Adaptive splits can
+produce `RANGE_1-25`, `RANGE_26-50`, then `RANGE_51-100`; use the index rather
+than guessing filenames or partitions.
+
+All `file` values are plain sibling basenames, not URLs, paths, queries or
+fragments; reject traversal, separators and encoded separator/scheme tricks.
+Range basenames match the index's MULTIKEY stem and declared endpoints and are
+resolved relative to the index directory. `canonical.file` identifies the
+actual ordinary producer basename; the ordinary PDF remains at the output root.
+It is not a full-MULTIKEY descriptor or a range-directory location override.
+SHA-256 values are 64 lowercase hexadecimal characters over final exact bytes,
+computed after all extraction/normalization; `byte_length` is the true final size.
+No index hash is embedded in those PDFs, avoiding a circular dependency.
+
+Geometry `view` is effective CropBox intersected with MediaBox in unscaled PDF
+user coordinates, preserving precision and nonzero origins. Rotation is
+normalized to 0/90/180/270; UserUnit defaults to 1. Ordinary/intermediate/range
+geometry must agree. Manifest indices remain zero-based **global** indices and
+anchors retain PDF user space. For global 1-based page `P`, locate the range
+with `first_page <= P <= last_page`; its local 1-based page is
+`P - first_page + 1`. Never rebase the manifest or truncate a cross-range song.
+
+`canonical-names-v1` requires internal Link annotations to use exact named
+destinations (PDF names/strings) present in the ordinary PDF with equivalent
+canonical target and coordinates. Preserve names unchanged across extraction,
+including targets outside the range. Preserve original safe external URI actions
+and annotation geometry; introduce no active actions or editable form semantics.
+Range-local numeric or indirect-page-reference destinations are forbidden.
+Normalize only to an existing equivalent canonical name with structured PDF
+tooling and revalidate; never invent names, regex-edit PDF bytes, discard target
+coordinates or silently drop links. Unsupported cases fail packaging. A range's
+own destination tree is not the authority for canonical navigation identity.
 
 ### Viewer integration
 
-1. Read XMP from the opened PDF, or use the matching exported JSON. Check
-   `has_multikey_info`, require `schema_version === 2`, and check `layer_protocol`
+1. Read the external entry point referenced by `multikey_json_file`, validate
+   protocol v1 and its complete range identities, then read `manifest`. Check
+   `has_multikey_info`, require nested `schema_version === 2`, and check `layer_protocol`
    before using it. Validate each required `layer_page_indices` as sorted, unique,
    integer page indices within the document, consistent with
    `has_transposable_content`.
@@ -582,11 +876,8 @@ PDF.js example (its v5 `getGroups()` API and v6 iterable configuration are both
 shown because deployed viewers may use either):
 
 ```js
-const { metadata } = await pdfDocument.getMetadata();
-const raw = metadata?.get("ulsbs:multikey");
-// Metadata is optional; a malformed payload must not prevent ordinary viewing.
-let envelope = null;
-try { envelope = raw ? JSON.parse(raw) : null; } catch { /* no multikey UI */ }
+// index is the validated external protocol-v1 entry point, not PDF XMP.
+const envelope = index.manifest;
 const info = envelope?.has_multikey_info ? envelope.multikey_info : null;
 // Proceed only for schema_version === 2 and the supported layer_protocol;
 // validate layer_page_indices and the other entry fields before creating UI.
@@ -606,8 +897,8 @@ function selectOffset(song, offset) {
   // Rerender visible affected views using this updated optional-content config.
 }
 
-// Use the viewport of pdfDocument.getPage(song.page_index + 1), including its
-// current scale, crop, and rotation, for an overlay in that page's view.
+// Map global song.page_index + 1 through index.ranges before obtaining the
+// range-local page viewport, including its current scale, crop and rotation.
 const [left, top] = viewport.convertToViewportPoint(song.anchor.x, song.anchor.y);
 ```
 
@@ -730,8 +1021,8 @@ compatibility testing.
 
 ### Validation and performance
 
-Run the supported containerized suite with `./ulsbs-test`; see the README for
-runner options. Renderer regression coverage should include OCG names/counts,
+Run the supported containerized suite with `./ulsbs-test`; see [Testing](#testing)
+for runner options. Renderer regression coverage should include OCG names/counts,
 initial visibility, independent radio groups, print usage, actual resource
 targets, balanced marked content, and native/hidden switching. Test the real
 one-draft/two-full sequence with images, not only small all-full fixtures.
@@ -754,6 +1045,35 @@ observations included different cache work and the former four-versus-three pass
 they are not controlled benchmarks of the new paired-job workflow. Extra jobs
 and notation increase total compilation work even when PDF size growth is small.
 
+A controlled Ubuntu-image benchmark (LuaHBTeX 1.18.0, qpdf 12.2.0) compared the
+former draft behavior with original-only draft visuals. Its generic 40-song
+book contains 320 chord chunks and 160 font-rich LilyPond system inclusions from
+public synthetic exercises, with chord shrinking disabled as in the corpus
+configuration. All five measured trials use fresh engine processes and fresh
+auxiliary files, with warmed font/input caches, alternating condition order,
+and no profiling callbacks. One font-cache warmup is excluded.
+
+| Engine draft behavior | Median wall time | Five-trial range |
+| --- | ---: | ---: |
+| Construct all twelve visuals | 12.002 s | 11.998--12.100 s |
+| Construct only original visuals | 4.398 s | 4.357--4.413 s |
+
+The measured draft improvement is 2.73x (63.4% less time). Draft reference
+labels, score requests, and global manifests matched exactly. Maintained
+regressions also compare layout-bearing box dimensions, song index data,
+physical pages, long headers, repeated occurrences, and original-view rendering,
+then verify that full runs restore every actual layer. This benchmark does not
+measure a three-hour full-book build or predict a 2.73x end-to-end improvement;
+the two full passes and LilyPond generation remain separate costs.
+
+PDF bundling was investigated but not adopted. In controlled synthetic tests,
+large global bundles slowed distinct-page LuaTeX import substantially. Even
+12/24-page bundles sharing only exactly identical whole font dictionaries were
+7.7%/17.9% slower for the main TeX pass than separate PDFs; preparation also cost
+time. Smaller output bytes or cheaper final font sharing alone are not evidence
+of faster overall compilation. Separate graphics and the validated final font
+deduplication remain in use.
+
 Paired-edition validation also covered the default, charango, and bass-clef
 variants. All visible word positions matched at 0.01 pt precision. Default and
 charango each had an 18-pixel raster difference around one superscript on page 8
@@ -761,5 +1081,56 @@ at 72 dpi; every other page matched exactly. Bass-clef pages matched exactly,
 with no visible key-switching effect in that configuration. These small raster
 differences must not be reported as strict pixel equality.
 
-The maintained toolchain supplies `ocgx2` through `texlive-latex-extra`. No
-separate PDF post-processing tool is required to create the layers.
+The maintained toolchain supplies `ocgx2` through `texlive-latex-extra`. Layer
+creation remains native TeX/LilyPond OCG output; qpdf packages and validates
+page ranges without re-engraving, flattening, rasterizing or print-to-PDF.
+
+## Syntax Migration
+
+The [author-facing migration instructions](README.md#ulsbs-migrate-syntax-v1)
+cover invocation and diagnostics requiring source review. The destination-syntax
+version is part of the command name; `ulsbs-migrate-melody-syntax` remains a
+compatibility alias for `ulsbs-migrate-syntax-v1`.
+
+`--diff` and `--write` process only files with no diagnostics. Writes are
+file-atomic, not directory-atomic: other safe files in a directory may change
+even when one file is rejected. Comments and verbatim-like regions are ignored.
+Accidental macros are rewritten only inside standalone `\altchords`,
+`\beginsong`'s `key`/`gk` values, and `\audio`'s `key` value; explicit macros
+elsewhere remain intact.
+
+Baseline alternate-only `\ma`/`\mac` forms become secondary notes under
+`\melodySecondaryPosition{same}`. A uniform verse receives one scoped setting;
+mixed placement receives a local TeX group. Missing secondary-note slots are
+never inferred. `--normalize-low` normalizes reviewed low `\mnd`/`\mad` slots
+but does not change verse environments.
+
+The rendered one-slot circled `/` marker remains `/`, never the empty-slot `_`.
+Legacy commands are migrated only from the leading melody/beat layer. A leading
+replay caret remains before the generated block: `\[^\mnc{C}]` becomes
+`\[^<C>]`. Alternate chords stay after that block while their selectors change
+from `\ac<1>{Em}` to `\ac{1}{Em}`. A legacy melody command after chord content
+produces a diagnostic instead of being hoisted across the chord. Malformed
+arguments, compound pitches, incompatible offsets, and ambiguous secondary
+placement also require author review rather than speculative conversion.
+
+## Testing
+
+From the ULSBS source directory, run `./ulsbs-test`. The runner builds the normal
+Docker or Podman `ulsbs-compiler` image when needed, runs LuaLaTeX regressions
+through `l3build`, and runs compilation/PDF-structure tests through Python's
+standard-library `unittest` runner.
+
+```sh
+./ulsbs-test --container-rebuild
+./ulsbs-test --container-engine podman
+./ulsbs-test --no-container
+./ulsbs-test --verbose
+```
+
+Host testing is intended for development only. The containerized suite is the
+canonical result because it uses the supported ULSBS toolchain and fonts. See
+[Validation and Performance](#validation-and-performance) for renderer/PDF
+inspection and measurement guidance, [PDF Font Sharing](#pdf-font-sharing) for
+optimizer coverage, and [Trusted Cache Assets](#trusted-cache-assets) for the
+read-only asset audit and explicit trust-record maintenance workflow.

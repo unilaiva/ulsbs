@@ -17,6 +17,7 @@ import json
 import math
 import re
 import shlex
+import time
 from dataclasses import dataclass
 from fractions import Fraction
 from itertools import groupby
@@ -25,10 +26,10 @@ from pathlib import Path
 import pikepdf
 
 from . import lilypond_score_cache as cache
+from .constants import LILYPOND_SCORE_MIN_SCALE
 from .util import read_text, run_cmd, write_text
 
 
-MINIMUM_SCALE = 0.80
 _NATURAL = (0, 2, 4, 5, 7, 9, 11)
 _LETTERS = ("c", "d", "e", "f", "g", "a", "b")
 _TAILS = {
@@ -56,10 +57,25 @@ class Score:
     boundaries: tuple[tuple[Fraction, Fraction, Fraction, Fraction], ...] = ()
 
 
+def _minimum_scale_tex() -> str:
+    """Carry the current Python fitting policy into the generated TeX bindings.
+
+    Write this header even before alternatives exist, so the draft and final
+    passes use one threshold. Compute it at call time rather than retaining a
+    separate policy value in a template or another module.
+    """
+    return rf"\def\ulScoreMinimumScale{{{LILYPOND_SCORE_MIN_SCALE}}}" + "\n"
+
+
 def prepare_scores(directory: Path, basename: str) -> dict[str, Score]:
-    """Instrument generated inclusions, without changing their break tokens."""
+    """Reset dispatch/status, write draft fitting policy, and wrap score inclusions.
+
+    Preserve generated break tokens and original graphics. Only the fresh policy
+    header remains in the bindings until generation supplies accepted variants.
+    """
     for suffix in (".ulsbs-score-variants.tex", ".ulsbs-scores.json", ".ulsbs-score-results.json"):
         (directory / (basename + suffix)).unlink(missing_ok=True)
+    write_text(directory / (basename + ".ulsbs-score-variants.tex"), _minimum_scale_tex())
     scores = {}
     inventory = directory / (basename + ".ulsbs-lilypond-systems.json")
     fragments = ([directory / name for name in json.loads(read_text(inventory))]
@@ -99,7 +115,7 @@ def prepare_scores(directory: Path, basename: str) -> dict[str, Score]:
 
 
 def _support(source: Path) -> tuple[str | None, int | None]:
-    """Return an unsupported-structure reason or the tail include position."""
+    """Return an unsupported reason or the insertion point before score assembly."""
     if not source.is_file():
         return "generated LilyPond source is unavailable", None
     text = read_text(source)
@@ -107,12 +123,55 @@ def _support(source: Path) -> tuple[str | None, int | None]:
     clean = re.sub(r"%\{[\s\S]*?%\}|%[^\n]*", lambda match: " " * len(match[0]), text)
     includes = list(_INCLUDE.finditer(clean))
     tails = [match for match in includes if match[1] in _TAILS]
-    if (len(tails) != 1 or sum(match[1] in _HEADS for match in includes) != 1
-            or re.search(r"\\score\b", clean)):
+    heads = [match for match in includes if match[1] in _HEADS]
+    # Repeated identical headers before the definitions need no source repair.
+    # Never permit a header reset interleaved with music or other settings.
+    if (not heads or len({match[1] for match in heads}) != 1
+            or any(clean[left.end():right.start()].strip()
+                   for left, right in zip(heads, heads[1:], strict=False))):
         return "custom or unrecognized score structure", None
-    if any(match[1] not in _HEADS | _TAILS | {"lilypond-book-preamble.ly"} for match in includes):
+    blocks = list(re.finditer(r"\\score\b", clean))
+    allowed = _HEADS | _TAILS | {"lilypond-book-preamble.ly"}
+    if not blocks and len(tails) == 1:
+        position = tails[0].start()
+    elif len(blocks) == 1 and not tails and _named_score(clean[blocks[0].start():]):
+        position = blocks[0].start()
+        allowed |= {"ulsbs-internal-scorepart-tabstaff.ly", "ulsbs-internal-score-midi.ly"}
+    else:
+        return "custom or unrecognized score structure", None
+    if heads[-1].end() > position:
+        return "custom or unrecognized score structure", None
+    if any(match[1] not in allowed for match in includes):
         return "additional LilyPond includes are not yet supported", None
-    return None, tails[0].start()
+    return None, position
+
+
+def _named_score(text: str) -> bool:
+    """Recognize two declarative assemblies, not arbitrary LilyPond or Scheme.
+
+    Every pitched staff must consume the transformed named melody/chords. Fixed
+    octave shifts and numeric engraving settings remain in their original place.
+    """
+    chords = r'\\new\s+ChordNames\s*\{\s*\\theChords\s*\}'
+    staff = (r'\\new\s+Staff\s*\{\s*\\clef\s+"treble"\s*'
+             r"(?:\\transpose\s+c'\s+c\s+)?"
+             r'\\new\s+Voice\s*=\s*"theVoice"\s*\{\s*\\theMelody\s*\}\s*\}')
+    tab = r'\\include\s+"ulsbs-internal-scorepart-tabstaff\.ly"'
+    lyrics = (r'\\new\s+Lyrics\s+\\lyricsto\s+"theVoice"\s*'
+              r'\{\s*\\theLyrics(?:One|Two|Three|Four|Five|Six)\s*\}')
+    between = rf'{chords}\s*{staff}\s*(?:{lyrics}\s*)+{tab}\s*(?:{lyrics}\s*)*'
+    grouped = (
+        rf'{chords}\s*\\new\s+StaffGroup\s+\\with\s*\{{\s*'
+        r'\\override\s+StaffGrouper\.staffgroup-staff-spacing\.padding\s*=\s*#\d+(?:\.\d+)?\s*\}'
+        rf'\s*<<\s*{staff}\s*{tab}\s*'
+        r'\\new\s+TabStaff\s*\{\s*\\tabFullNotation\s+\\stemDown\s*'
+        r'\\clef\s+"moderntab"\s+\\set\s+minimumFret\s*=\s*#\d+\s*'
+        r"\\transpose\s+c'\s+c\s+\\theMelody\s*\}\s*>>"
+    )
+    return re.fullmatch(
+        rf'\\score\s*\{{\s*<<\s*(?:{between}|{grouped})\s*>>\s*'
+        r'\\layout\s*\{\s*\}\s*\}\s*'
+        r'\\include\s+"ulsbs-internal-score-midi\.ly"\s*', text) is not None
 
 
 def _boundaries(path: Path) -> tuple[tuple[Fraction, Fraction, Fraction, Fraction], ...]:
@@ -210,7 +269,14 @@ def _valid_key(key: object, *, mode: bool = False) -> bool:
 
 def generate_scores(ui, job, basename: str, scores: dict[str, Score],
                     env: dict[str, str], include_args: list[str], *, verbose: bool = False) -> None:
-    """Render requested alternatives between the draft and full TeX passes."""
+    """Render requested alternatives and write final dispatch plus fitting policy.
+
+    The generated bindings carry ``LILYPOND_SCORE_MIN_SCALE`` alongside accepted graphics,
+    keeping TeX's physical-box checks consistent with engraving and cache checks.
+    Private result diagnostics include wall time for this between-pass phase,
+    separate from the LuaLaTeX timings recorded by the pipeline.
+    """
+    started = time.perf_counter()
     directory = job.compile_dir
     request_file = directory / (basename + ".ulsbs-scores.json")
     requests = []
@@ -259,7 +325,7 @@ def generate_scores(ui, job, basename: str, scores: dict[str, Score],
         key, targets = request.get("key"), request.get("targets")
         reason = score.unsupported
         if not _valid_key(key, mode=True) or not isinstance(targets, list) or len(targets) != 12:
-            reason = reason or "effective key metadata is unavailable"
+            reason = reason or "effective key metadata is unavailable or unsupported (major/minor required)"
         elif any(not _valid_key(target) or (target["pitch"] - key["pitch"]) % 12 != offset
                  for offset, target in enumerate(targets)):
             reason = "invalid target key metadata"
@@ -287,7 +353,11 @@ def generate_scores(ui, job, basename: str, scores: dict[str, Score],
                         score.source, include_args, cwd=directory, env=env, toolchain=toolchain)
                 record["cache_eligible"] = fingerprints[score.identity] is not None
                 signed = offset if offset <= 6 else offset - 12
-                for candidate in (signed, signed - 12 if signed > 0 else signed + 12):
+                # Keep existing choices first, then try the higher register that
+                # positive intervals otherwise miss on instruments with a floor.
+                candidates = ((signed, signed - 12, signed + 12) if signed > 0
+                              else (signed, signed + 12))
+                for candidate in candidates:
                     cache_key = (score.identity, signature, targets[offset]["letter"], candidate)
                     if cache_key not in rendered:
                         attempts += 1
@@ -333,9 +403,11 @@ def generate_scores(ui, job, basename: str, scores: dict[str, Score],
             f"title={warning['title']!r}: {reason}; original notation substituted; "
             f"affected transpositions: {affected}"
         )
-    write_text(directory / (basename + ".ulsbs-score-variants.tex"), "\n".join(dispatch) + "\n")
+    write_text(directory / (basename + ".ulsbs-score-variants.tex"),
+               _minimum_scale_tex() + "".join(line + "\n" for line in dispatch))
     write_text(directory / (basename + ".ulsbs-score-results.json"), json.dumps({
         "schema_version": 1, "scores": results, "attempts": attempts,
+        "elapsed_seconds": round(time.perf_counter() - started, 3),
         **statistics,
         "successful_offsets": successes, "fallback_offsets": fallbacks,
     }, ensure_ascii=True, indent=2) + "\n")
@@ -378,8 +450,8 @@ def _engrave(score: Score, key: dict, target: dict, signed: int, offset: int,
         cache_key = cache.candidate_key(
             fingerprint, signed=signed, spelled=(start, end), original_dimensions=original,
             original_boundaries=score.boundaries,
-            extra={"key": key, "target": target, "source": source, "minimum_scale": MINIMUM_SCALE},
-            implementation_version="ulsbs-score-transpose-boundaries-5")
+            extra={"key": key, "target": target, "source": source, "minimum_scale": LILYPOND_SCORE_MIN_SCALE},
+            implementation_version="ulsbs-score-transpose-boundaries-6")
         if cache.restore(cache_key, stem, env=env) is not None:
             try:
                 failure = _validate_variant(stem, score, original)
@@ -408,7 +480,7 @@ def _engrave(score: Score, key: dict, target: dict, signed: int, offset: int,
         if failure:
             return None, failure, relative_log
         cache.publish(cache_key, stem, success=True, original_dimensions=original,
-                      minimum_scale=MINIMUM_SCALE, env=env)
+                      minimum_scale=LILYPOND_SCORE_MIN_SCALE, env=env)
         return stem.relative_to(directory).as_posix(), None, relative_log
     except (OSError, ValueError, pikepdf.PdfError) as error:
         return None, str(error), relative_log
@@ -428,6 +500,6 @@ def _validate_variant(stem: Path, score: Score, original) -> str | None:
     for index, (graphic, dimensions) in enumerate(zip(expected, original, strict=True), 1):
         width, height = _dimensions(graphic)
         scale = min(1, dimensions[0] / width, dimensions[1] / height)
-        if scale < MINIMUM_SCALE:
-            return f"system {index} required scale {scale:.3f} is below {MINIMUM_SCALE:.2f}"
+        if scale < LILYPOND_SCORE_MIN_SCALE:
+            return f"system {index} required scale {scale:.3f} is below {LILYPOND_SCORE_MIN_SCALE:.2f}"
     return None

@@ -12,7 +12,6 @@ import subprocess
 import tempfile
 import unittest
 import warnings
-import xml.etree.ElementTree as ET
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,13 +23,14 @@ from ulsbs import pipeline, resultlist
 from ulsbs.config import Config
 from ulsbs.engine_assets import EngineAssets
 from ulsbs.jobs import Job, build_job_basename
+from ulsbs.multikey_ranges import validate_index
 from ulsbs.pdf_fonts import _check_equivalent, deduplicate_fonts
 
 
 class LilyPondFontSharingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        for tool in ("lilypond-book", "lilypond", "lualatex", "pdffonts", "pdftoppm", "pdftotext"):
+        for tool in ("lilypond-book", "lilypond", "lualatex", "qpdf", "pdffonts", "pdftoppm", "pdftotext"):
             if shutil.which(tool) is None:
                 raise unittest.SkipTest(f"{tool} is not installed")
 
@@ -75,13 +75,16 @@ class LilyPondFontSharingTests(unittest.TestCase):
                     + "\n" + r"\layout {} \midi {} }" + "\n"
                     r"\end{lilypond}\end{lilywrap}\endsong" + "\n"
                 )
-            (content / "song.tex").write_text("".join(snippets), encoding="utf-8")
+            (content / "song.tex").write_text(
+                "\\end{songs}\\clearpage\\begin{songs}{}\n".join(snippets), encoding="utf-8",
+            )
             paths = SimpleNamespace(project_root=root, result_dir=result,
                                     content_dir=content, include_dir=root / "include")
             cfg = replace(
                 Config(), runtime=SimpleNamespace(project_paths=paths, in_container=False),
                 create_printouts=False, coverimage=False, multikey_books=multikey,
                 audiofiles=False, midifiles=True, json=True, clean_temp=False,
+                multikey_max_pages_per_range=1,
             )
             job = Job(doc, doc.stem, "default", root / "job", multikey=multikey)
             basename = build_job_basename(job)
@@ -105,26 +108,42 @@ class LilyPondFontSharingTests(unittest.TestCase):
 
             resultlist.initialize(result, "font-integration")
             try:
+                ordinary_job = None
+                if multikey:
+                    ordinary_job = replace(job, compile_dir=root / "ordinary-job", multikey=False)
+                    ordinary_job.compile_dir.mkdir()
+                    with patch.dict(os.environ, {
+                        "TEXMFVAR": str(cache), "TEXMFCACHE": str(cache),
+                    }):
+                        pipeline.compile_one_job(
+                            ui, EngineAssets(), replace(cfg, json=False, midifiles=False), ordinary_job,
+                        )
+                    canonical = result / f"{build_job_basename(ordinary_job)}.pdf"
+                    canonical_bytes = canonical.read_bytes()
                 for build in ("cold", "warm"):
                     with self.subTest(build=build), patch.dict(os.environ, {
                         "TEXMFVAR": str(cache), "TEXMFCACHE": str(cache),
                     }), patch("ulsbs.pdf_fonts.deduplicate_fonts", side_effect=optimize):
                         try:
-                            payloads = {}
-                            pipeline.compile_one_job(ui, EngineAssets(), cfg, job,
-                                                     multikey_payload_sink=payloads)
+                            compilation = pipeline.compile_one_job(ui, EngineAssets(), cfg, job)
+                            if multikey:
+                                pipeline.finish_multikey_job(ui, cfg, job, ordinary_job, compilation)
                         except pipeline.CompileError as error:
                             logs = "\n".join(p.read_text(errors="replace") for p in job.compile_dir.glob("*.log"))
                             self.fail(f"{error}\n{logs}")
                         before, after, removed = measurements[-1]
                         self.assertLess(after, before)
                         self.assertGreater(removed, 0)
-                        published = (result / "multikey" if multikey else result) / f"{basename}.pdf"
-                        self.assertEqual(published.read_bytes(), (job.compile_dir / published.name).read_bytes())
+                        optimized_pdf = job.compile_dir / f"{basename}.pdf"
+                        self.assertEqual(optimized_pdf.stat().st_size, after)
+                        if multikey:
+                            self.assertFalse(list(result.rglob(optimized_pdf.name)))
+                        else:
+                            self.assertEqual((result / optimized_pdf.name).read_bytes(), optimized_pdf.read_bytes())
                         self.assertTrue((job.compile_dir / "content" / "song.tex").is_file())
                         for source, data in source_snapshots[-1].items():
                             self.assertEqual(source.read_bytes(), data, str(source))
-                        with pikepdf.open(baseline) as original, pikepdf.open(published) as optimized:
+                        with pikepdf.open(baseline) as original, pikepdf.open(optimized_pdf) as optimized:
                             _check_equivalent(original, optimized)
                             pages = len(original.pages)
                             if multikey:
@@ -134,29 +153,47 @@ class LilyPondFontSharingTests(unittest.TestCase):
                                     f"ulsbs:transpose:v1:id:font-song-{song}:t{offset:02d}"
                                     for song in range(2) for offset in range(12)
                                 })
-                                metadata = ET.fromstring(optimized.Root.Metadata.read_bytes())
-                                embedded = json.loads(metadata.find(".//{urn:ulsbs:multikey:1}multikey").text)
-                                self.assertEqual(embedded["multikey_info"], payloads[job])
-                                self.assertTrue(embedded["has_multikey_info"])
-                        inventory = subprocess.check_output(["pdffonts", str(published)], text=True)
-                        font_rows = inventory.splitlines()[2:]
-                        self.assertTrue(font_rows)
-                        self.assertTrue(all(row.split()[-5] == "yes" for row in font_rows), inventory)
-                        self.assertIn("NotoSans", inventory)
-                        self.assertIn("Emmentaler", inventory)
+                                self.assertNotIn('/Metadata', optimized.Root)
+                                manifest = json.loads((job.compile_dir / f"{basename}.ulsbs-multikey.json").read_text())
+                                self.assertIs(manifest["has_multikey_info"], True)
+                        ranges = []
+                        if multikey:
+                            # The optimized master stays private. Validate the
+                            # published index against the unchanged ordinary PDF.
+                            self.assertEqual(pages, 2, "The fixture must exercise actual page extraction")
+                            index_path = result / "multikey" / f"{basename}_RANGES.json"
+                            index = json.loads(index_path.read_text())
+                            validate_index(index, index_path, canonical)
+                            self.assertEqual(index["manifest"], manifest)
+                            self.assertEqual(canonical.read_bytes(), canonical_bytes)
+                            ranges = [(entry, index_path.parent / entry["file"]) for entry in index["ranges"]]
+                            self.assertEqual(len(ranges), pages)
+                            print(
+                                f"Font/range measurements ({build}, qpdf {index['packaging']['tool_version']}): "
+                                f"baseline={before}, optimized={after}, "
+                                f"ranges={[path.stat().st_size for _, path in ranges]} bytes",
+                                flush=True,
+                            )
+                        for path in [optimized_pdf, *(path for _, path in ranges)]:
+                            inventory = subprocess.check_output(["pdffonts", str(path)], text=True)
+                            font_rows = inventory.splitlines()[2:]
+                            self.assertTrue(font_rows, str(path))
+                            self.assertTrue(all(row.split()[-5] == "yes" for row in font_rows), inventory)
+                            self.assertIn("NotoSans", inventory)
+                            self.assertIn("Emmentaler", inventory)
                         for page in range(1, pages + 1):
                             command = ["pdftoppm", "-r", "96", "-f", str(page), "-singlefile", "-png"]
                             self.assertEqual(subprocess.check_output(command + [str(baseline)]),
-                                             subprocess.check_output(command + [str(published)]))
+                                             subprocess.check_output(command + [str(optimized_pdf)]))
                         command = ["pdftotext", "-bbox"]
                         self.assertEqual(subprocess.check_output(command + [str(baseline), "-"]),
-                                         subprocess.check_output(command + [str(published), "-"]))
+                                          subprocess.check_output(command + [str(optimized_pdf), "-"]))
                         if multikey:
                             rasters = []
                             for offset in range(12):
                                 selected = []
                                 save_warnings = []
-                                for source in (baseline, published):
+                                for source in (baseline, optimized_pdf, *(path for _, path in ranges)):
                                     selected_pdf = root / f"selected-{len(selected)}.pdf"
                                     with pikepdf.open(source) as pdf:
                                         groups = pdf.Root.OCProperties.OCGs
@@ -171,11 +208,21 @@ class LilyPondFontSharingTests(unittest.TestCase):
                                         with warnings.catch_warnings(record=True) as caught:
                                             pdf.save(selected_pdf)
                                         save_warnings.append([str(w.message) for w in caught])
-                                    selected.append(subprocess.check_output([
-                                        "pdftoppm", "-r", "96", "-singlefile", "-png", str(selected_pdf),
-                                    ]))
+                                    with pikepdf.open(selected_pdf) as pdf:
+                                        selected_pages = len(pdf.pages)
+                                    selected.append(tuple(subprocess.check_output([
+                                        "pdftoppm", "-r", "96", "-f", str(page),
+                                        "-singlefile", "-png", str(selected_pdf),
+                                    ]) for page in range(1, selected_pages + 1)))
                                 self.assertEqual(selected[0], selected[1], f"key offset {offset}")
                                 self.assertEqual(save_warnings[0], save_warnings[1])
+                                for (entry, _), raster in zip(ranges, selected[2:], strict=True):
+                                    # Index bounds are one-based and inclusive;
+                                    # compare each extracted page in every key.
+                                    self.assertEqual(
+                                        raster, selected[1][entry["first_page"] - 1:entry["last_page"]],
+                                        f"range {entry['file']}, key offset {offset}",
+                                    )
                                 rasters.append(selected[0])
                             self.assertGreater(len(set(rasters)), 1, "key selections must visibly change the PDF")
                             self.assertFalse((result / "json" / f"{basename}.json").exists())

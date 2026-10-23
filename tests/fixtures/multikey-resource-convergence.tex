@@ -1,0 +1,26 @@
+\documentclass[paper={a5paper},maintitle={Public Resource Convergence}]{ulsbs-songbook}
+% pdfbase caches numeric property references in the previous pass's aux file.
+% Shift object allocation on passes 2 and 3, then keep it stable from pass 4.
+\providecommand{\ResourceRun}{0}
+\makeatletter
+\AtBeginDocument{%
+  \ifnum\ResourceRun>0
+    \immediate\pdfextension obj stream {public dummy stream one}%
+  \fi
+  \ifnum\ResourceRun>1
+    \immediate\pdfextension obj stream {public dummy stream two}%
+  \fi
+  \typeout{ULSBS-RESOURCE-RUN:\number\numexpr\ResourceRun+1\relax}%
+  \immediate\write\@auxout{\string\gdef\string\ResourceRun{\number\numexpr\ResourceRun+1\relax}}%
+}
+\makeatother
+\begin{document}
+\pagestyle{empty}
+\begin{songs}{}
+\beginsong{Public Resource Song}[id={public-resource-song},key={C}]
+\beginverse
+\[C]Generic words and \[G]simple music.
+\endverse
+\endsong
+\end{songs}
+\end{document}

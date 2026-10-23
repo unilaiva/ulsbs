@@ -2,7 +2,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 """
-Compilation pipeline: prepare, run tools, and post-process outputs.
+Compilation, output publication, and bounded parallel job orchestration.
+
+Ordinary and MULTIKEY editions compile independently. Ordinary jobs publish
+their outputs immediately; MULTIKEY jobs retain an optimized private master.
+The coordinator schedules range packaging in the same pool only after both
+matching compilations succeed, including ordinary media and JSON exports.
+Compilation completion alone therefore does not imply MULTIKEY job success.
+
 This file is part of the 'ulsbs' package.
 """
 
@@ -18,6 +25,7 @@ import shutil
 import signal
 import sys
 import threading
+import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,9 +34,11 @@ from fnmatch import fnmatch
 
 from .config import Config
 from .constants import (
+    LUALATEX_MAX_EXTRA_PASSES,
     PAPERA5_FNAMEPART,
     RESULT_TYPE_MAIN_PDF,
     RESULT_TYPE_MULTIKEY_PDF,
+    RESULT_TYPE_MULTIKEY_JSON,
     RESULT_TYPE_PRINTOUT_PDF,
     RESULT_TYPE_JSON,
     RESULT_TYPE_IMAGE,
@@ -112,19 +122,41 @@ class CompileError(RuntimeError):
 # Result containers for parallel runs
 
 @dataclass(frozen=True)
+class CompilationResult:
+    """Compiler warnings and the next per-job log number for a later phase.
+
+    This immutable handoff carries no PDF objects or manifest payload. A
+    MULTIKEY result still needs packaging; it is not a final ``JobSuccess``.
+    """
+
+    warning_count: int
+    next_step: int
+
+
+@dataclass(frozen=True)
 class JobSuccess:
+    """Final job outcome: ordinary publication or completed MULTIKEY packaging.
+
+    An explicitly layer-disabled source is also a completed, skipped companion
+    with a warning. Each job's warning count contributes to the run total once.
+    """
+
     job: Job
     warning_count: int
 
 
 @dataclass(frozen=True)
 class JobFailure:
+    """One reported failure per job, including a failed ordinary dependency."""
+
     job: Job
     reason: str
 
 
 @dataclass
 class ParallelRunResult:
+    """Final named outcomes; warnings count successful jobs only."""
+
     successes: List[JobSuccess]
     failures: List[JobFailure]
     total_warnings: int = 0
@@ -183,8 +215,12 @@ def die_log(ui: UI, cfg: Config, job: Job, cwd: Path, message: str, log_path: Pa
     raise CompileError(message, log_path)
 
 
-def require_tools() -> None:
-    """Ensure required tools and Python dependencies are available."""
+def require_tools(*, multikey: bool = False) -> None:
+    """Fail early with installation guidance for missing build dependencies.
+
+    qpdf is optional for ordinary builds. When ``multikey`` is true, also check
+    its minimum version; semantic qualification still happens for every range.
+    """
     for t in ("lualatex", "texlua", "lilypond-book"):
         if which(t) is None:
             raise SystemExit(f"'{t}' binary not found in PATH")
@@ -194,6 +230,13 @@ def require_tools() -> None:
             "Install it with pip install 'pikepdf>=8' (or apt install python3-pikepdf), "
             "or rebuild the compiler container."
         )
+    if multikey:
+        from .multikey_ranges import qpdf_version
+
+        try:
+            qpdf_version()
+        except (OSError, ValueError) as error:
+            raise SystemExit(f"qpdf is required for MULTIKEY range packaging: {error}") from error
 
 
 def build_include_paths(cfg: Config, job: Job) -> tuple[dict[str, str], list[str], list[Path]]:
@@ -626,7 +669,14 @@ def step_lualatex_pass(
     pass_no: int,
     draftmode: bool,
 ) -> tuple[Path, int]:
-    """Run a LuaLaTeX pass and return the log path and next step number."""
+    """Run LuaLaTeX, returning its log path and the next per-job step number.
+
+    Remove any previous manifest sidecar first, even between passes. Packaging
+    must observe fresh status and anchors from the final pass, never a stale
+    success left behind by an earlier pass or failed build.
+    Append measured wall time to each completed pass log so TeX cost can be
+    distinguished from between-pass score generation and executor contention.
+    """
     cwd = job.compile_dir
     (cwd / f"{basename}.ulsbs-multikey.json").unlink(missing_ok=True)
     txt_doc = ui.fmt_doc(job)
@@ -643,11 +693,16 @@ def step_lualatex_pass(
         args.append("-draftmode")
     args.append(f"{basename}.tex")
 
+    started = time.perf_counter()
     try:
         run_cmd(args, cwd=cwd, stdout_path=log_path, stderr_to_stdout=True, check=True, env=env)
     except Exception:
         raise CompileError(f"Compilation error running {label}!", log_path) from None
 
+    elapsed = time.perf_counter() - started
+    with log_path.open("a", encoding="utf-8") as log:
+        log.write(f"\nULSBS wall time: {elapsed:.3f} seconds "
+                  f"(LuaLaTeX pass {pass_no}, {'draft' if draftmode else 'full'})\n")
     return log_path, step + 1
 
 
@@ -1353,20 +1408,178 @@ def analyze_warnings(
     return total_warn
 
 
+def step_lualatex_convergence(
+    ui: UI, cfg: Config, job: Job, basename: str, env: dict[str, str], last_tex_log: Path, step: int,
+) -> tuple[Path, int]:
+    """Settle explicit reference requests and MULTIKEY resources before publication.
+
+    Share the fixed ``LUALATEX_MAX_EXTRA_PASSES`` budget between both checks.
+    Ordinary jobs inspect only the latest log; MULTIKEY jobs also validate
+    pdfbase's cached property references. Unreadable inputs fail immediately;
+    ordinary warnings, including undefined references without a rerun request,
+    retain their policy.
+    Each retry refreshes the manifest through ``step_lualatex_pass``.
+    """
+    warning_pattern = re.compile(
+        r"^(LaTeX|Package (?:rerunfilecheck|hyperref|lastpage)) Warning:"
+        r"[^\n]*(?:\n(?![ \t]*$|(?:LaTeX|Package \S+) Warning:)[^\n]+)*",
+        re.M,
+    )
+    requests = {
+        "LaTeX": r"Label\(s\)mayhavechanged|Reruntogetcross-referencesright",
+        "Package rerunfilecheck": r"File[`'][^`']*\.out['`]haschanged",
+        "Package hyperref": r"Reruntoget/?PageLabels(?:right|entry)",
+        "Package lastpage": r"Reruntoget(?:the)?referencesright",
+    }
+
+    for extra in range(LUALATEX_MAX_EXTRA_PASSES + 1):
+        try:
+            reasons = []
+            for warning in warning_pattern.finditer(read_text(last_tex_log)):
+                # TeX wraps filenames/words and prefixes package continuation lines.
+                compact = re.sub(r"\((?:rerunfilecheck|hyperref|lastpage)\)", "", warning[0])
+                compact = re.sub(r"\s+", "", compact)
+                if re.search(requests[warning[1]], compact, re.I):
+                    reasons.append(re.sub(r"\s+", " ", warning[0]).strip())
+            if job.multikey:
+                from .multikey_ranges import check_pdf_property_resources
+
+                try:
+                    check_pdf_property_resources(job.compile_dir / f"{basename}.pdf")
+                except ValueError as error:
+                    reasons.append(str(error))
+        except Exception as error:
+            log_path = job.compile_dir / f"{step:02d}_lualatex-convergence.log"
+            write_text(log_path, traceback.format_exc())
+            raise CompileError(f"Cannot inspect LuaLaTeX convergence: {error}", log_path) from error
+        if not reasons:
+            return last_tex_log, step
+        diagnostic = f"Last LuaLaTeX log: {last_tex_log}\n" + "\n".join(reasons) + "\n"
+        if extra == LUALATEX_MAX_EXTRA_PASSES:
+            log_path = job.compile_dir / f"{step:02d}_lualatex-convergence.log"
+            write_text(log_path, diagnostic)
+            raise CompileError("LuaLaTeX references/resources did not settle after "
+                               f"{LUALATEX_MAX_EXTRA_PASSES} extra passes", log_path)
+        pass_no = 4 + extra
+        ui.info_line(f"{ui.fmt_doc(job)} Rerunning LuaLaTeX pass {pass_no} "
+                     f"to settle references/resources: {'; '.join(reasons)}")
+        last_tex_log, step = step_lualatex_pass(ui, cfg, job, basename, env, step, pass_no, False)
+    raise AssertionError("Unreachable LuaLaTeX convergence state")
+
+
+def step_multikey_ranges(
+    ui: UI, cfg: Config, job: Job, basename: str, ordinary_job: Job | None, step: int,
+) -> tuple[Path | None, int]:
+    """Stage, validate, and publish one ready MULTIKEY edition.
+
+    The caller holds this job's lock and has finished both matching compilations.
+    ``basename`` identifies the private, font-deduplicated master and final-pass
+    sidecar in ``job.compile_dir``. The ordinary source/variant and this run's
+    output inventory are checked before using the canonical PDF or book JSON.
+
+    Extract fresh candidates under ``compile_dir/ranges``, publish ranges and
+    then their index under ``result/multikey``, retire exact owned legacy names,
+    and finally add the completed-package reference to ordinary book metadata.
+    This step owns build inventory updates; the lower-level packager does not.
+
+    Return ``(index_path, next_step)``. Explicitly disabled layers instead retire
+    the prior owned package, warn, and return ``(None, next_step)``. Validation or
+    publication errors are logged in a numbered per-job log and wrapped in
+    ``CompileError``. A pre-publication failure invalidates a potentially stale
+    index, while a newly completed family survives later bookkeeping failures.
+    """
+    from .multikey_ranges import package_ranges
+    from .multikey_publish import publish_package, remove_legacy_outputs, remove_package
+
+    result_dir = cfg.runtime.project_paths.result_dir
+    output_dir = result_dir / RESULT_MULTIKEY_SUBDIRNAME
+    output_name = f"{basename}_RANGES.json"
+    output_index = output_dir / output_name
+    log_path = job.compile_dir / f"{step:02d}_multikey-ranges.log"
+    ui.exec_line(f"{ui.fmt_doc(job)} {ui.fmt_step(step)} internal: package MULTIKEY ranges")
+    published = False
+    try:
+        try:
+            envelope = json.loads(read_text(job.compile_dir / f"{basename}.ulsbs-multikey.json"))
+            enabled = envelope["has_multikey_info"]
+            payload = envelope["multikey_info"]
+            if not ((enabled is True and isinstance(payload, dict))
+                    or (enabled is False and payload is None)):
+                raise ValueError("Invalid multikey metadata envelope")
+        except Exception as error:
+            raise ValueError(f"Failed to capture multikey metadata: {error}") from error
+
+        if enabled is False:
+            remove_package(output_index)
+            remove_legacy_outputs(output_dir, result_dir / RESULT_JSON_SUBDIRNAME,
+                                  basename.removesuffix("_MULTIKEY"))
+            write_text(log_path, "Source disables PDF layers; previous package retired.\n")
+            ui.warning_line(f"{ui.fmt_doc(job)} Skipping multikey companion: source disables PDF layers")
+            return None, step + 1
+
+        if (ordinary_job is None or ordinary_job.multikey
+                or (ordinary_job.doc_tex_abs, ordinary_job.variant) != (job.doc_tex_abs, job.variant)):
+            raise ValueError("No successful matching ordinary edition in this run")
+        canonical = result_dir / f"{build_job_basename(ordinary_job)}.pdf"
+        records = set(resultlist.lines()) if resultlist.exists() else set()
+        if f"{RESULT_TYPE_MAIN_PDF}{RESULTLIST_SEPARATOR}{canonical.name}" not in records:
+            raise ValueError("Ordinary PDF is not in this run's output inventory")
+
+        # Retained debug builds may contain old staged ranges; never reuse them.
+        safe_rm_tree(job.compile_dir / "ranges")
+        staged_index = package_ranges(
+            job.compile_dir / f"{basename}.pdf", canonical, envelope,
+            job.compile_dir / "ranges", max_pages=cfg.multikey_max_pages_per_range,
+            target_bytes=cfg.multikey_target_max_range_bytes, warn=ui.warning_line,
+        )
+        names = publish_package(staged_index, output_dir, canonical)
+        published = True
+        for name in names:
+            resultlist.append_line(
+                RESULT_TYPE_MULTIKEY_JSON if name == output_name else RESULT_TYPE_MULTIKEY_PDF, name,
+            )
+        remove_legacy_outputs(output_dir, result_dir / RESULT_JSON_SUBDIRNAME, canonical.stem)
+
+        # The scheduler waits for the whole ordinary job, including media and
+        # JSON export, so it cannot overwrite this completed-package reference.
+        source_name = f"{build_job_basename(ordinary_job)}.json"
+        if cfg.json and f"{RESULT_TYPE_JSON}{RESULTLIST_SEPARATOR}{source_name}" in records:
+            json_dir = result_dir / RESULT_JSON_SUBDIRNAME
+            data = json.loads(read_text(json_dir / source_name))
+            data["book_info"].pop("multikey_file", None)
+            data["book_info"]["multikey_json_file"] = f"{RESULT_MULTIKEY_SUBDIRNAME}/{output_name}"
+            temporary = json_dir / f".{source_name}.tmp"
+            write_text(temporary, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+            os.replace(temporary, json_dir / source_name)
+        write_text(log_path, "Published MULTIKEY package:\n" + "\n".join(names) + "\n")
+    except Exception as error:
+        # An earlier index may describe an ordinary PDF replaced in this run.
+        # Keep a newly published complete package if only bookkeeping failed.
+        if not published:
+            output_index.unlink(missing_ok=True)
+        write_text(log_path, traceback.format_exc())
+        raise CompileError(f"Failed to publish multikey ranges: {error}", log_path) from error
+    return output_index, step + 1
+
+
 def compile_one_job(
     ui: UI,
     assets: EngineAssets,
     cfg: Config,
     job: Job,
-    *,
-    multikey_payload_sink: dict[Job, dict | None] | None = None,
-) -> int:
-    """Compile a single job end-to-end, raising on failure.
+) -> CompilationResult:
+    """Compile and optimize independently, retaining MULTIKEY masters privately.
 
-    Returns the total number of warnings reported by analyze_warnings for this job.
-    When supplied, multikey_payload_sink retains the renderer payload for deferred
-    companion JSON publication, independently of the compile directory's lifetime.
-    A None payload marks an explicitly disabled companion; it is not published.
+    Hold the existing job lock through preparation, engraving, final pagination,
+    font deduplication, optional exports, and warning analysis, releasing it on
+    every exit. Ordinary PDF/media/JSON outputs are published in this phase.
+    MULTIKEY jobs suppress those exports and report compilation completion, not
+    final success; their master and fresh sidecar remain in the compile directory.
+
+    Return compiler warnings and the next log number in ``CompilationResult``.
+    The scheduler supplies that small handoff to a separate packaging task once
+    both matching compilations succeed. Failures retain the usual numbered-log
+    diagnostics and raise ``CompileError`` rather than returning a result.
     """
     txt_doc = ui.fmt_doc(job)
     ui.start_line(txt_doc)
@@ -1386,12 +1599,13 @@ def compile_one_job(
                 not job.multikey and cfg.create_printouts and PAPERA5_FNAMEPART in basename
                 and bool(which("context") or which("contextjit"))
             )
+            output_file = pdf_dir / (basename + ("_RANGES.json" if job.multikey else ".pdf"))
             ui.debug_line(
                 f"{txt_doc}\n{ui.colorize('Source:', ui.C_DGRAY)} {job.doc_tex_abs}; variant: {job.variant}; "
                 f"edition: {'multikey' if job.multikey else 'standard'}; "
-                f"compile: {job.compile_dir}; PDF: {pdf_dir / (basename + '.pdf')}"
+                f"compile: {job.compile_dir}; {'Index' if job.multikey else 'PDF'}: {output_file}"
                 f"\n{ui.colorize('Outputs:', ui.C_DGRAY)} printouts={printouts}, MIDI={midi}, audio={audio}, "
-                f"JSON={'companion' if job.multikey and cfg.json else cfg.json}, "
+                f"JSON={'range index' if job.multikey else cfg.json}, "
                 f"covers={not job.multikey and cfg.coverimage and bool(which('pdftoppm'))}; "
                 f"layers={layers}"
                 + (f", strict IDs={cfg.multikey_require_song_ids}, layer UI={cfg.multikey_layer_ui}, "
@@ -1405,8 +1619,12 @@ def compile_one_job(
         if job.multikey and cfg.multikey_books and cfg.multikey_lilypond_scores and job.variant != "lyrics":
             # Capture the authoritative breaks while engraving t00, not in a
             # second approximation of the original's layout.
-            tail = job.compile_dir / _JOB_ULSBS_ASSETS_DIRNAME / "ly" / "ulsbs-internal-common-tail.ly"
-            write_text(tail, read_text(tail) + '\n\\include "ulsbs-score-boundaries.ily"\n')
+            # Heads cover explicit assemblies without tails; tails reinstall
+            # capture after source-defined layout callbacks. The listener records
+            # each physical system once even when both includes are present.
+            for asset in ("ulsbs-internal-common-head.ly", "ulsbs-internal-common-tail.ly"):
+                path = job.compile_dir / _JOB_ULSBS_ASSETS_DIRNAME / "ly" / asset
+                write_text(path, read_text(path) + '\n\\include "ulsbs-score-boundaries.ily"\n')
 
         # Step counter for log numbering
         step = 1
@@ -1470,25 +1688,6 @@ def compile_one_job(
         except CompileError as ce:
             die_log(ui, cfg, job, cwd=cwd, message=str(ce), log_path=ce.log_path)
 
-        # Require fresh final-pass status even when no JSON export was requested.
-        if job.multikey:
-            try:
-                envelope = json.loads(read_text(cwd / f"{basename}.ulsbs-multikey.json"))
-                enabled = envelope["has_multikey_info"]
-                payload = envelope["multikey_info"]
-                if not ((enabled is True and isinstance(payload, dict))
-                        or (enabled is False and payload is None)):
-                    raise ValueError("Invalid multikey metadata envelope")
-            except Exception as e:
-                raise CompileError(f"Failed to capture multikey metadata: {e}") from e
-            if enabled is False:
-                if multikey_payload_sink is not None:
-                    multikey_payload_sink[job] = None
-                ui.warning_line(f"{txt_doc} Skipping multikey companion: source disables PDF layers")
-                return 1
-            if cfg.json and multikey_payload_sink is not None:
-                multikey_payload_sink[job] = payload
-
         # Ensure PDF exists before post-processing or publication.
         produced_pdf = cwd / f"{basename}.pdf"
         if not produced_pdf.exists():
@@ -1501,16 +1700,20 @@ def compile_one_job(
                 log_path=last_tex_log,
             )
         try:
+            last_tex_log, step = step_lualatex_convergence(
+                ui, cfg, job, basename, env, last_tex_log, step,
+            )
+        except CompileError as ce:
+            die_log(ui, cfg, job, cwd=cwd, message=str(ce), log_path=ce.log_path)
+        try:
             step = step_pdf_fonts(ui, cfg, job, basename, step)
         except CompileError as ce:
             die_log(ui, cfg, job, cwd=cwd, message=str(ce), log_path=ce.log_path)
 
-        dst_pdf = pdf_dir / produced_pdf.name
-        shutil.copy2(produced_pdf, dst_pdf)
-        resultlist.append_line(
-            RESULT_TYPE_MULTIKEY_PDF if job.multikey else RESULT_TYPE_MAIN_PDF,
-            produced_pdf.name,
-        )
+        if not job.multikey:
+            dst_pdf = pdf_dir / produced_pdf.name
+            shutil.copy2(produced_pdf, dst_pdf)
+            resultlist.append_line(RESULT_TYPE_MAIN_PDF, produced_pdf.name)
 
         # 6) Optional printouts
         try:
@@ -1569,9 +1772,46 @@ def compile_one_job(
             ui, cfg, job, lilypond_log=lp_log, last_lualatex_log=last_tex_log
         )
 
-        ui.success_line(f"{ui.fmt_doc(job)} Compilation successful!")
-        ui.space_line(f"{ui.colorize('->', ui.C_LGREEN)} {dst_pdf.relative_to(result_dir.parent)}")
-        return warn_count
+        if job.multikey:
+            ui.info_line(f"{txt_doc} Compilation complete; awaiting MULTIKEY range packaging.")
+        else:
+            ui.success_line(f"{txt_doc} Compilation successful!")
+            ui.space_line(f"{ui.colorize('->', ui.C_LGREEN)} {dst_pdf.relative_to(result_dir.parent)}")
+        return CompilationResult(warning_count=warn_count, next_step=step)
+    finally:
+        lock.release()
+
+
+def finish_multikey_job(
+    ui: UI, cfg: Config, job: Job, ordinary_job: Job, compilation: CompilationResult,
+) -> int:
+    """Publish a compiled MULTIKEY job after its ordinary counterpart succeeds.
+
+    This worker never waits for another future. Reacquire the same per-job lock
+    used by compilation, continue log numbering from ``compilation.next_step``,
+    and run ``step_multikey_ranges``. The coordinator must keep the private
+    compile directory until this task finishes; CLI cleanup happens afterward.
+
+    Report final success only for a published package. Return the compiler's
+    warning count, adding one for an explicitly layer-disabled source without
+    announcing publication. Packaging failures use the ordinary job diagnostic
+    path and release the lock before propagating to the coordinator.
+    """
+    lock = JobLock(job.compile_dir)
+    lock.acquire()
+    try:
+        try:
+            output, _ = step_multikey_ranges(
+                ui, cfg, job, build_job_basename(job), ordinary_job, compilation.next_step,
+            )
+        except CompileError as error:
+            die_log(ui, cfg, job, cwd=job.compile_dir, message=str(error), log_path=error.log_path)
+        if output is None:
+            return compilation.warning_count + 1
+        ui.success_line(f"{ui.fmt_doc(job)} Compilation and MULTIKEY packaging successful!")
+        ui.space_line(f"{ui.colorize('->', ui.C_LGREEN)} "
+                      f"{output.relative_to(cfg.runtime.project_paths.result_dir.parent)}")
+        return compilation.warning_count
     finally:
         lock.release()
 
@@ -1582,14 +1822,38 @@ def run_jobs_parallel(
     assets: EngineAssets,
     cfg: Config,
 ) -> ParallelRunResult:
-    """Run jobs in parallel threads and collect structured results.
+    """Compile in parallel and submit packaging when each matching pair is ready.
 
-    Returns ParallelRunResult with named successes and failures, plus total warnings.
+    Expect a queue with unique publication paths, as checked by job construction.
+    Submit ordinary and MULTIKEY compilation together. Match editions by absolute
+    source path and musical variant, not basename or queue order. An orphan
+    MULTIKEY job fails without starting; either compilation failing prevents its
+    package from being published, even if the other compilation is still running.
+
+    A ready pair submits exactly one packaging task to the same bounded executor.
+    Neither phase waits inside a worker, so a single worker cannot deadlock and
+    unrelated jobs do not impose a global packaging barrier. Available executor
+    capacity still determines when an already queued packaging task can start.
+
+    Ordinary jobs become successful after compilation; MULTIKEY jobs only after
+    packaging. Count their warnings once, without counting the intermediate
+    compilation separately. Return final outcomes in ``ParallelRunResult``.
+    Call from the main thread: this function temporarily installs a cooperative
+    SIGINT handler, cancels queued work on abort, restores the previous handler,
+    and propagates ``KeyboardInterrupt`` after executor shutdown.
     """
     successes: List[JobSuccess] = []
     failures: List[JobFailure] = []
-    multikey_payloads: dict[Job, dict | None] = {}
+    failed: set[Job] = set()
+    compiled: dict[Job, CompilationResult] = {}
+    packaging_started: set[Job] = set()
     stop_requested = {"value": False}
+
+    def record_failure(job: Job, reason: str) -> None:
+        """Deduplicate dependency failure and a later error from its running job."""
+        if job not in failed:
+            failed.add(job)
+            failures.append(JobFailure(job, reason))
 
     def handle_sigint(signum, frame):
         """Request cooperative job cancellation without raising in the signal handler."""
@@ -1603,85 +1867,67 @@ def run_jobs_parallel(
 
     try:
         with cf.ThreadPoolExecutor(max_workers=cfg.max_parallel) as ex:
+            # Each future maps to (job, is_packaging). Compilation returns a
+            # handoff object; packaging returns the final integer warning count.
             fut_map = {}
 
-            # Submit all jobs up front (simple) – cancellation will stop those not started yet.
+            ordinary = {(job.doc_tex_abs, job.variant): job for job in jobs if not job.multikey}
+            companions = {(job.doc_tex_abs, job.variant): job for job in jobs if job.multikey}
             for job in jobs:
-                fut = ex.submit(
-                    compile_one_job,
-                    ui,
-                    assets,
-                    cfg,
-                    job,
-                    multikey_payload_sink=multikey_payloads,
-                )
-                fut_map[fut] = job
+                if job.multikey and (job.doc_tex_abs, job.variant) not in ordinary:
+                    record_failure(job, "No matching ordinary edition in this run")
+                else:
+                    fut_map[ex.submit(compile_one_job, ui, assets, cfg, job)] = (job, False)
 
-            # Collect results
-            for fut in cf.as_completed(fut_map):
+            # Compilation and packaging use the same bounded pool. Only this
+            # coordinator waits on futures; workers never wait on one another.
+            while fut_map:
+                completed, _ = cf.wait(fut_map, return_when=cf.FIRST_COMPLETED)
                 if stop_requested["value"]:
-                    # Cancel anything still pending
-                    for f in fut_map:
-                        f.cancel()
                     break
-
-                job = fut_map[fut]
-                try:
-                    warn_count = fut.result()
-                    successes.append(JobSuccess(job=job, warning_count=warn_count))
-                except KeyboardInterrupt:
-                    stop_requested["value"] = True
-                    for f in fut_map:
-                        f.cancel()
+                for fut in completed:
+                    job, packaging = fut_map.pop(fut)
+                    try:
+                        result = fut.result()
+                    except KeyboardInterrupt:
+                        stop_requested["value"] = True
+                        ABORT_EVENT.set()
+                        break
+                    except Exception as error:
+                        if ABORT_EVENT.is_set():
+                            continue
+                        record_failure(job, str(error))
+                        if not job.multikey:
+                            companion = companions.get((job.doc_tex_abs, job.variant))
+                            if companion is not None:
+                                record_failure(companion, "Matching ordinary edition failed")
+                    else:
+                        if packaging:
+                            successes.append(JobSuccess(job=job, warning_count=result))
+                            continue
+                        compiled[job] = result
+                        if not job.multikey:
+                            successes.append(JobSuccess(job=job, warning_count=result.warning_count))
+                        key = (job.doc_tex_abs, job.variant)
+                        companion, source = companions.get(key), ordinary.get(key)
+                        if (companion is not None and companion not in failed
+                                and companion not in packaging_started
+                                and companion in compiled and source in compiled):
+                            future = ex.submit(finish_multikey_job, ui, cfg, companion, source,
+                                               compiled[companion])
+                            fut_map[future] = (companion, True)
+                            packaging_started.add(companion)
+                if stop_requested["value"]:
                     break
-                except Exception as e:
-                    if ABORT_EVENT.is_set():
-                        # Ignore errors that occur during abort cascade
-                        continue
-                    failures.append(JobFailure(job=job, reason=str(e)))
 
             if stop_requested["value"]:
+                for future in fut_map:
+                    future.cancel()
                 # Let executor shut down; any running jobs may finish, but we will exit politely.
                 raise KeyboardInterrupt()
 
     finally:
         signal.signal(signal.SIGINT, old_int)
-
-    # Only now are ordinary JSON files complete, including final MIDI/audio links.
-    if cfg.json and any(s.job.multikey for s in successes):
-        ordinary = {
-            (s.job.doc_tex_abs, s.job.variant): s.job
-            for s in successes if not s.job.multikey
-        }
-        records = set(resultlist.lines()) if resultlist.exists() else set()
-        for success in list(successes):
-            job = success.job
-            if not job.multikey:
-                continue
-            if job in multikey_payloads and multikey_payloads[job] is None:
-                continue
-            source_job = ordinary.get((job.doc_tex_abs, job.variant))
-            source_name = f"{build_job_basename(source_job)}.json" if source_job else None
-            if source_name is None or f"{RESULT_TYPE_JSON}{RESULTLIST_SEPARATOR}{source_name}" not in records:
-                ui.warning_line(f"{ui.fmt_doc(job)} Skipping multikey JSON: no successful ordinary JSON in this run")
-                continue
-            try:
-                json_dir = cfg.runtime.project_paths.result_dir / RESULT_JSON_SUBDIRNAME
-                data = json.loads(read_text(json_dir / source_name))
-                basename = build_job_basename(job)
-                book_info = data["book_info"]
-                if "output_basename" in book_info:
-                    book_info["output_basename"] = basename
-                data["has_multikey_info"] = True
-                data["multikey_info"] = multikey_payloads[job]
-                output_name = f"{basename}.json"
-                write_text(json_dir / output_name, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
-                resultlist.append_line(RESULT_TYPE_JSON, output_name)
-            except Exception as e:
-                reason = f"Failed to publish multikey JSON: {e}"
-                ui.error_line(f"{ui.fmt_doc(job)} {reason}")
-                successes.remove(success)
-                failures.append(JobFailure(job=job, reason=reason))
 
     return ParallelRunResult(
         successes=successes,

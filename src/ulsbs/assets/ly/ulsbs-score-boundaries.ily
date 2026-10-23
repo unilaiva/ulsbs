@@ -13,9 +13,14 @@
    (string-append (ly:parser-output-name) ".ulsbs-boundaries"))
 % Truncate the sidecar before appending this job's system boundaries.
 #(call-with-output-file ulsbs-boundary-file (lambda (port) #t))
+% Header/tail instrumentation and repeated includes can nest callbacks.
+% Keep one record per physical system, without changing any layout callback.
+#(define ulsbs-boundary-seen (make-hash-table))
 % Append the first and last break-edge moments, preserving their grace parts.
 #(define (ulsbs-capture-boundaries system)
-   (let* ((columns (ly:grob-object system 'columns))
+   (unless (hashq-ref ulsbs-boundary-seen system #f)
+    (hashq-set! ulsbs-boundary-seen system #t)
+    (let* ((columns (ly:grob-object system 'columns))
           (items (if (ly:grob-array? columns) (ly:grob-array->list columns) '()))
           (edges (filter (lambda (column) (not (= 0 (ly:item-break-dir column)))) items)))
      (when (pair? edges)
@@ -25,7 +30,7 @@
          (format port "~a ~a ~a ~a\n"
            (ly:moment-main start) (ly:moment-grace start)
            (ly:moment-main end) (ly:moment-grace end))
-         (close-port port)))))
+          (close-port port))))))
 \layout {
   \context {
     \Score

@@ -98,19 +98,27 @@ def build_variant_basename(original_base: str, insert: str) -> str:
 
 
 def build_job_basename(job: Job) -> str:
-    """Build the edition/variant name while preserving standard filenames."""
+    """Append the edition marker to the complete ordinary variant basename.
+
+    Variant tokens retain their position before the paper suffix; ``_MULTIKEY``
+    follows that suffix so the ordinary stem remains the package's identity.
+    """
     variant_marker = {
         "default": "",
         "lyrics": LYRICSONLY_FNAMEPART,
         "charango": CHARANGO_FNAMEPART,
         "bassclef": BASSCLEF_FNAMEPART,
     }[job.variant]
-    marker = (MULTIKEY_FNAMEPART if job.multikey else "") + variant_marker
-    return build_variant_basename(job.doc_stem, marker)
+    basename = build_variant_basename(job.doc_stem, variant_marker)
+    return basename + (MULTIKEY_FNAMEPART if job.multikey else "")
 
 
 def build_job_queue(cfg: Config) -> List[Job]:
-    """Build jobs for selected songbooks and allowed variants."""
+    """Plan selected editions and reject colliding publication paths before work.
+
+    Multikey jobs reserve their mandatory range index, not a public full PDF or
+    optional song JSON. Equal basenames in distinct result directories are valid.
+    """
     project_root = cfg.runtime.project_paths.project_root
     jobs: List[Job] = []
     for doc in cfg.songbooks:
@@ -142,11 +150,14 @@ def build_job_queue(cfg: Config) -> List[Job]:
     outputs: dict[Path, Job] = {}
     for job in jobs:
         basename = build_job_basename(job)
-        pdf_dir = Path(RESULT_MULTIKEY_SUBDIRNAME) if job.multikey else Path()
-        destinations = [pdf_dir / (basename + ".pdf")]
-        if cfg.json:
-            # JSON remains shared even when PDF editions have separate folders.
-            destinations.append(Path(RESULT_JSON_SUBDIRNAME) / (basename + ".json"))
+        if job.multikey:
+            # The mandatory index owns the generated range family; reserving its
+            # path detects competing owners even when song JSON export is off.
+            destinations = [Path(RESULT_MULTIKEY_SUBDIRNAME) / (basename + "_RANGES.json")]
+        else:
+            destinations = [Path(basename + ".pdf")]
+            if cfg.json:
+                destinations.append(Path(RESULT_JSON_SUBDIRNAME) / (basename + ".json"))
         for destination in destinations:
             if destination in outputs:
                 previous = outputs[destination]

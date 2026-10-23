@@ -1,0 +1,20 @@
+\providecommand{\ulPdfTranspositionLayers}{true}
+\providecommand{\ulMultikeyLilypondScores}{true}
+\documentclass[paper={a5paper},maintitle={Score Scale Policy}]{ulsbs-songbook}
+\ExplSyntaxOn
+\cs_new_eq:NN \UL_test_score_alternative:nnn \UL_score_alternative:nnn
+\cs_set_protected:Npn \UL_score_alternative:nnn #1#2#3
+  {
+    \UL_test_score_alternative:nnn {#1}{#2}{#3}
+    \iow_term:x {ULSBS-TEST-SCALE~#3~=~\fp_to_decimal:N\l_UL_score_scale_fp}
+  }
+\ExplSyntaxOff
+\begin{document}
+\begin{songs}{}
+\beginsong{Scale Policy}[id={scale-policy},key={C}]
+\beginverse
+\ulScoreSystem{abcdef}{1}{original-1}
+\endverse
+\endsong
+\end{songs}
+\end{document}

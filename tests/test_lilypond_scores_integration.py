@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import re
@@ -21,6 +22,7 @@ from unittest.mock import Mock, patch
 import pikepdf
 
 from test_multikey_metadata import layer_page_dependencies
+from test_tex_integration import compile_fixture
 
 from ulsbs import lilypond_scores, pipeline, resultlist
 from ulsbs.config import Config
@@ -28,7 +30,7 @@ from ulsbs.engine_assets import EngineAssets
 from ulsbs.jobs import Job, build_job_basename
 
 
-def score_layer_drawings(pdf):
+def score_layer_drawings(pdf, *, generic=False):
     drawings = {}
     for page in pdf.pages:
         stack = []
@@ -52,7 +54,8 @@ def score_layer_drawings(pdf):
             elif op == 'Do':
                 graphic = xobjects[str(operands[0])]
                 fonts = graphic.get('/Resources', {}).get('/Font', {})
-                if any('emmentaler' in str(font.get('/BaseFont', '')).lower() for _, font in fonts.items()):
+                if generic or any('emmentaler' in str(font.get('/BaseFont', '')).lower()
+                                  for _, font in fonts.items()):
                     digest = hashlib.sha256(graphic.read_bytes()).hexdigest()
                     for name in (name for level in stack for name in level):
                         if name.startswith('ulsbs:transpose:v1:'):
@@ -63,6 +66,61 @@ def score_layer_drawings(pdf):
 
 
 class LilyPondScoreIntegrationTests(unittest.TestCase):
+    def test_generated_minimum_scale_controls_real_tex_graphic_fallback(self):
+        if shutil.which('lualatex') is None:
+            self.skipTest('lualatex is not installed')
+        files = {}
+        sizes = {'original': (60, 30), 'exact': (100, 30), 'larger': (80, 30),
+                 'below': (101, 30), 'height-exact': (60, 50),
+                 'height-below': (60, 51), 'height-larger': (60, 40)}
+        alternatives = {1: 'exact', 2: 'larger', 3: 'below', 4: 'height-exact',
+                        5: 'height-below', 6: 'height-larger'}
+        for name, (width, height) in sizes.items():
+            with pikepdf.Pdf.new() as graphic:
+                page = graphic.add_blank_page(page_size=(width, height))
+                page.Contents = pikepdf.Stream(
+                    graphic, f'0.2 0.4 0.6 rg 0 0 {width} {height} re f\n'.encode())
+                buffer = io.BytesIO()
+                graphic.save(buffer)
+                files[name + '-1.pdf'] = buffer.getvalue()
+        prefix = 'ulsbs:transpose:v1:id:scale-policy'
+        dispatch = ''.join(
+            rf'\expandafter\def\csname ULScoreVariant:{prefix}:abcdef:0-0-0:t{offset:02d}\endcsname'
+            + '{' + name + '}\n'
+            for offset, name in alternatives.items()
+        )
+        for minimum in (0.60, 0.75):
+            with self.subTest(minimum=minimum), patch.object(lilypond_scores, 'LILYPOND_SCORE_MIN_SCALE', minimum):
+                files['score-minimum-scale.ulsbs-score-variants.tex'] = (
+                    lilypond_scores._minimum_scale_tex() + dispatch).encode()
+                output, contents = compile_fixture('score-minimum-scale', files=files, passes=3)
+                scales = {int(offset): float(value) for offset, value in re.findall(
+                    r'ULSBS-TEST-SCALE (\d+) = ([0-9.]+)', output)}
+                for offset, name in alternatives.items():
+                    width, height = sizes[name]
+                    self.assertAlmostEqual(scales[offset], min(1, 60 / width, 30 / height), places=6)
+                with pikepdf.open(io.BytesIO(contents)) as pdf:
+                    # Generic vectors have no Emmentaler font. Inspect the actual
+                    # Do operations inside OCGs, not page text or changing badges.
+                    drawings = score_layer_drawings(pdf, generic=True)
+                self.assertEqual(set(drawings), {f'{prefix}:t{offset:02d}' for offset in range(12)})
+                self.assertTrue(all(len(hashes) == 1 for hashes in drawings.values()))
+                original = drawings[prefix + ':t00']
+                self.assertEqual(drawings[prefix + ':t03'], original)  # 60/101 < .60
+                self.assertEqual(drawings[prefix + ':t05'], original)  # 30/51 < .60
+                self.assertNotEqual(drawings[prefix + ':t02'], original)  # 60/80 = .75
+                self.assertNotEqual(drawings[prefix + ':t06'], original)  # 30/40 = .75
+                if minimum == 0.60:
+                    self.assertNotEqual(drawings[prefix + ':t01'], original, scales)  # 60/100 = .60
+                    self.assertNotEqual(drawings[prefix + ':t04'], original, scales)  # 30/50 = .60
+                    self.assertNotEqual(drawings[prefix + ':t01'], drawings[prefix + ':t02'])
+                else:
+                    self.assertEqual(drawings[prefix + ':t01'], original)
+                    self.assertEqual(drawings[prefix + ':t04'], original)
+                self.assertIn('is too small', output)
+                for offset in range(7, 12):
+                    self.assertEqual(drawings[f'{prefix}:t{offset:02d}'], original)
+
     def test_nested_imports_warm_edits_dependencies_removals_and_original_failure(self):
         for tool in ('lilypond-book', 'lilypond', 'lualatex', 'pdftoppm'):
             if shutil.which(tool) is None:
@@ -271,6 +329,7 @@ class LilyPondScoreIntegrationTests(unittest.TestCase):
             cold_engraving_count = None
             resultlist.initialize(root / 'result', 'score-integration')
             try:
+                ordinary_job = None
                 for enabled, build in ((False, 'cold'), (True, 'cold'), (True, 'warm')):
                     # A fresh warm job proves that copying sources and deleting
                     # compilation output does not prevent persistent cache hits.
@@ -282,8 +341,15 @@ class LilyPondScoreIntegrationTests(unittest.TestCase):
                             patch.object(pipeline, 'prepare_compile_dir', side_effect=prepare_fixture), \
                             patch.object(lilypond_scores, 'run_cmd', side_effect=engrave_fixture):
                         try:
-                            pipeline.compile_one_job(ui, EngineAssets(),
-                                                     replace(cfg, multikey_lilypond_scores=enabled), job)
+                            if ordinary_job is None:
+                                # Packaging needs the matching ordinary edition;
+                                # reuse it across disabled, cold, and warm runs.
+                                ordinary_job = Job(doc, doc.stem, 'default', root / 'job-ordinary')
+                                ordinary_job.compile_dir.mkdir()
+                                pipeline.compile_one_job(ui, EngineAssets(), cfg, ordinary_job)
+                            job_cfg = replace(cfg, multikey_lilypond_scores=enabled)
+                            compilation = pipeline.compile_one_job(ui, EngineAssets(), job_cfg, job)
+                            pipeline.finish_multikey_job(ui, job_cfg, job, ordinary_job, compilation)
                         except (pipeline.CompileError, SystemExit) as error:
                             logs = '\n'.join(str(p) + '\n' + p.read_text(errors='replace')[-5000:]
                                              for p in job.compile_dir.glob('*.log'))
@@ -310,6 +376,8 @@ class LilyPondScoreIntegrationTests(unittest.TestCase):
                             self.assertIn(count, (1, 12), f'{build}: {fragment}\n{text}')
                     self.assertEqual(list(job.compile_dir.rglob('*.midi')), [])
                     if enabled:
+                        self.assertTrue((job.compile_dir / (basename + '.ulsbs-score-variants.tex'))
+                                        .read_text().startswith(lilypond_scores._minimum_scale_tex()))
                         report = json.loads((job.compile_dir / (basename + '.ulsbs-score-results.json')).read_text())
                         self.assertEqual(len(report['scores']), 4)
                         first = report['scores'][0]['offsets'][0]

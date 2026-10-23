@@ -229,6 +229,13 @@
 \newif\ifUL@pdfchord
 \newif\ifUL@pdfrightalign
 \newif\ifUL@pdfalternate
+% The engine's -draftmode pass needs only t00 geometry and metadata requests.
+% Keep registering every OCG, but avoid constructing eleven discarded visuals.
+% Full PDF-producing passes always render all alternatives as before.
+\newif\ifUL@pdfdraftpass
+\ifUL@pdflayers
+  \ifnum\draftmode>0\relax\UL@pdfdraftpasstrue\fi
+\fi
 \newif\ifUL@keytranspose\UL@keytransposetrue
 \newsavebox{\UL@pdfbasebox}
 \newsavebox{\UL@pdfaltbox}
@@ -602,6 +609,7 @@
   \begingroup
   \sbox\UL@pdfbasebox{#2{#1}}
   \setbox\UL@pdfresultbox\hbox{\UL_pdf_mark:nn {0}{\copy\UL@pdfbasebox}}
+  \ifUL@pdfdraftpass\else
   \int_step_inline:nn {11}
    {
     \begingroup
@@ -642,8 +650,9 @@
       \fi
       \copy\UL@pdfaltbox}}}
     \endgroup
-    \setbox\UL@pdfresultbox\hbox{\box\UL@pdfaltbox\unhbox\UL@pdfresultbox}
-   }
+     \setbox\UL@pdfresultbox\hbox{\box\UL@pdfaltbox\unhbox\UL@pdfresultbox}
+    }
+  \fi
   \box\UL@pdfresultbox
   \endgroup
  }
@@ -4636,13 +4645,18 @@
           % \raisebox added by larva to ensure the top of highest non-accented
           % letters is on the same vertical level as the song number's top.
           % Accents over capital letters can go above taking no vertical space.
+          % Keep the invisible UI marker inside this existing, indivisible box.
+          % A zero-size box after the paragraph's \hfill can still create an
+          % empty extra line when the title overflows, shifting later targets.
+          \ifUL@pdflayers%
+            \makebox[0pt][l]{\kern\hsize\UL@pdfheaderanchor}%
+          \fi%
           \songtitle%
         }%
         {% larva: begin modifications for RT area: ph, tags and keys display
           \setcounter{@preludeRTrowscreatedcount}{0}%
           \@setpreludeRTraise%
           \hfill%
-          \UL@pdfheaderanchor%
           % tag line (tags, phase)
           \def\taglinetext{}%
           \ifshowtags\ifnowidth{\taglist}{}{% Add tags

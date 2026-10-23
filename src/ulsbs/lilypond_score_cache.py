@@ -44,6 +44,8 @@ from typing import Mapping, Sequence
 
 import pikepdf
 
+# Storage format and key namespace are owned by this cache implementation, not
+# shared build settings. Incompatible changes must invalidate existing entries.
 SCHEMA_VERSION = 1
 IMPLEMENTATION_VERSION = "ulsbs-score-cache-1"
 _LOG = logging.getLogger(__name__)
@@ -518,12 +520,15 @@ def _load(root: Path, key: str) -> tuple[dict, dict[str, bytes]]:
 
 
 def publish(key: str | None, stem: Path, *, success: bool,
-            original_dimensions: Sequence, minimum_scale: float = 0.80,
+            original_dimensions: Sequence, minimum_scale: float,
             metadata: object = None, env: Mapping[str, str] | None = None) -> bool:
     """Atomically publish validated system PDFs, log, boundaries and metadata.
 
     Explicit success is mandatory: a zero subprocess exit alone is insufficient.
     Dimensions may be a single (width, height) pair or one pair per system.
+    The caller must supply its minimum fitting scale explicitly; the cache has
+    no independent default policy. Include that scale in candidate-key semantics
+    so changing it cannot reuse an entry accepted under another threshold.
     Multiple systems require a contiguous .ulsbs-boundaries sidecar. The caller
     confirms its equality to the original musical boundaries before publishing.
     Concurrent publishers use private staging directories; the first wins.

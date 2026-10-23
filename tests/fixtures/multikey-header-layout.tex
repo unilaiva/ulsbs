@@ -1,0 +1,31 @@
+\documentclass[paper={a5paper},maintitle={Public Header Layout}]{ulsbs-songbook}
+% Public synthetic titles only. Widths and indivisible title lengths deliberately
+% straddle the header width. Each postlude targets the end of that song's body.
+\newcommand{\HeaderCase}[5]{%
+  \begingroup
+    \setlength{\textwidth}{#1}
+    \setlength{\hsize}{#1}
+    \setlength{\linewidth}{#1}
+    \renewcommand{\extendpostlude}{%
+      \hypertarget{after-#2}{After song #2.}\quad
+      \hyperlink{after-#2}{Return to the end of this song.}}
+    \begin{songs}{}
+      \beginsong{#3}[id={#2},#4]
+        \beginverse
+          #5
+          Another plain lyric line.
+        \endverse
+      \endsong
+    \end{songs}
+  \endgroup
+}
+\begin{document}
+\pagestyle{empty}
+\HeaderCase{110mm}{wide-long}{GenericPlaceholderTitleWithoutAnyBreaksAcrossTheHeader}{}{Plain opening lyric.}
+\HeaderCase{80mm}{medium-long}{UnbreakablePlaceholderHeadingAcrossTheColumn}{}{Plain opening lyric.}
+\HeaderCase{55mm}{narrow-long}{SyntheticUnbrokenHeading}{}{Plain opening lyric.}
+\HeaderCase{110mm}{wide-short}{Short Title}{}{Plain opening lyric.}
+\HeaderCase{80mm}{medium-tagged}{Tagged Title}{ph={I}}{Plain opening lyric.}
+\HeaderCase{110mm}{wide-chorded}{Chorded Title}{key={C},ph={II}}{\[C]Opening \[G]lyric.}
+\HeaderCase{80mm}{medium-chorded}{Other Title}{key={G}}{\[G]Opening \[D]lyric.}
+\end{document}

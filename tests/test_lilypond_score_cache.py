@@ -18,6 +18,7 @@ from unittest.mock import Mock, patch
 import pikepdf
 
 from ulsbs import lilypond_score_cache as cache
+from ulsbs import lilypond_scores as scores
 
 
 class ScoreCacheTests(unittest.TestCase):
@@ -64,6 +65,7 @@ class ScoreCacheTests(unittest.TestCase):
 
     def publish(self, **kwargs):
         inputs = dict(success=True, original_dimensions=(100, 50), env=self.env,
+                      minimum_scale=scores.LILYPOND_SCORE_MIN_SCALE,
                       metadata={"boundary_info": [0, 1], "status": "transposed"})
         inputs.update(kwargs)
         return cache.publish(self.key, self.stem, **inputs)
@@ -268,6 +270,8 @@ class ScoreCacheTests(unittest.TestCase):
         self.assertTrue(cache.audit_assets([midi])[0][2])
         for filename, mutation in (
                 ("ulsbs-internal-common-tail.ly", lambda data:
+                 data + b'\n\\include "ulsbs-score-boundaries.ily"\n'),
+                ("ulsbs-internal-common-head.ly", lambda data:
                  data + b'\n\\include "ulsbs-score-boundaries.ily"\n'),
                 ("ulsbs-internal-common-head.ly", lambda data: data.replace(
                     b"%%%ULSBS-PLACEHOLDER-FOR-EXTRA-INSTRUMENT-VARIANT-CODE%%%\n",
@@ -536,6 +540,28 @@ class ScoreCacheTests(unittest.TestCase):
         self.assertFalse(self.publish())
         self.assertFalse((self.root / "cache" / self.key).exists())
 
+    def test_publish_requires_explicit_minimum_scale(self):
+        self.artifacts()
+        with self.assertRaisesRegex(TypeError, "minimum_scale"):
+            cache.publish(self.key, self.stem, success=True,
+                          original_dimensions=(100, 50), env=self.env)
+
+    def test_supplied_minimum_scale_controls_boundary_and_validation_metadata(self):
+        for minimum_scale in (scores.LILYPOND_SCORE_MIN_SCALE, 0.75):
+            with self.subTest(minimum_scale=minimum_scale):
+                original = (100 * minimum_scale, 50)
+                self.artifacts(size=(101, 50))
+                self.assertFalse(self.publish(original_dimensions=original,
+                                              minimum_scale=minimum_scale))
+                self.artifacts(size=(100, 50))
+                self.key = self.candidate(original_dimensions=original,
+                                          extra={"minimum_scale": minimum_scale})
+                self.assertTrue(self.publish(original_dimensions=original,
+                                             minimum_scale=minimum_scale))
+                result = cache.restore(self.key, self.root / "restored/t01", env=self.env)
+                self.assertEqual(result["validation"]["minimum_scale"], minimum_scale)
+                self.assertEqual(result["validation"]["original_dimensions"], [list(original)])
+
     def test_warm_success_reuses_while_failed_candidates_are_retried(self):
         failed_key = self.candidate(signed=-11)
         destination = self.root / "round/t01"
@@ -549,7 +575,8 @@ class ScoreCacheTests(unittest.TestCase):
                 attempts[key] += 1
                 self.artifacts(destination)
                 cache.publish(key, destination, success=key == self.key,
-                              original_dimensions=(100, 50), env=self.env)
+                              original_dimensions=(100, 50), minimum_scale=scores.LILYPOND_SCORE_MIN_SCALE,
+                              env=self.env)
             return hits
         self.assertEqual(generate(), 0)
         self.assertEqual(attempts, {self.key: 1, failed_key: 1})
@@ -573,7 +600,8 @@ class ScoreCacheTests(unittest.TestCase):
                 (entry / "artifact-1.pdf").write_bytes(pdf)
                 (entry / "artifact.log").write_text("warning: harmless\n")
         self.assertFalse(cache.publish("../unsafe", self.stem, success=True,
-                                      original_dimensions=(100, 50), env=self.env))
+                                      original_dimensions=(100, 50),
+                                      minimum_scale=scores.LILYPOND_SCORE_MIN_SCALE, env=self.env))
 
     def test_manifest_path_traversal_and_symlinks_rejected(self):
         self.artifacts()

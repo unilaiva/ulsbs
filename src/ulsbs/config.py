@@ -107,6 +107,9 @@ class Config:
     audiofiles_allow_for_optional_variants: bool = False
     fast_audio_encode: bool = False
     multikey_books: bool = False
+    # Page cap and soft byte target for published ranges; neither enables multikey.
+    multikey_max_pages_per_range: int = 50
+    multikey_target_max_range_bytes: int = 33554432
     multikey_layer_ui: str = "native"
     multikey_require_song_ids: bool = False
     multikey_min_chordname_scale: float = 0.85
@@ -598,6 +601,8 @@ _ALLOWED_FILE_KEYS: Set[str] = {
     "extrainstrumentbooks",
     "lyricbooks",
     "multikey_books",
+    "multikey_max_pages_per_range",
+    "multikey_target_max_range_bytes",
     "multikey_layer_ui",
     "multikey_require_song_ids",
     "multikey_min_chordname_scale",
@@ -749,6 +754,11 @@ def build_config(
     _ensure_known_keys(f"profile '{profile}'", prof_eff, _ALLOWED_FILE_KEYS)
 
     for data in (flat, prof_eff):
+        # Reject booleans as well as numeric coercions: bool is an int subclass.
+        # Validate flat defaults even when the selected profile overrides them.
+        for name in ("multikey_max_pages_per_range", "multikey_target_max_range_bytes"):
+            if name in data and (type(data[name]) is not int or data[name] < 1):
+                raise ValueError(f"{name.replace('_', '-')} must be a positive integer")
         if "multikey_books" in data and not isinstance(
             data["multikey_books"], bool
         ):

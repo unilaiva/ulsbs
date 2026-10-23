@@ -7,11 +7,15 @@
 \AddToHook{enddocument/afterlastpage}{\directlua{ulsbs_score_layers.finish()}}
 % Generated definitions use csname so colons are safe under normal catcodes.
 \InputIfFileExists{\jobname.ulsbs-score-variants.tex}{}{}
+% Python writes the sole fitting policy with both draft and final bindings.
+% Standalone TeX without bindings has no alternatives: retain original graphics
+% at unity rather than inventing a second minimum scale for transposed systems.
+\providecommand{\ulScoreMinimumScale}{1}
 \ExplSyntaxOn
 \box_new:N \l_UL_score_base_box
 \box_new:N \l_UL_score_alt_box
 \box_new:N \l_UL_score_result_box
-\fp_const:Nn \c_UL_score_minimum_scale_fp {0.80}
+\fp_const:Nn \c_UL_score_minimum_scale_fp {\ulScoreMinimumScale}
 \fp_new:N \l_UL_score_scale_fp
 \tl_new:N \l_UL_score_key_lua_tl
 \tl_new:N \l_UL_score_targets_lua_tl
@@ -85,9 +89,18 @@
           {\box_set_eq:NN \l_UL_score_alt_box \l_UL_score_base_box}
       }
       {\box_set_eq:NN \l_UL_score_alt_box \l_UL_score_base_box}
-    % Graphic dimensions are rounded to sp; do not reject the exact 0.80 edge
-    % for sub-sp conversion noise. The applied fit itself is never rounded up.
-    \fp_compare:nNnTF {round(\l_UL_score_scale_fp,7)}<{\c_UL_score_minimum_scale_fp}
+    % PDF dimensions round to sp on conversion. At the exact policy boundary,
+    % rounding both boxes can leave a deficit of up to one sp in either axis.
+    % Compare those physical deficits, not a fixed number of ratio decimals;
+    % the applied fit above remains unrounded and cannot enlarge the footprint.
+    \fp_compare:nNnTF
+      {max(
+        \c_UL_score_minimum_scale_fp*\dim_to_fp:n {\box_wd:N\l_UL_score_alt_box}
+          -\dim_to_fp:n {\box_wd:N\l_UL_score_base_box},
+        \c_UL_score_minimum_scale_fp*\dim_to_fp:n
+          {\box_ht:N\l_UL_score_alt_box+\box_dp:N\l_UL_score_alt_box}
+          -\dim_to_fp:n {\box_ht:N\l_UL_score_base_box+\box_dp:N\l_UL_score_base_box})}
+      >{\dim_to_fp:n {1sp}}
       {\PackageWarning{ulsbs}{Score~#1~system~#2~offset~#3~is~too~small;
          ~original~notation~substituted}
        \box_set_eq:NN \l_UL_score_alt_box \l_UL_score_base_box}
@@ -106,8 +119,12 @@
     \hbox_set:Nn \l_UL_score_base_box {\includegraphics{#3}}
     \hbox_set:Nn \l_UL_score_result_box
       {\UL_pdf_mark:nn {0}{\box_use:N\l_UL_score_base_box}}
+    % Requests and the original-sized box remain live in engine draft mode;
+    % only full passes need the eleven alternate graphic/fitting operations.
+    \ifUL@pdfdraftpass\else
     % Dispatch values are snippet prefixes, followed by the system's -N suffix.
     \int_step_inline:nn {11}{\UL_score_alternative:nnn {#1}{#2}{##1}}
+    \fi
     \leavevmode\box_use:N\l_UL_score_result_box
     \group_end:
   }

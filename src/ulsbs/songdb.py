@@ -137,6 +137,10 @@ following JSON Schema (draft-07):
             "language": {"type": ["string", "null"]},
             "bindingoffset": {"type": ["string", "null"]},
             "bookbynote": {"type": ["string", "null"]},
+            "multikey_json_file": {
+              "type": "string",
+              "description": "Optional result-root-relative range-index pointer; omitted until range packaging succeeds, not an embedded manifest or full-PDF link"
+            },
             "audio_links": {
               "type": "array",
               "items": {"$ref": "#/definitions/AudioLink"}

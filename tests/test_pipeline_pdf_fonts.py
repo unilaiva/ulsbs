@@ -122,6 +122,11 @@ class PipelinePdfFontsTests(unittest.TestCase):
                         ))
                         stack.enter_context(patch.object(pipeline, "step_texlua_indices", return_value=3))
                         stack.enter_context(patch.object(pipeline, "step_lualatex_pass", side_effect=latex))
+                        # This test isolates font failure with a synthetic byte
+                        # string; real PDF resource convergence is tested separately.
+                        stack.enter_context(patch.object(
+                            pipeline, "step_lualatex_convergence", side_effect=lambda *args: args[-2:],
+                        ))
                         consumers = [stack.enter_context(patch.object(pipeline, name)) for name in (
                             "step_context_printouts", "step_coverimage_extraction",
                             "step_build_song_db", "step_midi_audio", "step_write_song_db_json",
@@ -165,6 +170,19 @@ class PipelinePdfFontsTests(unittest.TestCase):
         message = str(caught.exception)
         for text in ("pikepdf>=8", "python3-pikepdf", "rebuild the compiler container"):
             self.assertIn(text, message)
+
+    def test_multikey_preflights_qpdf_without_requiring_it_for_ordinary_jobs(self) -> None:
+        """Missing extraction tooling fails early only when range output is requested."""
+        with patch.object(pipeline, "which", return_value="/bin/tool"), \
+                patch.object(pipeline.importlib.util, "find_spec", return_value=object()), \
+                patch("ulsbs.multikey_ranges.qpdf_version", return_value="12.2.0") as version:
+            pipeline.require_tools()
+            version.assert_not_called()
+            pipeline.require_tools(multikey=True)
+            version.assert_called_once()
+            version.side_effect = FileNotFoundError("qpdf missing")
+            with self.assertRaisesRegex(SystemExit, "qpdf is required for MULTIKEY"):
+                pipeline.require_tools(multikey=True)
 
     def test_help_does_not_import_optimizer_or_pikepdf(self) -> None:
         code = """

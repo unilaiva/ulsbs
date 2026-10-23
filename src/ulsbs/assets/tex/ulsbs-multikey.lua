@@ -1,7 +1,7 @@
 -- SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- Fit alternate chords within lyric space and track physical-page usage for
--- the multikey manifest, embedded in PDF XMP and written as a JSON sidecar.
+-- the multikey manifest, written only as a finalized JSON sidecar.
 
 local M = {}
 local songs, by_id = {}, {}
@@ -315,31 +315,15 @@ function M.finish_disabled()
   finished = true
 end
 
--- Run after the final page has shipped. Standard PDF Info is deliberately untouched.
+-- Finalize only after all physical shipouts so dependency pages and PDF-user-space
+-- anchors describe this completed pass, not provisional layout measurements.
+-- The build consumer must discard prior-pass sidecars before compiling; this
+-- writer alone cannot establish freshness. No JSON is embedded in PDF XMP or Info,
+-- and any standard metadata supplied by the document remains untouched.
 function M.finish()
   if finished then return end
   if shipping_page ~= nil then fail("physical page shipout did not finish") end
-  if type(pdf.getcatalog) ~= "function" or type(pdf.setcatalog) ~= "function" then
-    fail("LuaTeX catalog inspection and update APIs are required")
-  end
-  local catalog = pdf.getcatalog() or ""
-  -- Decode PDF name escapes before checking, so /Meta#64ata is also protected.
-  local names = catalog:gsub("#(%x%x)", function(hex) return string.char(tonumber(hex, 16)) end)
-  if names:find("/Metadata%f[%z%s/%[%]()<>{}]") or names:match("/Metadata$") then
-    fail("catalog already has /Metadata; refusing to overwrite existing XMP")
-  end
-  local json = manifest()
-  -- Internal compile artifact for publication merging; the PDF remains self-contained.
-  write_status(json)
-  local xml_json = json:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
-  local xmp = '<?xpacket begin="' .. utf8.char(0xfeff) .. '" id="W5M0MpCehiHzreSzNTczkc9d"?>\n'
-    .. '<x:xmpmeta xmlns:x="adobe:ns:meta/">\n'
-    .. '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n'
-    .. '<rdf:Description rdf:about="" xmlns:ulsbs="urn:ulsbs:multikey:1">\n'
-    .. '<ulsbs:multikey>' .. xml_json .. '</ulsbs:multikey>\n'
-    .. '</rdf:Description>\n</rdf:RDF>\n</x:xmpmeta>\n<?xpacket end="w"?>'
-  local object = pdf.immediateobj("stream", xmp, "/Type /Metadata /Subtype /XML")
-  pdf.setcatalog(catalog .. " /Metadata " .. object .. " 0 R")
+  write_status(manifest())
   finished = true
 end
 

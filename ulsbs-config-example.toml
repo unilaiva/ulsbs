@@ -11,34 +11,44 @@
 # - You may also use boolean negations like no-deploy = true (only true is meaningful).
 #
 # Precedence (lowest -> highest):
-#   built-ins < flat config (this root table) < profiles (with inherit + merge-keys) < env vars < CLI flags
+#   built-ins < flat config (this root table) < profiles (with inherit + merge-keys) < env vars
+#   < CLI flags
 #
 # Profiles and inheritance:
-# - The flat config (this root table) acts as the parent of every profile that does not set inherit-from.
+# - The flat config (this root table) acts as the parent of every profile that does not set
+#   inherit-from.
 # - If a profile inherits from another profile, its parent already includes flat.
 #
 # Array merging vs replacement:
 # - By default, when a child profile specifies an array key, it REPLACES the parent's array.
-# - To MERGE specific arrays for a child profile, list their names in that profile's merge-keys array.
-#   * For merged arrays: result = parent + (child items not already present) -> order is preserved, no duplicates.
-#   * If a listed key is provided by the child but is not an array (or the parent is not an array), it's an error.
-# - merge-keys affects only parent->child profile merging (where the parent may be flat or another profile).
+# - To MERGE specific arrays for a child profile, list their names in that profile's merge-keys
+#   array.
+#   * For merged arrays: result = parent + (child items not already present) -> order is preserved,
+#     no duplicates.
+#   * If a listed key is provided by the child but is not an array (or the parent is not an array),
+#     it's an error.
+# - merge-keys affects only parent->child profile merging (where the parent may be flat or another
+#   profile).
 #
 # Files and globs:
-# - songbooks/common-* accept file paths or glob patterns (?, *). Relative paths are resolved against this file's directory.
+# - songbooks/common-* accept file paths or glob patterns (?, *). Relative paths are resolved
+#   against this file's directory.
 # - Duplicates are removed; results are absolute, sorted paths.
-# - common-* files don't need to exist when running inside a container; they are only used for deploying on the host.
+# - common-* files don't need to exist when running inside a container; they are only used for
+#   deploying on the host.
 #
 # Special modes:
 # - shell: run only an interactive shell and do nothing else.
 # - deploy-last: perform only the "deploy last" step and do nothing else.
 # - deploy-common: perform only the "deploy common" step and do nothing else.
-# - pull: run "git pull --rebase ; git submodule update --init --recursive" in the project root before doing anything else.
+# - pull: run "git pull --rebase ; git submodule update --init --recursive" in the project root
+#   before doing anything else.
 #   See cli.py for more information on CLI behaviors.
 #
 # Environment overrides (optional):
 # - ULSBS_USE_SYSTEM_TMP_FOR_TEMP=true|false   -> sets use-system-tmp
-# - ULSBS_MAX_CONTAINER_MEM_GB=6               -> container memory limit in GiB (also used when deriving max-parallel)
+# - ULSBS_MAX_CONTAINER_MEM_GB=6               -> container memory limit in GiB
+#                                                 (also used when deriving max-parallel)
 #   * If explicitly set to 0 or a negative value, ulsbs will NOT pass any
 #     --memory/--memory-swap arguments to the container engine (unlimited).
 #     This does not change the internal memory/max-parallel heuristics.
@@ -48,7 +58,8 @@
 # CLI highlights (override config):
 # - Flags like --no-container, --container-rebuild, --shell, --pull, --sequential, --max-parallel,
 #   --no-deploy, --no-printouts, --no-coverimage, --no-json, --no-midi, --no-audio,
-#   --no-extrainstr, --no-lyric, --no-multikey, -q/--quick, --deploy-last, --deploy-common, --max-log-lines.
+#   --no-extrainstr, --no-lyric, --no-multikey, -q/--quick, --deploy-last, --deploy-common,
+#   --max-log-lines.
 # - Passing files on the CLI overrides songbook selection.
 
 
@@ -58,10 +69,12 @@
 
 # Execution
 shell = false                # SPECIAL MODE: only run shell, do nothing else
-pull = false                 # SPECIAL: run 'git pull --rebase ; git submodule update --init --recursive' before anything else
+pull = false                 # SPECIAL: run 'git pull --rebase ; git submodule update --init --recursive'
+                             # before anything else
 
 sequential = false           # if true, behaves like max-parallel = 1
-clean-temp = true            # remove temp data after run (alias: keep-temp = true -> clean-temp = false)
+clean-temp = true            # remove temp data after run
+                             # (alias: keep-temp = true -> clean-temp = false)
 # keep-temp = true           # optional alias; if set, it inverts clean-temp (do not set both)
 
 # Features and modes
@@ -88,7 +101,10 @@ audiofiles-allow-for-optional-variants = false # requires audiofiles = true
 extrainstrumentbooks = true  # default: true
 lyricbooks = true            # default: true
 fast-audio-encode = false    # default: false; if true, use faster audio encoding (limiter instead of loudnorm)
-multikey-books = false       # default: false; set true to add a multikey PDF beside each selected non-lyrics variant
+multikey-books = false       # default: false; set true to add a MULTIKEY layered edition for each non-lyrics variant
+multikey-max-pages-per-range = 50 # positive integer; nominal maximum physical pages per range
+multikey-target-max-range-bytes = 33554432 # positive integer; 32 MiB target, adaptive bisection down to one page
+# A single page exceeding the byte target is retained with a warning and its true size.
 multikey-layer-ui = "native" # native (default) or hidden; hidden keeps layers discoverable
 multikey-min-chordname-scale = 0.85 # default: 0.85; number in [0.5, 1]; 1 disables chord-name shrinking
 # Applies to alternative TeX chord names only; original layout, melody hints,
@@ -102,13 +118,18 @@ multikey-lilypond-scores = false # experimental opt-in; only for non-lyrics mult
 # Valid alternatives use the persistent home cache; ordinary/lyrics PDFs are unchanged.
 # Normal profile inheritance applies: profiles can enable or disable extras,
 # including enabling them when the root multikey-books setting is false.
-# --no-multikey and -q/--quick disable extra multikey PDFs for one invocation.
+# --no-multikey and -q/--quick disable multikey packages for one invocation.
 # Ordinary PDFs are always retained; lyrics-only variants never get multikey editions.
-# PDF paths: book_A5.pdf + multikey/book_MULTIKEY_A5.pdf;
-#            book_CHARANGO_A5.pdf + multikey/book_MULTIKEY_CHARANGO_A5.pdf (same for BASSCLEF).
-# JSON companions stay in json/. Both result/ and deploy/ use this layout.
-# Multikey jobs produce PDFs and matching JSON (when enabled), reusing ordinary
-# metadata/media links. They do not create printouts, MIDI, audio or covers.
+# Paths: Book_A5.pdf + multikey/Book_A5_MULTIKEY_RANGES.json
+#        + multikey/Book_A5_MULTIKEY_RANGE_1-50.pdf (and remaining ranges).
+# Instrument example: multikey/Book_CHARANGO_A5_MULTIKEY_RANGE_1-50.pdf.
+# Both result/ and deploy/ use this layout; no full multikey PDF is published.
+# The required protocol-v1 index is generated even with json = false. Ordinary
+# JSON exports stay in json/ and reference multikey_json_file, not multikey_file.
+# The finalized schema-v2 manifest is external JSON only, never embedded in PDF XMP.
+# Packaging requires qpdf >= 11.0 and runtime validation of layers, geometry and
+# strict canonical named links; unsupported links fail packaging, not silently drop.
+# Multikey jobs do not create printouts, MIDI, audio or covers.
 
 # Cover image extraction and modified PNGs
 cover-image-height = 1024    # default: 1024; height in pixels for pdftoppm -scale-to-y

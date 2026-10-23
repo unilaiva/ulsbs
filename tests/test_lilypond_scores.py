@@ -94,6 +94,8 @@ class LilyPondScoreTests(unittest.TestCase):
                                    {"TEST": "1", "ULSBS_SCORE_CACHE_DIR": str(self.root / "cache")},
                                    ["-Itest-assets"], verbose=verbose)
         report = json.loads((self.root / "book.ulsbs-score-results.json").read_text())
+        self.assertIsInstance(report["elapsed_seconds"], float)
+        self.assertGreaterEqual(report["elapsed_seconds"], 0)
         dispatch = (self.root / "book.ulsbs-score-variants.tex").read_text()
         return report, dispatch, command
 
@@ -112,6 +114,27 @@ class LilyPondScoreTests(unittest.TestCase):
                 self.assertIsNone(score.unsupported)
                 self.assertTrue(score.source.read_text()[score.tail_position:].startswith(
                     '\\include "ulsbs-include-tail'))
+
+    def test_minimum_scale_header_reads_current_policy(self):
+        for minimum_scale in (scores.LILYPOND_SCORE_MIN_SCALE, 0.75):
+            with self.subTest(minimum_scale=minimum_scale), \
+                    patch.object(scores, "LILYPOND_SCORE_MIN_SCALE", minimum_scale):
+                self.assertEqual(scores._minimum_scale_tex(),
+                                 rf"\def\ulScoreMinimumScale{{{minimum_scale}}}" + "\n")
+
+    def test_prepare_replaces_stale_dispatch_and_status_with_current_policy_header(self):
+        self.snippet()
+        dispatch = self.root / "book.ulsbs-score-variants.tex"
+        for minimum_scale in (scores.LILYPOND_SCORE_MIN_SCALE, 0.75):
+            with self.subTest(minimum_scale=minimum_scale), \
+                    patch.object(scores, "LILYPOND_SCORE_MIN_SCALE", minimum_scale):
+                dispatch.write_text("stale dispatch\n")
+                for suffix in (".ulsbs-scores.json", ".ulsbs-score-results.json"):
+                    (self.root / ("book" + suffix)).write_text("stale status\n")
+                self.assertTrue(scores.prepare_scores(self.root, "book"))
+                self.assertEqual(dispatch.read_text(), scores._minimum_scale_tex())
+                for suffix in (".ulsbs-scores.json", ".ulsbs-score-results.json"):
+                    self.assertFalse((self.root / ("book" + suffix)).exists())
 
     def test_changed_bundled_asset_warns_once_not_per_offset_or_occurrence(self):
         self.snippet()
@@ -182,6 +205,98 @@ class LilyPondScoreTests(unittest.TestCase):
         self.assertEqual(len(prepared), 4)
         self.assertTrue(all(score.unsupported for score in prepared.values()))
 
+    def test_repeated_identical_heads_preserve_source_and_original_systems(self):
+        source, _ = self.snippet(systems=2)
+        source.write_text(source.read_text().replace(
+            '\\include "ulsbs-include-head.ly"',
+            '\\include "ulsbs-include-head.ly"\n% repeated header\n'
+            '\\include "ulsbs-include-head.ly"'))
+        original = source.read_bytes()
+        prepared = scores.prepare_scores(self.root, "book")
+        self.assertIsNone(next(iter(prepared.values())).unsupported)
+        self.request(prepared)
+        report, _, _ = self.generate(prepared)
+        self.assertEqual(report["successful_offsets"], 11)
+        self.assertEqual(source.read_bytes(), original)
+        for graphic in next(iter(prepared.values())).graphics:
+            self.assertEqual(scores._dimensions(self.root / (graphic + ".pdf")), (100, 50))
+
+    def test_mixed_or_interleaved_headers_remain_unsupported(self):
+        for extra in ('\\include "ulsbs-include-head-spacious.ly"\n',
+                      '\\include "ulsbs-include-head.ly"\n'):
+            with self.subTest(extra=extra):
+                self.snippet(extra=extra)
+                prepared = scores.prepare_scores(self.root, "book")
+                self.assertIsNotNone(next(iter(prepared.values())).unsupported)
+
+    def named_assembly(self, grouped=False):
+        chords = r'\new ChordNames { \theChords }'
+        staff = (r'\new Staff { \clef "treble" '
+                 + (r"\transpose c' c " if grouped else '')
+                 + r'\new Voice = "theVoice" { \theMelody } }')
+        tab = r'\include "ulsbs-internal-scorepart-tabstaff.ly"'
+        lyric = r'\new Lyrics \lyricsto "theVoice" { \theLyricsOne }'
+        if grouped:
+            body = (chords + r' \new StaffGroup \with { '
+                    r'\override StaffGrouper.staffgroup-staff-spacing.padding = #4 } << '
+                    + staff + ' ' + tab + r' \new TabStaff { \tabFullNotation \stemDown '
+                    r'\clef "moderntab" \set minimumFret = #7 '
+                    r"\transpose c' c \theMelody } >>")
+        else:
+            body = ' '.join((chords, staff, lyric, tab, lyric.replace('One', 'Two')))
+        return ('\\score { << ' + body + ' >> \\layout { } }\n'
+                '\\include "ulsbs-internal-score-midi.ly"\n')
+
+    def test_named_score_assemblies_transpose_before_consumption_and_preserve_layout(self):
+        for grouped in (False, True):
+            with self.subTest(grouped=grouped):
+                source, _ = self.snippet(systems=2)
+                source.write_text(source.read_text().replace(
+                    '\\include "ulsbs-include-tail.ly"\n', self.named_assembly(grouped)))
+                original = source.read_bytes()
+                prepared = scores.prepare_scores(self.root, "book")
+                score = next(iter(prepared.values()))
+                self.assertIsNone(score.unsupported)
+                self.assertTrue(source.read_text()[score.tail_position:].startswith(r'\score'))
+                originals = {path: path.read_bytes() for path in (
+                    source.with_suffix(".ulsbs-boundaries"),
+                    *(self.root / (graphic + ".pdf") for graphic in score.graphics))}
+                self.request(prepared)
+
+                def inspect(stem, transformed, log, grouped=grouped):
+                    self.assertTrue(transformed.endswith(self.named_assembly(grouped)))
+                    self.assertLess(transformed.index(r'theMelody = \transpose'),
+                                    transformed.index(r'\score'))
+                    self.assertEqual(transformed.count("(make-music 'LineBreakEvent"), 1)
+                    return SimpleNamespace(returncode=0)
+
+                report, _, _ = self.generate(prepared, inspect)
+                self.assertEqual(report["successful_offsets"], 11)
+                self.assertEqual(source.read_bytes(), original)
+                self.assertEqual({path: path.read_bytes() for path in originals}, originals)
+
+    def test_unrecognized_score_assembly_expressions_remain_original_only(self):
+        assembly = self.named_assembly()
+        cases = [assembly.replace(r'\theMelody', "c'1"),
+                 assembly.replace(r'\theMelody', r'\otherMelody'),
+                 assembly.replace(r'\theMelody', r"#(make-music 'NoteEvent)"),
+                 assembly.replace('ulsbs-internal-scorepart-tabstaff.ly', 'custom.ly'),
+                 assembly + "\\score { c'1 }\n",
+                 assembly.replace(r'\layout { }', r'\layout { #(custom-layout) }'),
+                 assembly.replace(r'\theChords', r'\transpose c d \theChords')]
+        for index, custom in enumerate(cases):
+            with self.subTest(index=index):
+                source, _ = self.snippet()
+                source.write_text(source.read_text().replace(
+                    '\\include "ulsbs-include-tail.ly"\n', custom))
+                prepared = scores.prepare_scores(self.root, "book")
+                self.assertIsNotNone(next(iter(prepared.values())).unsupported)
+                self.request(prepared)
+                report, dispatch, command = self.generate(prepared)
+                command.assert_not_called()
+                self.assertEqual(report["fallback_offsets"], 11)
+                self.assertEqual(dispatch, scores._minimum_scale_tex())
+
     def test_repeated_graphic_references_preserve_placements_and_system_identity(self):
         _, fragment = self.snippet()
         fragment.write_text(fragment.read_text() * 2)
@@ -247,6 +362,7 @@ class LilyPondScoreTests(unittest.TestCase):
         self.assertEqual(dispatch.count("\\endcsname"), 11)
         self.assertIn(request["layer_prefix"], dispatch)
         self.assertIn(":0-0-0:t06", dispatch)
+        self.assertTrue(dispatch.startswith(scores._minimum_scale_tex()))
         self.ui.warning_line.assert_not_called()
 
     def test_single_system_count_mismatch_still_falls_back_after_replay(self):
@@ -260,7 +376,7 @@ class LilyPondScoreTests(unittest.TestCase):
             return SimpleNamespace(returncode=0)
 
         report, dispatch, command = self.generate(prepared, extra_system)
-        self.assertEqual(command.call_count, 12)
+        self.assertEqual(command.call_count, 13)
         self.assertEqual((report["successful_offsets"], report["fallback_offsets"]), (10, 1))
         self.assertEqual(report["scores"][0]["offsets"][0]["reason"],
                          "alternative system count does not match original")
@@ -320,7 +436,7 @@ class LilyPondScoreTests(unittest.TestCase):
                 else:
                     self.assertEqual(messages, [])
 
-    def test_both_octaves_unplayable_warn_once_with_all_affected_offsets(self):
+    def test_all_octaves_unplayable_warn_once_with_all_affected_offsets(self):
         self.snippet()
         prepared = scores.prepare_scores(self.root, "book")
         self.request(prepared)
@@ -331,7 +447,7 @@ class LilyPondScoreTests(unittest.TestCase):
             return SimpleNamespace(returncode=0)
 
         report, dispatch, command = self.generate(prepared, warn)
-        self.assertEqual(command.call_count, 14)
+        self.assertEqual(command.call_count, 16)
         self.assertEqual((report["successful_offsets"], report["fallback_offsets"]), (8, 3))
         self.ui.warning_line.assert_called_once()
         warning = self.ui.warning_line.call_args.args[0]
@@ -339,6 +455,30 @@ class LilyPondScoreTests(unittest.TestCase):
         self.assertIn("affected transpositions: t01 (des), t04 (e), t07 (g)", warning)
         self.assertEqual(dispatch.count("\\endcsname"), 8)
         self.ui.debug_line.assert_not_called()
+
+    def test_third_higher_octave_recovers_low_tab_pitches_without_skipping_validation(self):
+        self.snippet(systems=2)
+        prepared = scores.prepare_scores(self.root, "book")
+        self.request(prepared)
+
+        def warn(stem, source, log):
+            if stem.name in ("t01", "t02"):
+                if "#(ly:make-pitch 1 1" not in source:
+                    log.write_text("warning: No string for pitch\n")
+                elif stem.name == "t02":
+                    stem.with_suffix(".ulsbs-boundaries").write_text("0 0 1/2 0\n1/2 0 2 0\n")
+            return SimpleNamespace(returncode=0)
+
+        report, dispatch, command = self.generate(prepared, warn)
+        first, second = report["scores"][0]["offsets"][:2]
+        self.assertEqual([item["interval"] for item in first["attempts"]], [1, -11, 13])
+        self.assertEqual(first["status"], "transposed")
+        self.assertEqual([item["interval"] for item in second["attempts"]], [2, -10, 14])
+        self.assertEqual(second["status"], "fallback")
+        self.assertIn("boundaries", second["reason"])
+        self.assertEqual(command.call_count, 15)
+        self.assertIn(":t01\\endcsname", dispatch)
+        self.assertNotIn(":t02\\endcsname", dispatch)
 
     def test_fallbacks_group_by_occurrence_and_reason_across_scores(self):
         self.snippet("first", extra="\\score { c'1 }\n")
@@ -377,6 +517,7 @@ class LilyPondScoreTests(unittest.TestCase):
         self.ui.warning_line.assert_called_once()
         warning = self.ui.warning_line.call_args.args[0]
         self.assertIn("effective key metadata is unavailable", warning)
+        self.assertIn("major/minor required", warning)
         for offset in range(1, 12):
             self.assertIn(f"t{offset:02d} (unknown)", warning)
 
@@ -390,12 +531,12 @@ class LilyPondScoreTests(unittest.TestCase):
 
         report, dispatch, command = self.generate(prepared, fail)
         self.assertEqual((report["successful_offsets"], report["fallback_offsets"]), (10, 1))
-        self.assertEqual(command.call_count, 12)
+        self.assertEqual(command.call_count, 13)
         self.assertNotIn(":t03\\endcsname", dispatch)
         self.assertIn(":t02\\endcsname", dispatch)
         self.assertIn(":t04\\endcsname", dispatch)
         failed = report["scores"][0]["offsets"][2]
-        self.assertEqual([item["interval"] for item in failed["attempts"]], [3, -9])
+        self.assertEqual([item["interval"] for item in failed["attempts"]], [3, -9, 15])
         self.assertEqual(failed["status"], "fallback")
         self.ui.warning_line.assert_called_once()
 
@@ -420,8 +561,10 @@ class LilyPondScoreTests(unittest.TestCase):
         self.request(prepared)
 
         def resize(stem, source, log):
-            size = {"t01": (126, 50), "t02": (100, 63),
-                    "t03": (125, 50)}.get(stem.name, (50, 25))
+            size = {"t01": (100 / (scores.LILYPOND_SCORE_MIN_SCALE - 0.01), 50),
+                    "t02": (100, 50 / (scores.LILYPOND_SCORE_MIN_SCALE - 0.01)),
+                    "t03": (100 / (scores.LILYPOND_SCORE_MIN_SCALE + 0.01), 50)
+                    }.get(stem.name, (50, 25))
             self.pdf(stem.with_name(stem.name + "-1.pdf"), size=size)
             if stem.name == "t05":
                 with pikepdf.Pdf.new() as pdf:
@@ -434,7 +577,7 @@ class LilyPondScoreTests(unittest.TestCase):
         offsets = report["scores"][0]["offsets"]
         for outcome in offsets[:2]:
             self.assertEqual(outcome["status"], "fallback")
-            self.assertIn("below 0.80", outcome["reason"])
+            self.assertIn(f"below {scores.LILYPOND_SCORE_MIN_SCALE:.2f}", outcome["reason"])
         self.assertEqual(offsets[2]["status"], "transposed")
         self.assertEqual(offsets[3]["status"], "transposed")
         small = self.root / (offsets[3]["graphic"] + "-1.pdf")
@@ -442,6 +585,57 @@ class LilyPondScoreTests(unittest.TestCase):
         self.assertEqual(offsets[4]["status"], "fallback")
         self.assertIn("invalid system graphic box", offsets[4]["reason"])
         self.assertEqual(report["successful_offsets"], 8)
+
+    def test_scale_boundary_and_intermediate_variants_are_accepted(self):
+        self.snippet()
+        self.pdf(self.root / "ab/lily-one-1.pdf", size=(100 * scores.LILYPOND_SCORE_MIN_SCALE, 50))
+        prepared = scores.prepare_scores(self.root, "book")
+        self.request(prepared)
+
+        def resize(stem, source, log):
+            # Keep the intermediate case relative to the policy, not the old
+            # threshold; it exercises a .70 fit with the current .60 minimum.
+            scale = {"t01": scores.LILYPOND_SCORE_MIN_SCALE,
+                     "t02": scores.LILYPOND_SCORE_MIN_SCALE - 0.01,
+                     "t03": scores.LILYPOND_SCORE_MIN_SCALE + (1 - scores.LILYPOND_SCORE_MIN_SCALE) / 4}.get(stem.name, 1)
+            self.pdf(stem.with_name(stem.name + "-1.pdf"),
+                      size=(100 * scores.LILYPOND_SCORE_MIN_SCALE / scale, 50))
+            return SimpleNamespace(returncode=0)
+
+        report, dispatch, _ = self.generate(prepared, resize)
+        offsets = report["scores"][0]["offsets"]
+        self.assertEqual([outcome["status"] for outcome in offsets[:3]],
+                         ["transposed", "fallback", "transposed"])
+        self.assertIn(f"below {scores.LILYPOND_SCORE_MIN_SCALE:.2f}", offsets[1]["reason"])
+        self.assertEqual(report["successful_offsets"], 10)
+        self.assertIn(":t01\\endcsname", dispatch)
+        self.assertNotIn(":t02\\endcsname", dispatch)
+        self.assertIn(":t03\\endcsname", dispatch)
+
+    def test_patched_policy_controls_validation_generation_and_cache_publication(self):
+        self.snippet()
+        prepared = scores.prepare_scores(self.root, "book")
+        self.request(prepared)
+
+        def resize(stem, source, log):
+            scale = {"t01": scores.LILYPOND_SCORE_MIN_SCALE,
+                     "t02": scores.LILYPOND_SCORE_MIN_SCALE - 0.01}.get(stem.name, 1)
+            self.pdf(stem.with_name(stem.name + "-1.pdf"), size=(75 / scale, 50))
+            return SimpleNamespace(returncode=0)
+
+        self.pdf(self.root / "ab/lily-one-1.pdf", size=(75, 50))
+        with patch.object(scores, "LILYPOND_SCORE_MIN_SCALE", 0.75), \
+                patch.object(scores.cache, "publish", wraps=scores.cache.publish) as publish:
+            report, dispatch, _ = self.generate(prepared, resize)
+            self.assertTrue(dispatch.startswith(scores._minimum_scale_tex()))
+            self.assertEqual(report["successful_offsets"], 10)
+            offsets = report["scores"][0]["offsets"]
+            self.assertEqual(offsets[0]["status"], "transposed")
+            self.assertEqual(offsets[1]["status"], "fallback")
+            self.assertIn(f"below {scores.LILYPOND_SCORE_MIN_SCALE:.2f}", offsets[1]["reason"])
+            self.assertEqual(publish.call_count, 10)
+            for call in publish.call_args_list:
+                self.assertEqual(call.kwargs["minimum_scale"], scores.LILYPOND_SCORE_MIN_SCALE)
 
     def test_unknown_key_and_unsupported_score_keep_original_without_commands(self):
         for kind in ("unknown-key", "custom"):
@@ -458,7 +652,7 @@ class LilyPondScoreTests(unittest.TestCase):
                 report, dispatch, command = self.generate(prepared)
                 command.assert_not_called()
                 self.assertEqual((report["successful_offsets"], report["fallback_offsets"]), (0, 11))
-                self.assertEqual(dispatch.strip(), "")
+                self.assertEqual(dispatch, scores._minimum_scale_tex())
                 self.assertEqual((self.root / "ab/lily-one-1.pdf").read_bytes(), original)
                 self.assertTrue(all(item["reason"] for item in report["scores"][0]["offsets"]))
                 source.unlink()
@@ -477,7 +671,8 @@ class LilyPondScoreTests(unittest.TestCase):
                 # The same count with different musical boundaries is not safe.
                 stem.with_suffix(".ulsbs-boundaries").write_text("0 0 2 0\n2 0 12 0\n")
             if stem.name == "t02":
-                self.pdf(stem.with_name(stem.name + "-12.pdf"), size=(130, 50))
+                self.pdf(stem.with_name(stem.name + "-12.pdf"),
+                          size=(100 / (scores.LILYPOND_SCORE_MIN_SCALE - 0.01), 50))
             return SimpleNamespace(returncode=0)
 
         report, dispatch, _ = self.generate(prepared, inspect)
@@ -571,9 +766,10 @@ class LilyPondScoreTests(unittest.TestCase):
         with patch.object(scores, "run_cmd", side_effect=no_output) as command:
             scores.generate_scores(self.ui, self.job, "book", prepared, {}, [])
         report = json.loads((self.root / "book.ulsbs-score-results.json").read_text())
-        self.assertEqual(command.call_count, 22)
+        self.assertEqual(command.call_count, 28)
         self.assertEqual((report["successful_offsets"], report["fallback_offsets"]), (0, 11))
-        self.assertEqual((self.root / "book.ulsbs-score-variants.tex").read_text().strip(), "")
+        self.assertEqual((self.root / "book.ulsbs-score-variants.tex").read_text(),
+                         scores._minimum_scale_tex())
 
     def test_generation_reuses_only_validated_successes_and_reports_cache_hits(self):
         self.snippet(systems=2)
@@ -597,6 +793,35 @@ class LilyPondScoreTests(unittest.TestCase):
             changed, _, command = self.generate(prepared)
             self.assertEqual(command.call_count, 11)
             self.assertEqual(changed["cache_hits"], 0)
+
+    def test_changed_minimum_scale_uses_distinct_cache_keys_and_preserves_warm_reuse(self):
+        self.snippet()
+        prepared = scores.prepare_scores(self.root, "book")
+        self.request(prepared)
+        with patch.object(scores.cache, "source_fingerprint", return_value="a" * 64), \
+                patch.object(scores.cache, "candidate_key", wraps=scores.cache.candidate_key) as key:
+            cold, _, command = self.generate(prepared)
+            self.assertEqual(command.call_count, 11)
+            self.assertEqual(cold["cache_hits"], 0)
+            original_keys = {path.name for path in (self.root / "cache").iterdir()}
+            for call in key.call_args_list:
+                self.assertEqual(call.kwargs["extra"]["minimum_scale"], scores.LILYPOND_SCORE_MIN_SCALE)
+            key.reset_mock()
+            with patch.object(scores, "LILYPOND_SCORE_MIN_SCALE", 0.75):
+                changed, changed_dispatch, command = self.generate(prepared)
+                self.assertEqual(command.call_count, 11)
+                self.assertEqual(changed["cache_hits"], 0)
+                changed_keys = {path.name for path in (self.root / "cache").iterdir()} - original_keys
+                self.assertEqual(len(changed_keys), 11)
+                for call in key.call_args_list:
+                    self.assertEqual(call.kwargs["extra"]["minimum_scale"], scores.LILYPOND_SCORE_MIN_SCALE)
+                warm, dispatch, command = self.generate(prepared)
+                command.assert_not_called()
+                self.assertEqual(warm["cache_hits"], 11)
+                self.assertEqual(dispatch, changed_dispatch)
+            warm, _, command = self.generate(prepared)
+            command.assert_not_called()
+            self.assertEqual(warm["cache_hits"], 11)
 
 
 if __name__ == "__main__":

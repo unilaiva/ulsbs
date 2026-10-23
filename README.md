@@ -70,10 +70,8 @@ For a real-world example of a repository using ULSBS, see:
 
 ## Status and compatibility
 
-ULSBS is under active development and its schemas, APIs, and processing rules
-may still change between releases. If you use ULSBS outside the main
-Unilaiva Songbook repository, you are responsible for reviewing and updating
-your songbook sources when upgrading ULSBS.
+ULSBS is under active development. When upgrading, review the release notes for
+changes that may require updates to your songbook sources or configuration.
 
 A stable 1.0 release is planned, after which backward-compatibility guarantees
 will follow semantic versioning.
@@ -293,11 +291,8 @@ Depending on configuration and available tools, ULSBS can also produce:
 
 If deployment is enabled, files are also copied under `deploy/`.
 
-Songbook PDFs automatically share identical embedded font data to reduce file
-size, especially in books with many Lilypond scores. All embedded glyphs and the
-book's appearance are preserved; fonts are not substituted or removed. This is
-always enabled, including for quick builds. Multikey layers and key-selection
-metadata are preserved. Books without duplicate font data are left unchanged.
+ULSBS automatically reduces PDF size by sharing identical embedded font data,
+including in quick builds. The book's appearance and multikey controls are preserved.
 
 ## Requirements
 
@@ -337,6 +332,7 @@ Important host dependencies include:
 - `bash`
 - `python3` 3.11+
 - Python package `pikepdf` 8+ (mandatory for automatic PDF font sharing)
+- `qpdf` 12.2.0+ when multikey generation is enabled
 - Noto fonts (`Noto Sans`, `Noto Serif`, with needed weights)
 - locale `fi_FI.utf8`
 
@@ -436,7 +432,7 @@ setup:
 
 ```sh
 sudo apt update
-sudo apt install bash locales git python3 python3-pikepdf context context-modules ffmpeg fluidsynth fluid-soundfont-gm fonts-noto-core fonts-noto-extra fonts-noto-mono imagemagick lilypond poppler-utils texlive texlive-font-utils texlive-lang-arabic texlive-lang-english texlive-lang-european texlive-lang-portuguese texlive-lang-spanish texlive-latex-base texlive-latex-extra texlive-luatex texlive-music texlive-plain-generic
+sudo apt install bash locales git python3 python3-pikepdf qpdf context context-modules ffmpeg fluidsynth fluid-soundfont-gm fonts-noto-core fonts-noto-extra fonts-noto-mono imagemagick lilypond poppler-utils texlive texlive-font-utils texlive-lang-arabic texlive-lang-english texlive-lang-european texlive-lang-portuguese texlive-lang-spanish texlive-latex-base texlive-latex-extra texlive-luatex texlive-music texlive-plain-generic
 sudo locale-gen fi_FI.utf8
 sudo mtxrun --generate
 
@@ -507,11 +503,8 @@ Some useful environment variables:
 
 ## Writing songbooks
 
-ULSBS is based on LaTeX, Lilypond, and especially the `songs` LaTeX package by
-Kevin W. Hamlen. The `songs` package is a key part of ULSBS, not just a minor
-helper dependency: ULSBS builds on top of it extensively, extends it, and
-redefines parts of its behavior for songbook-oriented output, metadata,
-indexing, variants, and workflow automation.
+ULSBS builds on LaTeX, Lilypond, and the `songs` LaTeX package by Kevin W. Hamlen,
+with additional commands for songbook layout, notation, and metadata.
 
 If you are new to the underlying `songs` package, it is very much worth reading
 its documentation too:
@@ -599,8 +592,7 @@ used like this:
 - `\showtagstrue`
 - `\showtagsfalse`
 
-Available toggle pairs are below. The default state from `ulsbs.sty` is shown
-for each one.
+Available toggle pairs and their defaults are below.
 
 | Toggle pair | Default | Meaning |
 |---|---:|---|
@@ -656,9 +648,8 @@ Other useful preamble settings include:
 - `\renewcommand{\pagenumberstyle}{...}`
   - page-number style in headers
 
-There are many more rewritable settings in `src/ulsbs/assets/tex/ulsbs.sty`,
-but the toggle list above is the most important document-level configuration
-surface.
+For custom class development beyond these settings, see
+[Architecture](ARCHITECTURE.md#developer-navigation).
 
 ### Verses
 
@@ -772,9 +763,8 @@ is printed in another key. For example, to print source C-major notation in F:
 \endsong
 ```
 
-The printed chords are F, B-flat, and C-sharp. ULSBS infers source C major by
-subtracting the five-semitone offset from the declared F major. The prelude
-already says F and is not transposed again.
+The printed chords are F, B-flat, and C-sharp. The prelude says F and is not
+transposed again.
 
 Both ordinary source transposition and multikey selection preserve scale degree
 and chromatic alteration, not just pitch class. Major and natural minor are the
@@ -783,8 +773,8 @@ This applies to chord roots, slash basses, and pitched melody hints even in
 ordinary PDFs without layers. Double-accidental results use a pitch-equivalent
 single-accidental spelling. Missing keys use the current `\preferflats` or
 `\prefersharps` setting without inferring a key from the first chord; unsupported
-keys also use that fallback and issue a warning. Enharmonic source-key inference
-uses conventional tonic spellings, detailed in [Architecture](ARCHITECTURE.md#key-spelling).
+keys also use that fallback and issue a warning. See
+[Architecture](ARCHITECTURE.md#key-spelling) for the spelling rules.
 
 Write a sharp as `#` and a flat as `&` in musical contexts. The shorthand is
 supported in ordinary `\[ ... ]` chords and melody blocks, in `\altchords`, in
@@ -979,13 +969,8 @@ Those are enabled by a special comment in the main `.tex` file, for example:
 %% ULSBS-EXTRA-VARIANTS: bassclef, charango
 ```
 
-The exact post-setup files for such variants live under:
-
-- `src/ulsbs/assets/tex/`
-
-This comment-based selection is unchanged. Each selected non-lyrics variant
-also gets a multikey PDF when `multikey-books` is enabled; multikey is an edition,
-not another instrument variant. See [Multikey PDF editions](#multikey-pdf-editions).
+Each selected non-lyrics variant also gets a multikey edition when
+`multikey-books` is enabled. See [Multikey PDF editions](#multikey-pdf-editions).
 
 MIDI and audio exports normally come only from the main ordinary variant.
 Optional ordinary variants explicitly support `--midifiles-allow-for-optional-variants`
@@ -994,9 +979,7 @@ These opt-ins use each variant's own generated MIDI, not the main variant's
 files. MIDI export must still be enabled for the MIDI opt-in, and audio export
 for the audio opt-in: `--no-midi` and `--no-audio` independently disable their
 respective exports. Multikey editions never generate MIDI or audio regardless of opt-ins.
-Audio still requires intermediate MIDI and internal song metadata: `--no-midi`
-disables exported MIDI files, not the MIDI needed to encode enabled audio.
-Likewise, disabling JSON export does not remove metadata needed for audio.
+Audio can still be generated when MIDI or JSON export is disabled.
 
 ### Multikey PDF editions
 
@@ -1005,35 +988,77 @@ can choose a key independently for each song in a compatible viewer. Chords,
 melody hints and key labels switch together; supported LilyPond notation can
 switch too. Ordinary PDFs remain unchanged.
 
-Enable these editions in `ulsbs-config.toml` (both options default to `false`):
+Enable these editions with `multikey-books` in `ulsbs-config.toml`. Also enable
+`multikey-lilypond-scores` if you want score transposition; both default to `false`:
 
 ```toml
 multikey-books = true
 multikey-lilypond-scores = true
 ```
 
-Each selected non-lyrics variant gets an additional PDF in `result/multikey/`
-and, when deployment is enabled, `deploy/multikey/`. For example,
-`book_A5.pdf` gets `multikey/book_MULTIKEY_A5.pdf`. Matching JSON exports stay
-in `json/`; no extra MIDI, audio or printouts are generated.
+Each selected non-lyrics variant gets a JSON index and one or more layered
+page-range PDFs in `result/multikey/` and, when deployment is enabled,
+`deploy/multikey/`. For example:
 
-Give songs stable `id=` values and accurate `key=` metadata. LilyPond transposition
-supports the standard ULSBS head/tail snippets; unsupported scores or keys that
-cannot be engraved safely retain the original notation with a warning. Builds
-take longer, but successful score alternatives are cached for later builds.
+```text
+Book_A5.pdf
+multikey/Book_A5_MULTIKEY_RANGES.json
+multikey/Book_A5_MULTIKEY_RANGE_1-50.pdf
+multikey/Book_A5_MULTIKEY_RANGE_51-100.pdf
+multikey/Book_A5_MULTIKEY_RANGE_101-137.pdf
+Book_CHARANGO_A5.pdf
+multikey/Book_CHARANGO_A5_MULTIKEY_RANGES.json
+multikey/Book_CHARANGO_A5_MULTIKEY_RANGE_1-50.pdf
+```
+
+Share the index and all its range PDFs together, keeping their filenames and
+relative locations unchanged. There is no single full-book multikey PDF; even a
+small book has an index and one range. The index is created even with `json = false`
+or `--no-json`, if multikey books are enabled. No extra MIDI, audio, printouts,
+or covers are generated.
+
+Use a viewer with PDF-layer support or a website with multikey controls. Viewer
+support varies; use the ordinary PDF for conventional printing and maximum
+compatibility. Hidden alternatives may still appear in search, copied text, or
+accessibility output. When updating a live website, publish the matching ordinary
+PDF, index, and ranges together; see the
+[deployment guidance](ARCHITECTURE.md#build-jobs-and-publication).
+
+Give songs stable `id=` values (lowercase letters, digits, and dashes) and accurate
+`key=` metadata. Missing or invalid IDs skip that song's interactive layers with a
+warning. Major and minor keys are supported; modal suffixes such as `lyd.`, `dor.`,
+or `mix.` leave scores original-only, without guessing a key. Unsupported scores
+or alternatives that cannot be engraved safely retain the original notation with
+a warning. Score transposition supports
+standard ULSBS snippets and selected named-variable score layouts, not arbitrary
+LilyPond code. Recommended singing keys (`gk=`), standalone `\altchords`, prose,
+and chord diagrams do not switch.
+
+Multikey builds take longer, especially with score transposition. Successful score
+alternatives are cached for later builds. Use `--clear-score-cache` to rebuild
+them if needed, or `--no-multikey` or `--quick` to skip multikey editions for one build.
 
 Other optional settings:
 
-- `multikey-layer-ui = "native"` shows the viewer's layer list; `"hidden"` hides
-  it for viewers with their own key controls.
+- `multikey-layer-ui = "native"` (default) requests the viewer's layer list;
+  `"hidden"` requests hiding it for viewers with their own key controls. Some
+  viewers still expose the list.
 - `multikey-min-chordname-scale = 0.85` limits chord-name shrinking (range
   `0.5` to `1`); use `1` to disable shrinking. Long names may then overhang.
-- `multikey-require-song-ids = true` makes missing or invalid song IDs an error.
+- `multikey-require-song-ids = true` (default `false`) or `--require-song-ids`
+  makes missing or invalid song IDs an error in multikey editions.
+- `multikey-max-pages-per-range = 50` is the nominal maximum physical pages per range.
+- `multikey-target-max-range-bytes = 33554432` targets 32 MiB per extracted file.
 
-Use `--no-multikey` or `--quick` to skip these editions for a build. Viewers
-vary in their layer support; use the ordinary PDF for conventional printing.
-See [Architecture](ARCHITECTURE.md#multikey-books) for implementation details,
-viewer integration and cache maintenance.
+Both sizing options require positive TOML integers and follow normal profile
+inheritance; dashed and snake_case names are accepted. Smaller ranges may be
+created to meet the byte target. A single page over the target is kept with a
+warning. Range numbers refer to physical PDF pages, including covers, not printed
+page labels; use the index rather than assuming fixed 50-page ranges.
+
+If packaging fails validation, the build reports an error rather than publishing
+an incomplete multikey edition. See [Architecture](ARCHITECTURE.md#multikey-books)
+for viewer integration, package contracts, and cache maintenance.
 
 ### Creating song selections
 
@@ -1085,25 +1110,14 @@ The version identifies the destination syntax. The former
 `ulsbs-migrate-melody-syntax` command is retained as a compatibility alias.
 
 `--check` never writes and exits nonzero while legacy syntax remains. `--diff`
-and `--write` are file-atomic: they process only files with no diagnostics,
-although `--write` may still change other safe files in a directory. `--diff`
-prints only safe conversions. Comments and verbatim-like regions are ignored.
-The tool reports
+previews safe conversions; `--write` updates only files with no diagnostics,
+although it may still change other safe files in a directory. The tool reports
 malformed arguments, compound pitches, incompatible offsets, ambiguous secondary
 placement, and low `\mnd`/`\mad` forms. Use `--normalize-low` only after review;
 it normalizes those slots but never changes verse environments. The migrator does
-not infer missing secondary-note slots. Baseline alternate-only `\ma`/`\mac`
-forms become secondary notes under `\melodySecondaryPosition{same}`. A uniform
-verse receives one scoped setting; mixed placement receives a local TeX group.
-
-The melody-block grammar also accepts `/` as a rendered, one-slot unpitched
-marker. This preserves the legacy circled `/` marker; it is deliberately not
-converted to `_`, which is an empty slot. Legacy commands are migrated only from
-the leading melody/beat layer. A leading replay caret is preserved before the
-generated block, for example `\[^\mnc{C}]` becomes `\[^<C>]`. Alternate chords
-remain after it while their selector syntax is converted, for example
-`\ac<1>{Em}` becomes `\ac{1}{Em}`. A legacy melody command after chord content
-is reported instead of being hoisted across that content.
+not infer missing secondary-note slots. Review diagnostics and converted notation
+before committing your sources. See [migration details](ARCHITECTURE.md#syntax-migration)
+for placement and preservation rules.
 
 ## Editor support
 
@@ -1120,54 +1134,22 @@ Installation instructions are in:
 
 ## Testing
 
-Run the complete test suite from the ULSBS source directory with:
+If you are updating or developing ULSBS, run its test suite from the source
+directory with:
 
 ```sh
 ./ulsbs-test
 ```
 
-Tests use the same Docker or Podman `ulsbs-compiler` image as normal songbook
-compilation. The command builds the image when necessary, runs LuaLaTeX
-regression tests through `l3build`, and runs compilation/PDF-structure tests
-through Python's standard-library `unittest` runner.
-
-Useful options:
-
-```sh
-./ulsbs-test --container-rebuild
-./ulsbs-test --container-engine podman
-./ulsbs-test --no-container
-./ulsbs-test --verbose
-```
-
-Host testing is intended for development only; the containerized suite is the
-canonical result because it uses the supported ULSBS toolchain and fonts.
-
-Renderer validation, PDF inspection, and performance observations are documented
-in [Architecture](ARCHITECTURE.md#validation-and-performance).
+Tests use the normal Docker or Podman build image. Developer runner options,
+regression coverage, and performance observations are documented in
+[Architecture](ARCHITECTURE.md#testing).
 
 ## More information
 
-[Architecture](ARCHITECTURE.md) describes build-job contracts, the PDF layer
-protocol, notation state and layout, key spelling, and viewer compatibility.
-
-The most important source files to inspect when extending or debugging ULSBS
-are:
-
-- `src/ulsbs/assets/tex/ulsbs-songbook.cls`
-- `src/ulsbs/assets/tex/ulsbs.sty`
-- `src/ulsbs/cli.py`
-- `src/ulsbs/pipeline.py`
-- `ulsbs-config-example.toml`
-
-The main wrapper scripts are:
-
-- `ulsbs-compile`
-- `ulsbs-bookmeta`
-- `ulsbs-midi2audio`
-- `ulsbs-ly2tex`
-- `ulsbs-migrate-syntax-v1`
-- `ulsbs-test`
+Use [`ulsbs-config-example.toml`](ulsbs-config-example.toml) for the full public
+configuration reference. [Architecture](ARCHITECTURE.md) covers engine development,
+viewer integration, PDF contracts, and troubleshooting internals.
 
 Release steps for the repository maintainer are documented in
 [`MAINTAINERS.md`](MAINTAINERS.md).

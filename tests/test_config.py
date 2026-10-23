@@ -45,6 +45,10 @@ class MultikeyConfigTests(unittest.TestCase):
         cfg = self.build("")
         self.assertFalse(cfg.multikey_books)
         self.assertFalse(Config().multikey_books)
+        self.assertEqual(cfg.multikey_max_pages_per_range, 50)
+        self.assertEqual(Config().multikey_max_pages_per_range, 50)
+        self.assertEqual(cfg.multikey_target_max_range_bytes, 33554432)
+        self.assertEqual(Config().multikey_target_max_range_bytes, 33554432)
         self.assertEqual(cfg.multikey_layer_ui, "native")
         self.assertFalse(cfg.multikey_require_song_ids)
         self.assertFalse(Config().multikey_require_song_ids)
@@ -52,6 +56,40 @@ class MultikeyConfigTests(unittest.TestCase):
         self.assertFalse(Config().multikey_lilypond_scores)
         self.assertEqual(cfg.multikey_min_chordname_scale, 0.85)
         self.assertEqual(Config().multikey_min_chordname_scale, 0.85)
+
+    def test_range_sizes_accept_positive_integers_and_normalized_keys(self) -> None:
+        """Range tuning accepts either key spelling without enabling the edition."""
+        for name in ("multikey-max-pages-per-range", "multikey-target-max-range-bytes"):
+            for separator in ("-", "_"):
+                option = name.replace("-", separator)
+                for value in (1, 30, 50, 33554432):
+                    for prefix in ("", "[profiles.default]\n"):
+                        with self.subTest(option=option, value=value, prefix=prefix):
+                            cfg = self.build(prefix + f"{option} = {value}\n")
+                            self.assertEqual(getattr(cfg, name.replace("-", "_")), value)
+                            self.assertFalse(cfg.multikey_books)
+
+    def test_range_sizes_follow_profile_inheritance_and_overrides(self) -> None:
+        for name in ("multikey-max-pages-per-range", "multikey-target-max-range-bytes"):
+            with self.subTest(name=name):
+                text = (
+                    f'{name} = 50\n[profiles.base]\n{name} = 30\n'
+                    '[profiles.inherited]\ninherit-from = "base"\n'
+                    f'[profiles.child]\ninherit-from = "inherited"\n{name} = 1\n'
+                )
+                field = name.replace("-", "_")
+                self.assertEqual(getattr(self.build(text), field), 50)
+                self.assertEqual(getattr(self.build(text, "inherited"), field), 30)
+                self.assertEqual(getattr(self.build(text, "child"), field), 1)
+
+    def test_range_sizes_reject_non_integer_and_non_positive_values(self) -> None:
+        """TOML booleans and integral floats are not positive-integer settings."""
+        for name in ("multikey-max-pages-per-range", "multikey-target-max-range-bytes"):
+            for value in ('"50"', "true", "false", "1.0", "0", "-1", "nan", "inf", "[]", "{}"):
+                for prefix in ("", "[profiles.default]\n"):
+                    with self.subTest(name=name, value=value, prefix=prefix):
+                        with self.assertRaisesRegex(ValueError, name + " must be a positive integer"):
+                            self.build(prefix + f"{name} = {value}\n")
 
     def test_chordname_scale_accepts_numeric_bounds_and_normalized_keys(self) -> None:
         for separator in ("-", "_"):

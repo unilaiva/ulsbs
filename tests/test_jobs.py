@@ -107,22 +107,28 @@ class MultikeyJobTests(unittest.TestCase):
             selected = [job for job in jobs if job.doc_tex_abs == doc]
             self.assertEqual([job.multikey for job in selected], [False] * 4 + [True] * 3)
 
-    def test_companion_cannot_overwrite_another_selected_document(self) -> None:
-        other = self.root / "book_MULTIKEY_A5.tex"
+    def test_multikey_stem_can_match_an_ordinary_document(self) -> None:
+        """A shared stem is safe when the jobs own different publication paths."""
+        other = self.root / "book_A5_MULTIKEY.tex"
         other.write_text("\\documentclass{article}\n", encoding="utf-8")
-        with self.assertRaisesRegex(ValueError, r"Output filename collision.*book_MULTIKEY_A5\.json"):
-            build_job_queue(replace(self.cfg, songbooks=(self.doc, other)))
-        self.assertFalse((self.root / "temp").exists())
+        for json in (False, True):
+            with self.subTest(json=json):
+                jobs = build_job_queue(replace(self.cfg, songbooks=(self.doc, other), json=json))
+                self.assertEqual(sum(build_job_basename(job) == "book_A5_MULTIKEY" for job in jobs), 2)
+                self.assertFalse((self.root / "temp").exists())
 
-        jobs = build_job_queue(replace(
-            self.cfg, songbooks=(self.doc, other), multikey_books=False,
-        ))
-        self.assertEqual(len({build_job_basename(job) for job in jobs}), len(jobs))
+    def test_multikey_index_collisions_are_checked_without_json_export(self) -> None:
+        # Duplicate only the multikey jobs to isolate their mandatory index path.
+        from unittest.mock import patch
 
-        # With JSON disabled these identical PDF basenames occupy different
-        # directories, so there is no publication collision to reject.
-        jobs = build_job_queue(replace(self.cfg, songbooks=(self.doc, other), json=False))
-        self.assertEqual(sum(build_job_basename(job) == "book_MULTIKEY_A5" for job in jobs), 2)
+        job = Job(self.doc, self.doc.stem, "default", self.root / "default", multikey=True)
+        for json in (False, True):
+            with self.subTest(json=json):
+                with patch("ulsbs.jobs.replace", return_value=job):
+                    with self.assertRaisesRegex(
+                        ValueError, r"Output filename collision.*multikey/book_A5_MULTIKEY_RANGES\.json"
+                    ):
+                        build_job_queue(replace(self.cfg, json=json))
 
     def test_variant_cannot_overwrite_another_selected_document(self) -> None:
         other = self.root / "book_CHARANGO_A5.tex"
@@ -152,11 +158,9 @@ class MultikeyJobTests(unittest.TestCase):
                     self.assertFalse(job.multikey)
                     self.assertEqual(build_job_basename(job), build_variant_basename(stem, marker))
                     if variant != "lyrics":
-                        suffix = "_A5" if stem.endswith("_A5") else "_A4" if stem.endswith("_A4") else ""
-                        base = stem[:-len(suffix)] if suffix else stem
                         self.assertEqual(
                             build_job_basename(replace(job, multikey=True)),
-                            base + "_MULTIKEY" + marker + suffix,
+                            build_variant_basename(stem, marker) + "_MULTIKEY",
                         )
 
     def test_multikey_constants_use_result_list_width(self) -> None:

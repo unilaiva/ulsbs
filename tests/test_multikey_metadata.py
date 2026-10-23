@@ -1,16 +1,14 @@
 # SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Public multikey layer identities, embedded JSON, and physical UI anchors."""
+"""Public multikey layer identities, finalized sidecar JSON, and physical UI anchors."""
 
 from __future__ import annotations
 
-import base64
 import io
 import json
 import shutil
 import unittest
-import xml.etree.ElementTree as ET
 
 import pikepdf
 
@@ -21,15 +19,14 @@ from test_pdf_transposition_layers import (
 from test_tex_integration import compile_fixture
 
 
-def embedded_multikey_info(pdf: bytes) -> dict | None:
-    structure = PdfStructure(pdf)
-    reference = structure.catalog.get("/Metadata")
-    if reference is None:
-        return None
-    stream = structure.objects[f"obj:{reference}"]["stream"]
-    xml = ET.fromstring(base64.b64decode(stream["data"]))
-    field = xml.find(".//{urn:ulsbs:multikey:1}multikey")
-    return json.loads(field.text) if field is not None else None
+def compile_with_manifest(name: str, **kwargs) -> tuple[str, bytes, dict]:
+    """Return PDF and finalized sidecar separately; a missing sidecar is a failure."""
+    filename = f"{name}.ulsbs-multikey.json"
+    artifacts = {filename: None}
+    output, pdf = compile_fixture(name, artifacts=artifacts, **kwargs)
+    if artifacts[filename] is None:
+        raise AssertionError("Successful multikey compile did not finalize its sidecar")
+    return output, pdf, json.loads(artifacts[filename])
 
 
 def layer_page_dependencies(pdf) -> dict[str, list[int]]:
@@ -74,10 +71,10 @@ class MultikeyMetadataTests(unittest.TestCase):
         cls.ordinary_output, cls.ordinary = compile_fixture(
             "multikey-metadata", passes=3, multikey=False, artifacts=cls.ordinary_artifacts,
         )
-        _, cls.hidden = compile_fixture(
+        _, cls.hidden, cls.hidden_envelope = compile_with_manifest(
             "multikey-metadata", passes=3, preamble="\\def\\ulPdfTranspositionLayerUI{hidden}\n",
         )
-        cls.envelope = embedded_multikey_info(cls.pdf)
+        cls.envelope = json.loads(cls.artifacts["multikey-metadata.ulsbs-multikey.json"])
         cls.info = cls.envelope["multikey_info"]
         cls.songs = cls.info["songs"]
 
@@ -121,11 +118,68 @@ class MultikeyMetadataTests(unittest.TestCase):
         self.assertIn(prefixes[1] + ":t02", on)
         self.assertIn(prefixes[3] + ":t00", on)
 
-    def test_publication_payload_is_the_same_as_embedded_json(self) -> None:
-        raw = self.artifacts["multikey-metadata.ulsbs-multikey.json"]
-        self.assertIsNotNone(raw)
-        self.assertEqual(json.loads(raw), self.envelope)
+    def assert_no_embedded_json(self, data: bytes) -> None:
+        """Check PDF metadata and attachment channels without scanning graphics."""
+        with pikepdf.open(io.BytesIO(data)) as pdf:
+            # Inspect metadata channels, not arbitrary font or drawing bytes.
+            payloads = [str(value).encode() for _, value in pdf.docinfo.items()]
+            for obj in pdf.objects:
+                if isinstance(obj, pikepdf.Stream):
+                    self.assertNotEqual(obj.get('/Type'), '/EmbeddedFile')
+                    if obj.get('/Type') == '/Metadata' or obj.get('/Subtype') == '/XML':
+                        payloads.append(obj.read_bytes())
+                elif isinstance(obj, pikepdf.Dictionary):
+                    self.assertNotIn('/EmbeddedFiles', obj)
+                    self.assertNotIn('/AF', obj)
+            for payload in payloads:
+                for marker in (b'ulsbs:multikey', b'urn:ulsbs:multikey',
+                               b'has_multikey_info', b'multikey_info'):
+                    self.assertNotIn(marker, payload)
+                try:
+                    value = json.loads(payload)
+                except (ValueError, UnicodeDecodeError):
+                    continue
+                self.assertNotIsInstance(value, (dict, list))
+
+    def test_json_is_only_in_the_finalized_compile_sidecar(self) -> None:
+        for data in (self.pdf, self.ordinary, self.hidden):
+            self.assert_no_embedded_json(data)
         self.assertIsNone(self.ordinary_artifacts["multikey-metadata.ulsbs-multikey.json"])
+
+    def test_existing_standard_xmp_and_info_are_preserved(self) -> None:
+        """Sidecar finalization leaves standard metadata, even escaped names, intact."""
+        xmp = (
+            '<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+            '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+            '<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/">'
+            '<dc:rights>Fixture attribution and rights</dc:rights>'
+            '</rdf:Description></rdf:RDF></x:xmpmeta>'
+        )
+        for name in ('"/Metadata"', '"/Meta" .. string.char(35) .. "64ata"'):
+            with self.subTest(catalog_name=name):
+                _, data, envelope = compile_with_manifest(
+                    'multikey-metadata', passes=3, preamble=(
+                        r'\AtBeginDocument{\hypersetup{pdftitle={Preserved title},'
+                        r'pdfauthor={Fixture author},pdfsubject={Required attribution},'
+                        r'pdfkeywords={Ordinary keywords}}\directlua{'
+                        'local object = pdf.immediateobj("stream", '
+                        # Avoid TeX parameter tokens inside the hook definition.
+                        + '[[' + xmp.replace('#', ']] .. string.char(35) .. [[') + ']], '
+                        '"/Type /Metadata /Subtype /XML"); '
+                        'pdf.setcatalog((pdf.getcatalog() or "") .. " " .. '
+                        + name + ' .. " " .. object .. " 0 R")}}\n'
+                    ),
+                )
+                self.assertEqual(envelope, self.envelope)
+                with pikepdf.open(io.BytesIO(data)) as pdf:
+                    self.assertEqual(pdf.Root.Metadata.read_bytes(), xmp.encode())
+                    for key, value in {
+                        '/Title': 'Preserved title', '/Author': 'Fixture author',
+                        '/Subject': 'Required attribution', '/Keywords': 'Ordinary keywords',
+                    }.items():
+                        self.assertEqual(str(pdf.docinfo[key]), value)
+                self.assert_no_embedded_json(data)
+                pdf_command(data, ["qpdf", "--check", "{pdf}"])
 
     def test_shipout_anchors_use_physical_pages_and_exist_without_any_tags(self) -> None:
         self.assertEqual([song["page_index"] for song in self.songs], [1, 2, 3, 4])
@@ -165,8 +219,9 @@ class MultikeyMetadataTests(unittest.TestCase):
         self.assertEqual([song['layer_page_indices'] for song in self.songs], [[1], [2], [3], [4]])
 
     def test_page_union_includes_hidden_reused_boxes_not_headers_or_page_ranges(self) -> None:
-        _, data = compile_fixture('multikey-pages', passes=3)
-        songs = embedded_multikey_info(data)['multikey_info']['songs']
+        _, data, envelope = compile_with_manifest('multikey-pages', passes=3)
+        self.assert_no_embedded_json(data)
+        songs = envelope['multikey_info']['songs']
         self.assertEqual([song['song_id'] for song in songs], ['shared', 'shared'])
         self.assertEqual([song['page_index'] for song in songs], [1, 1])
         self.assertEqual([song['layer_page_indices'] for song in songs], [[1, 3, 4, 5], [1]])
@@ -194,19 +249,20 @@ class MultikeyMetadataTests(unittest.TestCase):
         self.assertIn('TeXleadershasunknownpagedependencies', ''.join(output.split()))
 
     def test_entirely_hidden_notation_has_no_ocgs_or_song_records(self) -> None:
-        _, data = compile_fixture('multikey-metadata', passes=2, preamble=(
+        _, data, envelope = compile_with_manifest('multikey-metadata', passes=2, preamble=(
             r'\AtBeginDocument{\chordsoff\shownotesfalse}'))
-        self.assertEqual(embedded_multikey_info(data)['multikey_info']['songs'], [])
+        self.assertEqual(envelope['multikey_info']['songs'], [])
+        self.assert_no_embedded_json(data)
         self.assertEqual(PdfStructure(data).layers, {})
 
     def test_hidden_ui_keeps_the_same_manifest_and_positions(self) -> None:
-        self.assertEqual(embedded_multikey_info(self.hidden), self.envelope)
+        self.assertEqual(self.hidden_envelope, self.envelope)
         self.assertEqual(PdfStructure(self.hidden).order_references(), set())
 
     def test_metadata_and_position_markers_do_not_change_default_layout(self) -> None:
         self.assertNotIn("was incomplete", self.output)
         self.assertNotIn("was incomplete", self.ordinary_output)
-        self.assertIsNone(embedded_multikey_info(self.ordinary))
+        self.assert_no_embedded_json(self.ordinary)
         self.assertEqual(PdfStructure(self.ordinary).layers, {})
         self.assertEqual(words_and_geometry(self.pdf), words_and_geometry(self.ordinary))
         self.assertEqual(rendered_pages(self.pdf), rendered_pages(self.ordinary))
@@ -226,7 +282,7 @@ class MultikeyMetadataTests(unittest.TestCase):
             preamble="\\def\\ulPdfTranspositionRequireSongIDs{true}\n",
         )
         self.assertNotIn("Missing or invalid song id", output)
-        self.assertIsNone(embedded_multikey_info(pdf))
+        self.assert_no_embedded_json(pdf)
 
 
 if __name__ == "__main__":
