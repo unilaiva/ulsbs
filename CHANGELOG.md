@@ -3,12 +3,10 @@
 Changes accumulate under Unreleased and move to a dated version heading when
 the extension is released.
 
-## [Unreleased]
+## Unreleased
 
-### Added
-
-- Add `\symdim` and `\symhalfdim` macros for diminished and half-diminished chords.
-- Optional MULTIKEY editions with independent per-song key selection, native or
+- Added `\symdim` and `\symhalfdim` macros for diminished and half-diminished chords.
+- Added optional MULTIKEY editions with independent per-song key selection, native or
   programmatic layer controls, configurable chord-name shrinking, optional strict
   song-ID validation, and page-aware JSON metadata. Enable with
   `multikey-books = true`; ordinary PDFs remain layer-free. Each edition provides
@@ -18,15 +16,12 @@ the extension is released.
   `multikey-max-pages-per-range` (50) and `multikey-target-max-range-bytes`
   (33554432, 32 MiB). Book metadata uses `multikey_json_file`; PDFs contain no
   embedded JSON. See [Multikey PDF editions](README.md#multikey-pdf-editions).
-- Opt-in LilyPond score transposition for MULTIKEY editions, with validated persistent
+- Added opt-in LilyPond score transposition for MULTIKEY editions, with validated persistent
   caching, original-score fallback, `--clear-score-cache`, and asset audit/rewrite tools.
-- `+` modifier for `\beginverse`, enabling the larger melody-note line spacing
+- Added a `+` modifier for `\beginverse`, enabling the larger melody-note line spacing
   previously selected by a separate verse command. It composes with the
   existing unnumbered `*` modifier and `[n]` indentation as
   `\beginverse*+[n]`.
-
-### Changed
-
 - Songbook PDFs, including multikey editions, now use automatic, lossless font
   sharing to reduce file size while preserving appearance and all embedded glyphs.
   Host builds require `pikepdf` 8+; rebuild existing compiler images after upgrading. See
@@ -43,32 +38,24 @@ the extension is released.
 - Song metadata extraction and the VS Code extension now recognize every
   supported `\beginverse` modifier combination through the single canonical
   verse construct.
-
-### Removed
-
-- The separate melody-spaced verse commands. Use `\beginverse+` and
+- Removed the separate melody-spaced verse commands. Use `\beginverse+` and
   `\endverse` instead, and run `ulsbs-migrate-syntax-v1` on existing sources.
 
-## [0.2.1] - 2026-09-26
+## v0.2.1 - 2026-09-26
 
-### Added
-
-- `#` and `&` accidental shorthand in alternate chords and musical key
+- Added `#` and `&` accidental shorthand in alternate chords and musical key
   metadata, while retaining `\shrp` and `\flt`.
-- Default-off `\iftransposealtchords` control for transposing `\altchords`,
+- Added a default-off `\iftransposealtchords` control for transposing `\altchords`,
   including nested `\id` and `\ac` content and `\notrans` exclusions.
   Transposable alternate chords must use `#` and `&` for accidentals rather
   than `\shrp` and `\flt`.
-
-### Changed
-
 - Renamed the expanded migration tool and its module to
   `ulsbs-migrate-syntax-v1`; `ulsbs-migrate-melody-syntax` remains available as
   a compatibility alias.
 - `ulsbs-migrate-syntax-v1` now also migrates explicit accidental macros to the
   shorthand within the newly supported contexts.
 
-## [0.2.0] - 2026-09-23
+## v0.2.0 - 2026-09-23
 
 > [!IMPORTANT]
 > This release completely replaces the melody-note and beat-mark authoring
@@ -81,14 +68,9 @@ the extension is released.
 > ulsbs-migrate-melody-syntax --write PATH
 > ```
 
-### Added
-
-- Melody-block syntax and renderer with sequences, two voices, beats, gaps,
+- Added melody-block syntax and renderer with sequences, two voices, beats, gaps,
   offsets, zero-advance blocks, scoped positioning/styles, replay, and
   visibility controls.
-- `ulsbs-migrate-melody-syntax` for checked, file-atomic source migration.
-
-### Removed
-
-- Legacy `\mn*`, `\ma*`, `\bm*`, and `\usealtmnstyle...` authoring macros.
-- Legacy `\ac<n>{Chord}` syntax, replaced by `\ac{n}{Chord}`.
+- Added `ulsbs-migrate-melody-syntax` for checked, file-atomic source migration.
+- Removed legacy `\mn*`, `\ma*`, `\bm*`, and `\usealtmnstyle...` authoring macros.
+- Replaced legacy `\ac<n>{Chord}` syntax with `\ac{n}{Chord}`.
