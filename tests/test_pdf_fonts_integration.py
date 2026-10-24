@@ -78,7 +78,7 @@ class LilyPondFontSharingTests(unittest.TestCase):
             (content / "song.tex").write_text(
                 "\\end{songs}\\clearpage\\begin{songs}{}\n".join(snippets), encoding="utf-8",
             )
-            paths = SimpleNamespace(project_root=root, result_dir=result,
+            paths = SimpleNamespace(project_root=root, host_project_root=root, result_dir=result,
                                     content_dir=content, include_dir=root / "include")
             cfg = replace(
                 Config(), runtime=SimpleNamespace(project_paths=paths, in_container=False),

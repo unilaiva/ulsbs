@@ -42,7 +42,7 @@ class PartialDeploymentTests(unittest.TestCase):
         self.result_dir.mkdir()
         self.deploy_dir.mkdir()
         self.paths = SimpleNamespace(
-            project_root=self.root, result_dir=self.result_dir,
+            project_root=self.root, host_project_root=self.root, result_dir=self.result_dir,
             config_file=self.root / "config.json",
         )
         self.cfg = replace(
@@ -330,13 +330,45 @@ class PartialDeploymentTests(unittest.TestCase):
         text = output.getvalue()
         self.assertIn("2 succeeded (1 with warnings), 1 failed, 1 blocked, 0 skipped", text)
         self.assertIn("3 warning diagnostics across all job outcomes", text)
-        self.assertIn("2 warnings", text)
+        self.assertNotIn("2 warnings", text)
         self.assertIn("FAILED", text)
         self.assertIn("compile failed", text)
         self.assertIn("BLOCKED", text)
         self.assertIn("ordinary unavailable", text)
         self.assertIn("Run-level advisories: 1 (separate from job warnings)", text)
         self.assertEqual(len(ui.run_diagnostics), 1)
+
+    def test_summary_warned_job_recap_is_verbose_only(self) -> None:
+        job = self.job("warned")
+        result = pipeline.ParallelRunResult(
+            successes=[pipeline.JobSuccess(job, 2)], failures=[], total_warnings=2,
+        )
+        for verbose in (False, True):
+            with self.subTest(verbose=verbose):
+                ui = Mock()
+                ui.fmt_doc.return_value = "warned-book"
+                cli.print_run_summary(ui, replace(self.cfg, verbose=verbose), result, 1)
+                ui.success_line.assert_called_once_with(
+                    "Finished: 1 jobs; 1 succeeded (1 with warnings), 0 failed, 0 blocked, 0 skipped."
+                )
+                ui.warning_line.assert_called_once_with(
+                    "2 warning diagnostics across all job outcomes.", record=False,
+                )
+                details = [call.args[0] for call in ui.space_line.call_args_list]
+                self.assertEqual("warned-book: 2 warnings" in details, verbose)
+                ui.see_line.assert_called_once_with("result/diagnostics")
+
+    def test_summary_diagnostics_link_is_relative_inside_container(self) -> None:
+        paths = SimpleNamespace(
+            project_root=Path("/songbook-data"), result_dir=Path("/songbook-data/result"),
+        )
+        cfg = replace(self.cfg, runtime=SimpleNamespace(project_paths=paths, in_container=True))
+        result = pipeline.ParallelRunResult(
+            successes=[pipeline.JobSuccess(self.job("warned"), 1)],
+            failures=[], total_warnings=1,
+        )
+        cli.print_run_summary(self.ui, cfg, result, 1)
+        self.ui.see_line.assert_called_once_with("result/diagnostics")
 
 
 if __name__ == "__main__":

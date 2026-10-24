@@ -6,9 +6,12 @@ the extension is released.
 ## Unreleased
 
 - Compiler warnings now use structured, source-aware diagnostic counts, compact
-  per-job summaries, clickable log paths, and retained `result/diagnostics/`
-  reports. Successful jobs remain `SUCCESS` with a warning count; related output
-  lines print atomically. Only the final LuaLaTeX invocation contributes warnings.
+  per-job summaries, clickable log paths, and retained `_DIAGNOSTICS.json` reports
+  under `result/diagnostics/` with host paths. Successful jobs remain `SUCCESS`
+  with a warning count; related output lines print atomically. Only the final
+  LuaLaTeX invocation contributes warnings. Native TeX error file/line locations
+  are retained in failed-job reports and linked in failure output without
+  guessing original lines for generated TeX.
 - Independent jobs continue after failures, while dependency-blocked multikey
   companions are distinguished from compilation failures. Automatic deployment
   requires a complete successful run; explicit `--deploy-last` deploys only

@@ -153,7 +153,7 @@ class LilyPondScoreIntegrationTests(unittest.TestCase):
             dependency.write_text("melody = { c'4 d' e' f' }\n", encoding='utf-8')
             layout = root / 'include/layout.tex'
             layout.write_text(r'\setlength{\textwidth}{200pt}' + '\n', encoding='utf-8')
-            paths = SimpleNamespace(project_root=root, result_dir=root / 'result',
+            paths = SimpleNamespace(project_root=root, host_project_root=root, result_dir=root / 'result',
                                     content_dir=root / 'content', include_dir=root / 'include')
             cfg = replace(Config(), runtime=SimpleNamespace(project_paths=paths, in_container=False))
             job = Job(doc, doc.stem, 'default', root / 'job')
@@ -290,7 +290,7 @@ class LilyPondScoreIntegrationTests(unittest.TestCase):
                 r'\include "ulsbs-include-tail.ly"' + '\n'
                 r'\end{lilypond}\end{lilywrap}' + '\n'
                 r'\beginverse\[Am]After the long score.\endverse\endsong' + '\n', encoding='utf-8')
-            paths = SimpleNamespace(project_root=root, result_dir=root / 'result',
+            paths = SimpleNamespace(project_root=root, host_project_root=root, result_dir=root / 'result',
                                     content_dir=root / 'content', include_dir=root / 'include')
             cfg = replace(Config(), runtime=SimpleNamespace(project_paths=paths, in_container=False),
                           multikey_books=True, create_printouts=False, coverimage=False, audiofiles=False,

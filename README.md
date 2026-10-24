@@ -320,8 +320,13 @@ requiring a message whitelist. Those without a specialized category appear as
 logs. Entirely unfamiliar warning header formats may require parser support.
 
 The final summary identifies warned jobs, failures, blocked companions, and
-intentionally skipped outputs. Per-job JSON diagnostic reports remain under
-`result/diagnostics/`, even when temporary files are cleaned. Full raw tool logs
+intentionally skipped outputs. Per-job `<book-basename>_DIAGNOSTICS.json` reports
+remain under `result/diagnostics/`, even when temporary files are cleaned. Paths
+in these reports use host locations, including during container builds.
+Failed jobs also retain native TeX error locations when available, and display
+a clickable file-and-line link independently of the log-tail limit. These lines
+refer to the file TeX actually read, which can be staged or generated TeX; they
+are not guessed mappings back to the original document. Full raw tool logs
 require `--keep-temp`; warning-bearing logs are linked as jobs finish so they can
 be inspected while other jobs continue.
 

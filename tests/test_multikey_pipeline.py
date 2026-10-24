@@ -56,7 +56,7 @@ class MultikeyPipelineTests(unittest.TestCase):
         self.addCleanup(lambda: resultlist.delete() if resultlist._initialized else None)
         self.deploy = self.root / "deploy"
         self.deploy.mkdir()
-        self.paths = SimpleNamespace(project_root=self.root, result_dir=self.result)
+        self.paths = SimpleNamespace(project_root=self.root, host_project_root=self.root, result_dir=self.result)
         self.cfg = replace(
             Config(),
             multikey_books=True,
@@ -975,7 +975,7 @@ class MultikeyPipelineTests(unittest.TestCase):
                 warnings.assert_not_called()
                 self.assertEqual(count, pipeline.PackagingResult(3, diagnostics, skipped=output is None))
                 report = json.loads((self.result / "diagnostics" /
-                                     (build_job_basename(multikey) + ".json")).read_text())
+                                     (build_job_basename(multikey) + "_DIAGNOSTICS.json")).read_text())
                 self.assertEqual(report["status"], "skipped" if output is None else "success")
                 self.assertEqual(report["warnings"][0]["occurrences"], 3)
                 if output is None:
@@ -1375,6 +1375,33 @@ class MultikeyPipelineTests(unittest.TestCase):
                 self.assertIn(f"layers={layers}", outputs)
                 self.assertEqual("strict IDs=" in outputs, layers)
                 self.assertEqual("layer UI=" in outputs, layers)
+
+    def test_startup_paths_use_host_locations_and_artifact_has_its_own_line(self) -> None:
+        for in_container, multikey in product((False, True), repeat=2):
+            with self.subTest(in_container=in_container, multikey=multikey):
+                root = Path("/songbook-data") if in_container else self.root
+                paths = SimpleNamespace(project_root=root, host_project_root=self.root,
+                                        result_dir=root / "result")
+                cfg = replace(self.cfg, verbose=True, use_container=in_container,
+                              runtime=SimpleNamespace(project_paths=paths, in_container=in_container))
+                job = Job(root / self.doc.name, self.doc.stem, "default",
+                          root / "temp" / "book" / "default", multikey)
+                self.ui.reset_mock()
+                with patch.object(pipeline, "JobLock"), patch.object(pipeline, "prepare_compile_dir"), \
+                        patch.object(pipeline, "which", return_value=None), \
+                        patch.object(pipeline, "make_variant_tex", side_effect=RuntimeError("stop")):
+                    with self.assertRaisesRegex(RuntimeError, "stop"):
+                        pipeline._compile_one_job(self.ui, Mock(), cfg, job)
+                settings, = self.ui.debug_line.call_args.args
+                lines = settings.splitlines()
+                self.assertEqual(len(lines), 3)
+                self.assertTrue(lines[0].startswith(f"Source: {self.doc}"))
+                self.assertIn(f"compile: {self.root / 'temp/book/default'}", lines[0])
+                directory = self.result / RESULT_MULTIKEY_SUBDIRNAME if multikey else self.result
+                artifact = directory / (build_job_basename(job) + ("_RANGES.json" if multikey else ".pdf"))
+                self.assertEqual(lines[1], f"{'Index' if multikey else 'PDF'}: {artifact}")
+                self.assertTrue(lines[2].startswith("Outputs:"))
+                self.assertNotIn("/songbook-data/", settings)
 
     def test_deployment_skips_legacy_full_multikey_records_and_preserves_unowned_artifacts(self) -> None:
         resultlist.initialize(self.result, "deploy-test")

@@ -40,7 +40,7 @@ class PipelinePdfFontsTests(unittest.TestCase):
         self.cfg = replace(
             Config(), max_log_lines=0,
             runtime=SimpleNamespace(project_paths=SimpleNamespace(
-                project_root=self.root, result_dir=self.result,
+                project_root=self.root, host_project_root=self.root, result_dir=self.result,
             ), in_container=False),
         )
 

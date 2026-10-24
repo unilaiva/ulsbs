@@ -173,13 +173,15 @@ def print_run_summary(ui, cfg, result, jobs_count):
         ui.success_line(text)
     if result.total_warnings:
         ui.warning_line(f"{result.total_warnings} warning diagnostics across all job outcomes.", record=False)
-    for item in sorted(warned, key=lambda item: build_job_basename(item.job)):
-        ui.space_line(f"{ui.fmt_doc(item.job)}: {item.warning_count} warnings")
+    if cfg.verbose:
+        for item in sorted(warned, key=lambda item: build_job_basename(item.job)):
+            ui.space_line(f"{ui.fmt_doc(item.job)}: {item.warning_count} warnings")
     for item in sorted(result.failures, key=lambda item: build_job_basename(item.job)):
         label = "BLOCKED" if item.blocked else "FAILED"
         ui.space_line(f"{label} {ui.fmt_doc(item.job)}: {item.reason}")
     if result.total_warnings:
-        ui.see_line(str(cfg.runtime.project_paths.result_dir / "diagnostics"))
+        paths = cfg.runtime.project_paths
+        ui.see_line(str((paths.result_dir / "diagnostics").relative_to(paths.project_root)))
         if cfg.clean_temp and not result.failures:
             ui.space_line("Diagnostic reports are retained; use --keep-temp for full tool logs.")
     if isinstance(ui, UI) and ui.run_diagnostics:

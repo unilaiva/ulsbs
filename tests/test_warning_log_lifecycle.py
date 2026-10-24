@@ -41,7 +41,8 @@ class WarningLogLifecycleTests(unittest.TestCase):
         self.job = Job(self.root / "book_A5.tex", "book_A5", "default", self.compile_dir)
         self.basename = build_job_basename(self.job)
         self.cfg = replace(Config(), runtime=SimpleNamespace(
-            project_paths=SimpleNamespace(project_root=self.root, result_dir=self.result_dir),
+            project_paths=SimpleNamespace(project_root=self.root, host_project_root=self.root,
+                                          result_dir=self.result_dir),
             in_container=False,
         ))
         self.ui = UI(use_colors=False)
@@ -208,10 +209,10 @@ class WarningLogLifecycleTests(unittest.TestCase):
 
         write_report = pipeline.write_diagnostic_report
 
-        def report(cfg, job, diagnostics, status):
+        def report(cfg, job, diagnostics, status, **kwargs):
             if failure_stage == "report" and status == "success":
                 raise failure
-            return write_report(cfg, job, diagnostics, status)
+            return write_report(cfg, job, diagnostics, status, **kwargs)
 
         commit = resultlist.commit_job
 
@@ -237,7 +238,7 @@ class WarningLogLifecycleTests(unittest.TestCase):
         with resultlist.job_scope(companion):
             self.assertEqual(resultlist.lines(), committed)
         diagnostic_report = (self.result_dir / "diagnostics"
-                             / (build_job_basename(companion) + ".json"))
+                             / (build_job_basename(companion) + "_DIAGNOSTICS.json"))
         self.assertEqual(json.loads(diagnostic_report.read_text(encoding="utf-8"))["status"], "failed")
         self.assertNotIn("SUCCESS", output.getvalue())
         lock = JobLock(companion_dir)

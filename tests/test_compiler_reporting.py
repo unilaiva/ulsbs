@@ -9,6 +9,7 @@ from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import replace
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -17,7 +18,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from ulsbs import pipeline, resultlist
+from ulsbs import cli, pipeline, resultlist
 from ulsbs.config import Config
 from ulsbs.constants import RESULT_TYPE_MAIN_PDF
 from ulsbs.diagnostics import Diagnostic
@@ -39,7 +40,8 @@ class CompilerReportingTests(unittest.TestCase):
         self.job = Job(self.doc, self.doc.stem, "default", self.compile_dir)
         self.basename = build_job_basename(self.job)
         self.cfg = replace(Config(), runtime=SimpleNamespace(
-            project_paths=SimpleNamespace(project_root=self.root, result_dir=self.result_dir),
+            project_paths=SimpleNamespace(project_root=self.root, host_project_root=self.root,
+                                          result_dir=self.result_dir),
             in_container=False,
         ))
         self.ui = UI(use_colors=False)
@@ -60,7 +62,7 @@ class CompilerReportingTests(unittest.TestCase):
             yield stdout, stderr
 
     def report(self):
-        path = self.result_dir / "diagnostics" / f"{self.basename}.json"
+        path = self.result_dir / "diagnostics" / f"{self.basename}_DIAGNOSTICS.json"
         return json.loads(path.read_text(encoding="utf-8"))
 
     def test_worker_warning_defers_output_and_retains_metadata(self):
@@ -389,7 +391,7 @@ class CompilerReportingTests(unittest.TestCase):
                     pipeline._report_failure(self.ui, replace(self.cfg, verbose=verbose, max_log_lines=8), failure, seen)
             output = stdout.getvalue() + stderr.getvalue()
             self.assertEqual(output.count("FAIL"), 2)
-            self.assertEqual(output.count("SEE"), 2)
+            self.assertEqual(output.count("SEE"), 4)
             self.assertIn("compile/first-failure.log", output)
             self.assertIn("compile/second-failure.log", output)
             self.assertEqual(output.count("FULL ERROR CONTEXT"), 2 if verbose else 1)
@@ -440,6 +442,238 @@ class CompilerReportingTests(unittest.TestCase):
         self.assertLess(text.index("first-block-start"), text.index("first-block-nested"))
         self.assertLess(text.index("first-block-nested"), text.index("first-block-end"))
         self.assertLess(text.index("first-block-end"), text.index("second-block"))
+
+    def _render_with_competing_exec(self, render, pause_prefix):
+        ready, release = threading.Event(), threading.Event()
+        attempted, finished = threading.Event(), threading.Event()
+        errors = []
+        print_line = self.ui._print_line
+
+        def pause_line(text, **kwargs):
+            print_line(text, **kwargs)
+            if text.startswith(pause_prefix):
+                ready.set()
+                if not release.wait(timeout=5):
+                    raise AssertionError("Timed out waiting to finish output block")
+
+        def reporting_worker():
+            try:
+                render(finished)
+            except Exception as error:
+                errors.append(error)
+
+        def other_worker():
+            try:
+                attempted.set()
+                self.ui.exec_line("COMPETING EXEC")
+            except Exception as error:
+                errors.append(error)
+            finally:
+                finished.set()
+
+        reporting = threading.Thread(target=reporting_worker, daemon=True)
+        other = threading.Thread(target=other_worker, daemon=True)
+        output = io.StringIO()
+        with redirect_stdout(output), redirect_stderr(output), \
+                patch.object(self.ui, "_print_line", side_effect=pause_line):
+            reporting.start()
+            try:
+                self.assertTrue(ready.wait(timeout=5))
+                other.start()
+                self.assertTrue(attempted.wait(timeout=5))
+                self.assertFalse(finished.wait(timeout=0.1), "exec_line split an output block")
+            finally:
+                release.set()
+                reporting.join(timeout=5)
+                if other.ident is not None:
+                    other.join(timeout=5)
+        self.assertFalse(reporting.is_alive())
+        self.assertFalse(other.is_alive())
+        self.assertEqual(errors, [])
+        return output.getvalue()
+
+    def test_start_and_verbose_settings_are_atomic_without_locking_preparation(self):
+        worker = pipeline._JobUI(self.ui, self.job)
+
+        def render(other_finished):
+            def prepare(**kwargs):
+                self.assertTrue(other_finished.wait(timeout=5), "Preparation holds the output lock")
+                raise RuntimeError("stop after preparation")
+
+            with patch.object(pipeline, "prepare_compile_dir", side_effect=prepare), \
+                    patch.object(pipeline, "which", return_value=None):
+                with self.assertRaisesRegex(RuntimeError, "stop after preparation"):
+                    pipeline._compile_one_job(worker, object(), replace(self.cfg, verbose=True), self.job)
+
+        text = self._render_with_competing_exec(render, self.ui.PRETXT_START)
+        self.assertEqual(text.count(self.ui.PRETXT_START), 1)
+        self.assertIn(self.ui.PRETXT_DEBUG + "Source:", text)
+        self.assertNotIn(self.ui.PRETXT_DEBUG + self.ui.fmt_doc(self.job), text)
+        self.assertLess(text.index("START"), text.index("Source:"))
+        self.assertLess(text.index("Source:"), text.index("Outputs:"))
+        self.assertLess(text.index("layers=False"), text.index("COMPETING EXEC"))
+
+    def test_failure_message_path_and_full_log_tail_are_atomic(self):
+        log = self.log("atomic-failure.log", "FIRST TAIL LINE\nLAST TAIL LINE\n")
+        failure = pipeline.JobFailure(self.job, "Failed atomically", log_path=log)
+
+        def render(_other_finished):
+            pipeline._report_failure(self.ui, replace(self.cfg, max_log_lines=2), failure, {})
+
+        text = self._render_with_competing_exec(render, self.ui.PRETXT_FAIL)
+        self.assertLess(text.index("Failed atomically"), text.index("compile/atomic-failure.log"))
+        self.assertLess(text.index("compile/atomic-failure.log"), text.index("FIRST TAIL LINE"))
+        self.assertLess(text.index("FIRST TAIL LINE"), text.index("LAST TAIL LINE"))
+        self.assertLess(text.index("LAST TAIL LINE"), text.index("COMPETING EXEC"))
+
+    def test_completion_failure_and_summary_links_are_relative_on_host_and_in_container(self):
+        for in_container in (False, True):
+            for multikey in (False, True):
+                with self.subTest(in_container=in_container, multikey=multikey):
+                    root = self.root / "container" if in_container else self.root
+                    compile_dir = root / "temp" / "book" / "default"
+                    compile_dir.mkdir(parents=True, exist_ok=True)
+                    log = compile_dir / "final.log"
+                    log.write_text("Error detail\n", encoding="utf-8")
+                    paths = SimpleNamespace(project_root=root, host_project_root=self.root,
+                                            result_dir=root / "result")
+                    cfg = replace(self.cfg, use_container=in_container, runtime=SimpleNamespace(
+                        project_paths=paths, in_container=in_container,
+                    ))
+                    job = replace(self.job, doc_tex_abs=root / self.doc.name,
+                                  compile_dir=compile_dir, multikey=multikey)
+                    diagnostic = Diagnostic("TeX", "other", "Example warning", log)
+                    report = pipeline.write_diagnostic_report(cfg, job, (diagnostic,), "success")
+                    with self.capture() as (stdout, stderr):
+                        pipeline._report_success(self.ui, cfg, job, (diagnostic,), multikey=multikey)
+                        pipeline._report_failure(self.ui, cfg, pipeline.JobFailure(
+                            job, "Example failure", log_path=log,
+                        ), {})
+                        cli.print_run_summary(self.ui, cfg, pipeline.ParallelRunResult(
+                            successes=[pipeline.JobSuccess(job, 1)], failures=[], total_warnings=1,
+                        ), 1)
+                    text = stdout.getvalue() + stderr.getvalue()
+                    basename = build_job_basename(job)
+                    output = f"result/multikey/{basename}_RANGES.json" if multikey else f"result/{basename}.pdf"
+                    self.assertIn(output, text)
+                    self.assertIn("temp/book/default/final.log", text)
+                    self.assertIn(str(report.relative_to(root)), text)
+                    self.assertIn("result/diagnostics", text)
+                    self.assertNotIn(str(root) + "/", text)
+
+    def test_host_path_mapping_leaves_external_paths_unchanged(self):
+        cfg = replace(self.cfg, runtime=SimpleNamespace(project_paths=SimpleNamespace(
+            project_root=Path("/songbook-data"), host_project_root=self.root,
+        )))
+        external = Path("/songbook-data-other/external.tex")
+        self.assertEqual(pipeline._host_path(external, cfg), external)
+
+    def test_diagnostic_json_uses_explicit_suffix_and_host_paths(self):
+        for in_container in (False, True):
+            with self.subTest(in_container=in_container):
+                root = Path("/songbook-data") if in_container else self.root
+                cfg = replace(self.cfg, runtime=SimpleNamespace(
+                    project_paths=SimpleNamespace(project_root=root, host_project_root=self.root,
+                                                  result_dir=self.result_dir),
+                    in_container=in_container,
+                ))
+                job = replace(self.job, doc_tex_abs=root / self.doc.name,
+                              compile_dir=root / "temp/book/default")
+                log = job.compile_dir / "final.log"
+                diagnostics = (
+                    Diagnostic("TeX", "other", f"Warning involving {root / 'content/song.tex'}", log),
+                    Diagnostic("Compiler", "other", "No log available"),
+                )
+                report = pipeline.write_diagnostic_report(cfg, job, diagnostics, "success")
+                self.assertEqual(report.name, f"{self.basename}_DIAGNOSTICS.json")
+                data = json.loads(report.read_text(encoding="utf-8"))
+                self.assertEqual(data["book"], str(self.doc))
+                self.assertEqual(data["warnings"][0]["log"], str(self.root / "temp/book/default/final.log"))
+                self.assertIn(str(self.root / "content/song.tex"), data["warnings"][0]["message"])
+                self.assertIsNone(data["warnings"][1]["log"])
+                self.assertNotIn("/songbook-data/", json.dumps(data))
+
+    def test_tex_file_line_location_is_visible_without_tail_and_retained_in_json(self):
+        for in_container in (False, True):
+            with self.subTest(in_container=in_container):
+                root = self.root / "container" if in_container else self.root
+                compile_dir = root / "temp/book/default"
+                compile_dir.mkdir(parents=True, exist_ok=True)
+                log = compile_dir / "final.log"
+                log.write_text(
+                    "./content/song with spaces.tex:42: Undefined control sequence.\n"
+                    "l.42 \\unknowncommand\n"
+                    "TAIL THAT SHOULD NOT DISPLAY\n", encoding="utf-8",
+                )
+                cfg = replace(self.cfg, max_log_lines=0, runtime=SimpleNamespace(
+                    project_paths=SimpleNamespace(project_root=root, host_project_root=self.root,
+                                                  result_dir=root / "result"),
+                    in_container=in_container,
+                ))
+                job = replace(self.job, doc_tex_abs=root / self.doc.name, compile_dir=compile_dir)
+                error = pipeline.CompileError(f"Compilation failed in {compile_dir}", log)
+                report = pipeline.write_diagnostic_report(cfg, job, (), "failed", error=error)
+                data = json.loads(report.read_text(encoding="utf-8"))
+                source = self.root / "temp/book/default/content/song with spaces.tex"
+                self.assertEqual(data["error"]["file"], str(source))
+                self.assertEqual(data["error"]["line"], 42)
+                self.assertEqual(data["error"]["detail"], "Undefined control sequence.")
+                self.assertEqual(data["error"]["log"], str(self.root / "temp/book/default/final.log"))
+                self.assertIn(str(self.root / "temp/book/default"), data["error"]["message"])
+                with self.capture() as (stdout, stderr):
+                    pipeline._report_failure(self.ui, cfg, pipeline.JobFailure(
+                        job, "Compilation failed", log_path=log,
+                    ), {})
+                text = stdout.getvalue() + stderr.getvalue()
+                self.assertIn("temp/book/default/content/song with spaces.tex:42", text)
+                self.assertIn("Undefined control sequence.", text)
+                self.assertNotIn("TAIL THAT SHOULD NOT DISPLAY", text)
+
+    def test_plain_tex_line_number_is_not_misrepresented_as_a_source_location(self):
+        log = self.log("plain-error.log", "! Undefined control sequence.\nl.99 \\unknowncommand\n")
+        error = pipeline.CompileError("Compilation failed", log)
+        report = pipeline.write_diagnostic_report(self.cfg, self.job, (), "failed", error=error)
+        data = json.loads(report.read_text(encoding="utf-8"))
+        self.assertNotIn("file", data["error"])
+        self.assertNotIn("line", data["error"])
+        self.assertIsNone(pipeline._tex_error_location(log.read_text(), self.job))
+
+    def test_failure_wrapper_retains_native_tex_error_location(self):
+        log = self.log("native-error.log", "./input.tex:7: Undefined control sequence.\n")
+        with self.capture(), patch.object(pipeline, "_compile_one_job", side_effect=pipeline.CompileError(
+            "Compilation failed", log,
+        )):
+            with self.assertRaises(pipeline.CompileError):
+                pipeline.compile_one_job(self.ui, object(), self.cfg, self.job)
+        data = self.report()
+        self.assertEqual(data["error"]["file"], str(self.compile_dir / "input.tex"))
+        self.assertEqual(data["error"]["line"], 7)
+
+    @unittest.skipUnless(shutil.which("lualatex"), "LuaLaTeX not installed")
+    def test_native_lualatex_reports_the_included_files_local_line(self):
+        content = self.compile_dir / "content"
+        content.mkdir()
+        included = content / "included.tex"
+        included.write_text("% first line\n% second line\n\\ulsbsUndefinedTestCommand\n", encoding="utf-8")
+        (self.compile_dir / "native-location.tex").write_text(
+            "\\documentclass{article}\n\\begin{document}\n"
+            "\\input{content/included.tex}\n\\end{document}\n", encoding="utf-8",
+        )
+        cache = self.root / "texmf-cache"
+        cache.mkdir()
+        env = dict(os.environ, TEXMFVAR=str(cache), TEXMFCACHE=str(cache))
+        with self.capture(), self.assertRaises(pipeline.CompileError) as caught:
+            pipeline.step_lualatex_pass(
+                self.ui, self.cfg, self.job, "native-location", env, 1, 1, draftmode=False,
+            )
+        report = pipeline.write_diagnostic_report(
+            self.cfg, self.job, (), "failed", error=caught.exception,
+        )
+        detail = json.loads(report.read_text(encoding="utf-8"))["error"]
+        self.assertIn("file", detail, caught.exception.log_path.read_text(encoding="utf-8"))
+        self.assertEqual(detail["file"], str(included), caught.exception.log_path.read_text(encoding="utf-8"))
+        self.assertEqual(detail["line"], 3)
+        self.assertIn("Undefined control sequence", detail["detail"])
 
     def test_ordinary_exec_line_cannot_split_warning_success_output_block(self):
         warning_ready = threading.Event()

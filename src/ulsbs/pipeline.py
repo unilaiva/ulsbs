@@ -219,6 +219,8 @@ class _JobUI:
 
 
 def _output_block(ui):
+    if isinstance(ui, _JobUI):
+        ui = ui.ui
     return ui.output_block() if isinstance(ui, UI) else nullcontext()
 
 
@@ -245,6 +247,28 @@ def _diagnostic_path(path: Path, cfg: Config) -> str:
         return str(path.relative_to(cfg.runtime.project_paths.project_root))
     except ValueError:
         return str(path)
+
+
+def _host_path(path: Path, cfg: Config) -> Path:
+    paths = cfg.runtime.project_paths
+    try:
+        return paths.host_project_root / path.relative_to(paths.project_root)
+    except ValueError:
+        return path
+
+
+def _host_text(text: str, cfg: Config) -> str:
+    paths = cfg.runtime.project_paths
+    return text.replace(str(paths.project_root) + "/", str(paths.host_project_root) + "/")
+
+
+def _tex_error_location(text: str, job: Job) -> tuple[Path, int, str] | None:
+    """Use native file-line-error locations, without guessing original lines."""
+    match = re.search(r"^([^\r\n]+?\.(?:tex|sty|cls)):(\d+):[ \t]*(.+)$", text, re.M)
+    if match is None:
+        return None
+    source = (job.compile_dir / match[1]).resolve()
+    return source, int(match[2]), match[3]
 
 
 def _report_warnings(ui, cfg, job, diagnostics):
@@ -279,7 +303,7 @@ def _report_warnings(ui, cfg, job, diagnostics):
     for path in dict.fromkeys(item.log_path for item in diagnostics if item.log_path is not None):
         if path.exists():
             ui.see_line(_diagnostic_path(path, cfg))
-    report = cfg.runtime.project_paths.result_dir / "diagnostics" / (build_job_basename(job) + ".json")
+    report = cfg.runtime.project_paths.result_dir / "diagnostics" / (build_job_basename(job) + "_DIAGNOSTICS.json")
     if report.exists():
         ui.see_line(_diagnostic_path(report, cfg))
 
@@ -297,19 +321,35 @@ def _report_success(ui, cfg, job, diagnostics, *, multikey=False):
         ui.space_line(f"{ui.colorize('->', ui.C_LGREEN)} {_diagnostic_path(path, cfg)}")
 
 
-def write_diagnostic_report(cfg, job, diagnostics, status):
+def write_diagnostic_report(cfg, job, diagnostics, status, *, error=None):
     """Retain compact diagnostics even when successful temp directories are cleaned."""
-    path = cfg.runtime.project_paths.result_dir / "diagnostics" / (build_job_basename(job) + ".json")
+    basename = build_job_basename(job)
+    path = cfg.runtime.project_paths.result_dir / "diagnostics" / (basename + "_DIAGNOSTICS.json")
     ensure_dir(path.parent)
-    write_text(path, json.dumps({
-        "book": str(job.doc_tex_abs), "variant": job.variant,
+    data = {
+        "book": str(_host_path(job.doc_tex_abs, cfg)), "variant": job.variant,
         "edition": "multikey" if job.multikey else "standard", "status": status,
         "warnings": [{"source": item.source, "category": item.category,
-                      "message": item.message, "occurrences": item.occurrences,
+                      "message": _host_text(item.message, cfg), "occurrences": item.occurrences,
                       "affected_count": item.affected_count,
-                      "log": str(item.log_path) if item.log_path else None}
+                      "log": str(_host_path(item.log_path, cfg)) if item.log_path else None}
                      for item in diagnostics],
-    }, indent=2) + "\n")
+    }
+    if error is not None:
+        log_path = getattr(error, "log_path", None)
+        detail = {"message": _host_text(str(error), cfg),
+                  "log": str(_host_path(log_path, cfg)) if log_path else None}
+        if log_path is not None:
+            try:
+                location = _tex_error_location(strip_tex_warnings(read_text(log_path)), job)
+            except OSError:
+                location = None
+            if location is not None:
+                source, line, message = location
+                detail.update(file=str(_host_path(source, cfg)), line=line,
+                              detail=_host_text(message, cfg))
+        data["error"] = detail
+    write_text(path, json.dumps(data, indent=2) + "\n")
     return path
 
 
@@ -1680,36 +1720,41 @@ def _compile_one_job(
     diagnostics and raise ``CompileError`` rather than returning a result.
     """
     txt_doc = ui.fmt_doc(job)
-    ui.start_line(txt_doc)
+    result_dir = cfg.runtime.project_paths.result_dir
+    pdf_dir = result_dir / RESULT_MULTIKEY_SUBDIRNAME if job.multikey else result_dir
+    settings = None
+    if cfg.verbose:
+        basename = build_job_basename(job)
+        midi, audio = _midi_audio_enabled(cfg, job)
+        layers = cfg.multikey_books and job.multikey and job.variant != "lyrics"
+        printouts = (
+            not job.multikey and cfg.create_printouts and PAPERA5_FNAMEPART in basename
+            and bool(which("context") or which("contextjit"))
+        )
+        output_file = pdf_dir / (basename + ("_RANGES.json" if job.multikey else ".pdf"))
+        settings = (
+            f"{ui.colorize('Source:', ui.C_DGRAY)} {_host_path(job.doc_tex_abs, cfg)}; variant: {job.variant}; "
+            f"edition: {'multikey' if job.multikey else 'standard'}; "
+            f"compile: {_host_path(job.compile_dir, cfg)}"
+            f"\n{ui.colorize('Index:' if job.multikey else 'PDF:', ui.C_DGRAY)} {_host_path(output_file, cfg)}"
+            f"\n{ui.colorize('Outputs:', ui.C_DGRAY)} printouts={printouts}, MIDI={midi}, audio={audio}, "
+            f"JSON={'range index' if job.multikey else cfg.json}, "
+            f"covers={not job.multikey and cfg.coverimage and bool(which('pdftoppm'))}; "
+            f"layers={layers}"
+            + (f", strict IDs={cfg.multikey_require_song_ids}, layer UI={cfg.multikey_layer_ui}, "
+               f"min chord scale={cfg.multikey_min_chordname_scale:g}"
+               if layers else "")
+        )
+    with _output_block(ui):
+        ui.start_line(txt_doc)
+        if settings is not None:
+            ui.debug_line(settings)
 
     lock = JobLock(job.compile_dir)
     lock.acquire()
 
     try:
         prepare_compile_dir(ui=ui, assets=assets, cfg=cfg, job=job)
-        result_dir = cfg.runtime.project_paths.result_dir
-        pdf_dir = result_dir / RESULT_MULTIKEY_SUBDIRNAME if job.multikey else result_dir
-        if cfg.verbose:
-            basename = build_job_basename(job)
-            midi, audio = _midi_audio_enabled(cfg, job)
-            layers = cfg.multikey_books and job.multikey and job.variant != "lyrics"
-            printouts = (
-                not job.multikey and cfg.create_printouts and PAPERA5_FNAMEPART in basename
-                and bool(which("context") or which("contextjit"))
-            )
-            output_file = pdf_dir / (basename + ("_RANGES.json" if job.multikey else ".pdf"))
-            ui.debug_line(
-                f"{txt_doc}\n{ui.colorize('Source:', ui.C_DGRAY)} {job.doc_tex_abs}; variant: {job.variant}; "
-                f"edition: {'multikey' if job.multikey else 'standard'}; "
-                f"compile: {job.compile_dir}; {'Index' if job.multikey else 'PDF'}: {output_file}"
-                f"\n{ui.colorize('Outputs:', ui.C_DGRAY)} printouts={printouts}, MIDI={midi}, audio={audio}, "
-                f"JSON={'range index' if job.multikey else cfg.json}, "
-                f"covers={not job.multikey and cfg.coverimage and bool(which('pdftoppm'))}; "
-                f"layers={layers}"
-                + (f", strict IDs={cfg.multikey_require_song_ids}, layer UI={cfg.multikey_layer_ui}, "
-                   f"min chord scale={cfg.multikey_min_chordname_scale:g}"
-                   if layers else "")
-            )
         input_tex = make_variant_tex(job, cfg)
         env: dict[str, str]
         lp_include_args: list[str]
@@ -1901,7 +1946,7 @@ def compile_one_job(ui: UI, assets: EngineAssets, cfg: Config, job: Job) -> Comp
             failure = error if isinstance(error, CompileError) else CompileError(str(error))
             failure.diagnostics = tuple(worker_ui.diagnostics)
             resultlist.discard_job(job)
-            write_diagnostic_report(cfg, job, failure.diagnostics, "failed")
+            write_diagnostic_report(cfg, job, failure.diagnostics, "failed", error=failure)
             if failure is error:
                 raise
             raise failure from error
@@ -1954,7 +1999,7 @@ def finish_multikey_job(
                 failure = error if isinstance(error, CompileError) else CompileError(str(error))
                 failure.diagnostics = tuple(worker_ui.diagnostics)
                 resultlist.discard_job(job)
-                write_diagnostic_report(cfg, job, failure.diagnostics, "failed")
+                write_diagnostic_report(cfg, job, failure.diagnostics, "failed", error=failure)
                 if failure is error:
                     raise
                 raise failure from error
@@ -1977,6 +2022,7 @@ def _run_job_phase(function, job, *args):
 
 def _report_failure(ui, cfg, failure, seen):
     excerpt = ""
+    location = None
     if failure.log_path is not None:
         try:
             text = read_text(failure.log_path)
@@ -1985,10 +2031,12 @@ def _report_failure(ui, cfg, failure, seen):
             error_text = strip_tex_warnings(text)
             lines = error_text.splitlines()
             # Only a concrete source diagnostic can establish a shared failure.
-            match = re.search(r"^.*?([^\s:]+\.tex:\d+: .+)$", text, re.M)
-            signature = (failure.job.doc_tex_abs, match[1]) if match else None
+            location = _tex_error_location(error_text, failure.job)
+            signature = (failure.job.doc_tex_abs, location) if location else None
             if not cfg.verbose and signature is not None and signature in seen:
-                excerpt = f"Same source error as {ui.fmt_doc(seen[signature])}: {match[1]}"
+                source, line, message = location
+                excerpt = (f"Same source error as {ui.fmt_doc(seen[signature])}: "
+                           f"{_diagnostic_path(source, cfg)}:{line}: {message}")
             else:
                 if signature is not None:
                     seen[signature] = failure.job
@@ -1999,6 +2047,10 @@ def _report_failure(ui, cfg, failure, seen):
     with _output_block(ui):
         _report_warnings(ui, cfg, failure.job, failure.diagnostics)
         ui.fail_line(f"{ui.fmt_doc(failure.job)} {failure.reason}")
+        if location is not None:
+            source, line, message = location
+            ui.space_line(_host_text(message, cfg))
+            ui.see_line(f"{_diagnostic_path(source, cfg)}:{line}")
         if failure.log_path is not None and failure.log_path.exists():
             ui.see_line(_diagnostic_path(failure.log_path, cfg))
         if excerpt:
@@ -2050,7 +2102,7 @@ def run_jobs_parallel(
             failures[:] = [item for item in failures if item.job != job]
             failures.append(failure)
             resultlist.discard_job(job)
-            write_diagnostic_report(cfg, job, diagnostics, "blocked" if blocked else "failed")
+            write_diagnostic_report(cfg, job, diagnostics, "blocked" if blocked else "failed", error=error)
             if not blocked:
                 _report_failure(ui, cfg, failure, seen_errors)
 
