@@ -297,6 +297,51 @@ to `deploy/` by default, not an upload to a web server. Disable it with
 ULSBS automatically reduces PDF size by sharing identical embedded font data,
 including in quick builds, while preserving appearance and multikey controls.
 
+### Warnings and partial builds
+
+Each job is one book, variant, and ordinary or multikey edition. Successful jobs
+remain `SUCCESS` even with warnings. Their completion block prints a compact
+warning breakdown and `SEE` paths before `SUCCESS ... with N warnings` and the
+output path. Related lines print together, without interleaving other jobs.
+Use `--verbose` for individual diagnostics and detailed score-fallback information.
+
+Warning counts represent diagnostic records, not lines, logs, or occurrences of
+the word "warning". Multiline warnings count once; repeated records display
+together with their occurrence count, and closing TeX recaps are not counted
+again when their specific warnings are available. Native aggregate warnings
+retain an affected-item count, such as eight songs missing IDs. Only the **last
+LuaLaTeX invocation** contributes displayed or counted warnings, including after
+convergence reruns; intermediate rerun requests are progress, not final warnings.
+Missing glyphs and overfull boxes are warnings; underfull boxes are informational.
+Configuration, resource, and cleanup advisories are separate from job counts.
+Unfamiliar messages with recognized warning headers are still counted, without
+requiring a message whitelist. Those without a specialized category appear as
+`unclassified warnings`; `--verbose` shows their messages, and `SEE` links their
+logs. Entirely unfamiliar warning header formats may require parser support.
+
+The final summary identifies warned jobs, failures, blocked companions, and
+intentionally skipped outputs. Per-job JSON diagnostic reports remain under
+`result/diagnostics/`, even when temporary files are cleaned. Full raw tool logs
+require `--keep-temp`; warning-bearing logs are linked as jobs finish so they can
+be inspected while other jobs continue.
+
+A failed job does not abort independent jobs. A multikey companion whose ordinary
+edition failed is blocked from publication. Any failure or dependency block
+prevents automatic deployment and gives the command a nonzero exit status;
+warnings alone do not block deployment. Partial files may remain in `result/`
+for inspection, but only finally successful jobs enter the deployable result list.
+
+To explicitly deploy successful jobs from an incomplete run, use:
+
+```sh
+./ulsbs/ulsbs-compile --deploy-last
+```
+
+This selects the newest retained run inventory, reports partial deployment, and
+does not deploy artifacts from failed or blocked jobs. Obsolete inventories are
+retired rather than replayed against newer files. The result directory itself is
+not an all-or-nothing snapshot and can still contain older or partial files.
+
 ## Variants and editions
 
 A **variant** is a version of a source book: default, lyrics-only, or an

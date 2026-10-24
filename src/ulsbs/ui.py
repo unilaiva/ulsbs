@@ -17,9 +17,12 @@ import hashlib
 import threading
 import time
 import atexit
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, TextIO
+
+from .diagnostics import Diagnostic
 
 if TYPE_CHECKING:  # pragma: no cover - import only for type checking
     from .jobs import Job
@@ -361,6 +364,13 @@ class UI:
     """Small helper for colored, prefixed console messages."""
 
     use_colors: bool = True
+    run_diagnostics: list[Diagnostic] = field(default_factory=list, init=False)
+
+    @contextmanager
+    def output_block(self):
+        """Keep a job's diagnostic/completion lines together across workers."""
+        with _output_lock:
+            yield
 
     def __post_init__(self) -> None:
         """
@@ -585,10 +595,11 @@ class UI:
 
     def _print_line(self, text: str, stderr: bool = False) -> None:
         """Print a single line, stripping ANSI colors if target isn't a TTY."""
-        out = sys.stderr if stderr else sys.stdout
-        if not out.isatty():
-            text = ANSI_ESCAPE_RE.sub("", text)
-        print(text, flush=True, file=out)
+        with _output_lock:
+            out = sys.stderr if stderr else sys.stdout
+            if not out.isatty():
+                text = ANSI_ESCAPE_RE.sub("", text)
+            print(text, flush=True, file=out)
 
     def _print_prefixed(self, prefix: str, msg: str, stderr: bool = False) -> None:
         """Print a possibly wrapped, prefixed message.
@@ -596,10 +607,11 @@ class UI:
         The first line uses the given prefix, subsequent lines are
         indented with PRETXT_SPACE.
         """
-        parts = self._wrap_message(msg)
-        for idx, part in enumerate(parts):
-            used_prefix = prefix if idx == 0 else self.PRETXT_SPACE
-            self._print_line(f"{used_prefix}{part}", stderr=stderr)
+        with _output_lock:
+            parts = self._wrap_message(msg)
+            for idx, part in enumerate(parts):
+                used_prefix = prefix if idx == 0 else self.PRETXT_SPACE
+                self._print_line(f"{used_prefix}{part}", stderr=stderr)
 
     def _make_prefix(self, label: str, color: str) -> str:
         """Return a colorized, padded prefix of fixed visual width.
@@ -858,8 +870,9 @@ class UI:
 
     def plain(self, msg: str = "", stderr: bool = False) -> None:
         """Print a plain info line (no prefix)."""
-        for part in self._wrap_message(msg):
-            self._print_line(part, stderr=stderr)
+        with _output_lock:
+            for part in self._wrap_message(msg):
+                self._print_line(part, stderr=stderr)
 
     def line(self, prefix: str, msg: str, stderr: bool = False) -> None:
         """Print a custom-prefixed line with wrapping support."""
@@ -905,8 +918,13 @@ class UI:
         """Print a SEE-prefixed line with a path or hint."""
         self._print_prefixed(self.PRETXT_SEE, msg, stderr=stderr)
 
-    def warning_line(self, msg: str, stderr: bool = False) -> None:
+    def warning_line(self, msg: str, stderr: bool = False, *, source: str = "Compiler",
+                     category: str = "other", log_path: Path | None = None,
+                     affected_count: int | None = None, record: bool = True) -> None:
         """Print a WARNING-prefixed line."""
+        if record:
+            self.run_diagnostics.append(Diagnostic(source, category, msg, log_path,
+                                                   affected_count=affected_count))
         self._print_prefixed(self.PRETXT_WARNING, msg, stderr=stderr)
 
     def success_line(self, msg: str, stderr: bool = False) -> None:

@@ -27,7 +27,11 @@ import sys
 import threading
 import time
 import traceback
-from dataclasses import dataclass
+import warnings
+from collections import Counter
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import List
 from fnmatch import fnmatch
@@ -55,7 +59,6 @@ from .constants import (
     SORT_LOCALE,
     COVERIMAGE_MODIFIED_FNAME_POSTFIX,
     SELECTION_FNAME_PREFIX,
-    TEMP_DIRNAME,
     CONTENT_DIRNAME,
     INCLUDE_DIRNAME,
     TAG_DEFINITION_FILENAME,
@@ -63,6 +66,7 @@ from .constants import (
     JSON_INCLUDE_PLAIN_LOWERCASE_LYRICS,
 )
 from .engine_assets import EngineAssets
+from .diagnostics import Diagnostic, parse_tool_warnings, strip_tex_warnings
 from .jobs import Job, build_job_basename
 from .lock import JobLock
 from .songdb import build_song_database, SongbookData
@@ -108,6 +112,7 @@ MULTIKEY_DISABLED_FALLBACK_TEX = r"""\AtBeginDocument{%
 """
 
 ABORT_EVENT = threading.Event()
+_active_job_ui: ContextVar[_JobUI | None] = ContextVar("ulsbs_diagnostic_ui", default=None)
 
 
 class CompileError(RuntimeError):
@@ -117,6 +122,7 @@ class CompileError(RuntimeError):
         """Store the compile error message and optional diagnostic log path."""
         super().__init__(message)
         self.log_path = log_path
+        self.diagnostics: tuple[Diagnostic, ...] = ()
 
 
 # Result containers for parallel runs
@@ -131,18 +137,21 @@ class CompilationResult:
 
     warning_count: int
     next_step: int
+    diagnostics: tuple[Diagnostic, ...] = ()
 
 
 @dataclass(frozen=True)
 class JobSuccess:
     """Final job outcome: ordinary publication or completed MULTIKEY packaging.
 
-    An explicitly layer-disabled source is also a completed, skipped companion
-    with a warning. Each job's warning count contributes to the run total once.
+    An explicitly layer-disabled source is a completed, skipped companion.
+    Each job's warning count contributes to the run total once.
     """
 
     job: Job
     warning_count: int
+    diagnostics: tuple[Diagnostic, ...] = ()
+    skipped: bool = False
 
 
 @dataclass(frozen=True)
@@ -151,67 +160,163 @@ class JobFailure:
 
     job: Job
     reason: str
+    diagnostics: tuple[Diagnostic, ...] = ()
+    log_path: Path | None = None
+    blocked: bool = False
+
+    @property
+    def warning_count(self) -> int:
+        return sum(item.occurrences for item in self.diagnostics)
 
 
 @dataclass
 class ParallelRunResult:
-    """Final named outcomes; warnings count successful jobs only."""
+    """Final named outcomes, retaining diagnostics even on unsuccessful jobs."""
 
     successes: List[JobSuccess]
     failures: List[JobFailure]
     total_warnings: int = 0
 
+    @property
+    def blocked(self) -> list[JobFailure]:
+        return [item for item in self.failures if item.blocked]
+
+    @property
+    def errors(self) -> list[JobFailure]:
+        return [item for item in self.failures if not item.blocked]
+
+    @property
+    def skipped(self) -> list[JobSuccess]:
+        return [item for item in self.successes if item.skipped]
+
+
+@dataclass(frozen=True)
+class PackagingResult:
+    warning_count: int
+    diagnostics: tuple[Diagnostic, ...] = ()
+    skipped: bool = False
+
+
+class _JobUI:
+    """Collect a worker's warnings without interleaving them with other jobs."""
+
+    def __init__(self, ui: UI, job: Job, diagnostics=()):
+        self.ui, self.job = ui, job
+        self.diagnostics = list(diagnostics)
+        self.last_tex_log: Path | None = None
+        self.tool_logs: dict[Path, str] = {}
+        self.analyzed = False
+
+    def __getattr__(self, name):
+        return getattr(self.ui, name)
+
+    def warning_line(self, message: str, stderr: bool = False, *, source="Compiler",
+                     category="other", log_path=None, affected_count=None, **kwargs):
+        label = str(self.ui.fmt_doc(self.job))
+        message = message.removeprefix(label).strip().removeprefix("Warning: ")
+        self.diagnostics.append(Diagnostic(source, category, message, log_path,
+                                           affected_count=affected_count))
+
+
+def _output_block(ui):
+    return ui.output_block() if isinstance(ui, UI) else nullcontext()
+
+
+@contextmanager
+def _capture_library_warnings(ui):
+    token = _active_job_ui.set(ui)
+    try:
+        yield
+    finally:
+        _active_job_ui.reset(token)
+
+
+def _warning_count(diagnostics) -> int:
+    return sum(item.occurrences for item in diagnostics)
+
+
+def _track_log(ui, path, source):
+    if isinstance(ui, _JobUI):
+        ui.tool_logs[path] = source
+
+
+def _diagnostic_path(path: Path, cfg: Config) -> str:
+    try:
+        return str(path.relative_to(cfg.runtime.project_paths.project_root))
+    except ValueError:
+        return str(path)
+
+
+def _report_warnings(ui, cfg, job, diagnostics):
+    if not diagnostics:
+        return
+    count = _warning_count(diagnostics)
+    ui.warning_line(f"{ui.fmt_doc(job)} {count} warning{'s' if count != 1 else ''}", record=False)
+    if cfg.verbose:
+        for item in diagnostics:
+            repeated = f" ({item.occurrences} occurrences)" if item.occurrences > 1 else ""
+            ui.space_line(f"{item.source}/{item.category}: {item.message}{repeated}")
+    else:
+        groups = Counter()
+        overfull = Counter()
+        for item in diagnostics:
+            groups[(item.source, item.category)] += item.occurrences
+            if item.category == "layout" and re.match(r"Overfull \\[hv]box\b", item.message, re.I):
+                overfull[item.source] += item.occurrences
+        summaries = []
+        for (source, category), count in groups.items():
+            label = f"unclassified warning{'s' if count != 1 else ''}" if category == "other" else category
+            if category == "layout" and overfull[source]:
+                label += f" ({overfull[source]} overfull)"
+            summaries.append(f"{source}: {count} {label}")
+        ui.space_line("; ".join(summaries))
+        # Consequences matter more than raw package chatter in compact output.
+        details = [item for item in diagnostics if item.source not in ("TeX", "LilyPond")]
+        for item in details[:3]:
+            ui.space_line(item.message)
+        if len(details) > 3:
+            ui.space_line(f"{len(details) - 3} additional warning groups; see diagnostic report or --verbose.")
+    for path in dict.fromkeys(item.log_path for item in diagnostics if item.log_path is not None):
+        if path.exists():
+            ui.see_line(_diagnostic_path(path, cfg))
+    report = cfg.runtime.project_paths.result_dir / "diagnostics" / (build_job_basename(job) + ".json")
+    if report.exists():
+        ui.see_line(_diagnostic_path(report, cfg))
+
+
+def _report_success(ui, cfg, job, diagnostics, *, multikey=False):
+    with _output_block(ui):
+        _report_warnings(ui, cfg, job, diagnostics)
+        count = _warning_count(diagnostics)
+        suffix = f" with {count} warning{'s' if count != 1 else ''}" if count else ""
+        action = "Compilation and MULTIKEY packaging" if multikey else "Compilation"
+        ui.success_line(f"{ui.fmt_doc(job)} {action} successful{suffix}!")
+        basename = build_job_basename(job)
+        path = cfg.runtime.project_paths.result_dir / (
+            f"multikey/{basename}_RANGES.json" if multikey else f"{basename}.pdf")
+        ui.space_line(f"{ui.colorize('->', ui.C_LGREEN)} {_diagnostic_path(path, cfg)}")
+
+
+def write_diagnostic_report(cfg, job, diagnostics, status):
+    """Retain compact diagnostics even when successful temp directories are cleaned."""
+    path = cfg.runtime.project_paths.result_dir / "diagnostics" / (build_job_basename(job) + ".json")
+    ensure_dir(path.parent)
+    write_text(path, json.dumps({
+        "book": str(job.doc_tex_abs), "variant": job.variant,
+        "edition": "multikey" if job.multikey else "standard", "status": status,
+        "warnings": [{"source": item.source, "category": item.category,
+                      "message": item.message, "occurrences": item.occurrences,
+                      "affected_count": item.affected_count,
+                      "log": str(item.log_path) if item.log_path else None}
+                     for item in diagnostics],
+    }, indent=2) + "\n")
+    return path
+
 
 def die_log(ui: UI, cfg: Config, job: Job, cwd: Path, message: str, log_path: Path | None) -> None:
-    """
-    Show an error and tail a log (if any), then raise CompileError.
-    Intended to be called when a step fails within a job.
-    """
+    """Propagate a step failure; the coordinator renders and deduplicates it."""
     if ABORT_EVENT.is_set():
-        # Quiet abort: no log spam
         raise KeyboardInterrupt()
-
-    # While printing multi-line error/log output, temporarily suspend
-    # the spinner so that its status line does not get redrawn onto our
-    # blank separator lines.
-    try:
-        ui.suspend_spinner()
-    except Exception:
-        # Never let spinner issues interfere with error reporting.
-        pass
-
-    try:
-        txt_doc = ui.fmt_doc(job)
-        ui.error_line(f"{txt_doc} {message}")
-        if log_path is not None:
-            try:
-                rel = cwd.relative_to(cfg.runtime.project_paths.project_root)
-                ui.see_line(f"{ui.C_YELLOW}{rel}/{log_path.name}{ui.C_RESET}")
-            except Exception:
-                pass
-            if cfg.max_log_lines > 0:
-                ui.plain("")
-                ui.space_line(
-                    ui.colorize(f"Displaying the last {cfg.max_log_lines} lines of log:", ui.C_YELLOW)
-                )
-                ui.plain("")
-                try:
-                    from collections import deque
-
-                    with log_path.open("r", encoding="utf-8", errors="replace") as f:
-                        tail = deque(f, maxlen=cfg.max_log_lines)
-                    ui.space_line("".join(tail))
-                    ui.plain("")
-                except Exception:
-                    ui.warning("(Could not read log)")
-        else:
-            ui.warning("(No log file available)")
-    finally:
-        try:
-            ui.resume_spinner()
-        except Exception:
-            pass
-
     raise CompileError(message, log_path)
 
 
@@ -547,6 +652,7 @@ def step_lilypond_book(
     ensure_dir(lp_out)
 
     log_path = job.compile_dir / f"{step:02d}_lilypond.log"
+    _track_log(ui, log_path, "LilyPond")
     ui.exec_line(f"{txt_doc} {ui.fmt_step(step)} lilypond-book")
 
     # Generated imports in the job root/content/include shadow real sources on
@@ -681,6 +787,8 @@ def step_lualatex_pass(
     (cwd / f"{basename}.ulsbs-multikey.json").unlink(missing_ok=True)
     txt_doc = ui.fmt_doc(job)
     log_path = cwd / f"{step:02d}_lualatex-pass{pass_no}.log"
+    if isinstance(ui, _JobUI):
+        ui.last_tex_log = log_path
     label = f"lualatex (pass {pass_no})"
     ui.exec_line(f"{txt_doc} {ui.fmt_step(step)} {label}")
     args = [
@@ -727,6 +835,7 @@ def step_texlua_indices(
 
     # Title index
     log_title = cwd / f"{step:02d}_titleidx.log"
+    _track_log(ui, log_title, "Index")
     ui.exec_line(f"{txt_doc} {ui.fmt_step(step)} texlua (create title index)")
     try:
         run_cmd(
@@ -745,6 +854,7 @@ def step_texlua_indices(
     project_tag_file = cfg.runtime.project_paths.include_dir / TAG_DEFINITION_FILENAME
     if project_tag_file.exists():
         log_tag = cwd / f"{step:02d}_tagidx.log"
+        _track_log(ui, log_tag, "Index")
         ui.exec_line(f"{txt_doc} {ui.fmt_step(step)} texlua (create tag index)")
         try:
             run_cmd(
@@ -768,7 +878,8 @@ def step_texlua_indices(
             raise CompileError("Error creating tag indices!", log_tag) from None
         step += 1
     else:
-        ui.warning_line("Skipping creating tag index: tag definition file not found!")
+        ui.warning_line(f"{txt_doc} Skipping tag index: tag definition file not found",
+                        source="Index", category="skipped")
     return step
 
 
@@ -822,6 +933,7 @@ def step_context_printouts(
         data = read_text(template).replace(_PRINTOUT_INPUT_FILE_PLACEHOLDER, f"{basename}.pdf")
         write_text(ctx_out, data)
         logp = cwd / f"{step:02d}_context-{out_base}.log"
+        _track_log(ui, logp, "ConTeXt")
         try:
             run_cmd(
                 [context_bin, ctx_out.name],
@@ -879,6 +991,7 @@ def step_coverimage_extraction(
     # Extract cover as PNG with configurable height
     ui.exec_line(f"{txt_doc} {ui.fmt_step(step)} pdftoppm (extract cover as image)")
     log_extract = cwd / f"{step:02d}_coverimage-extract.log"
+    _track_log(ui, log_extract, "Images")
     try:
         run_cmd(
             [
@@ -914,6 +1027,7 @@ def step_coverimage_extraction(
         ui.exec_line(f"{txt_doc} {ui.fmt_step(step)} magick (cover image modified)")
         cover_modified_png = cwd / f"{basename}{COVERIMAGE_MODIFIED_FNAME_POSTFIX}.png"
         log_auto = cwd / f"{step:02d}_coverimage-modified.log"
+        _track_log(ui, log_auto, "Images")
 
         # Probe image size using ImageMagick so we can interpret fractional rects
         try:
@@ -1040,7 +1154,8 @@ def step_build_song_db(
     if psv_path.is_file():
         ulsbs_psv_file = psv_path
     else:
-        ui.warning_line(f"{txt_doc} PSV file not found: {psv_path.name}")
+        ui.warning_line(f"{txt_doc} PSV file not found: {psv_path.name}",
+                        source="Metadata", category="missing-psv", log_path=log_path)
 
     try:
         db = build_song_database(
@@ -1072,19 +1187,24 @@ def step_build_song_db(
         # Warn if missing ids
         if db.songs_with_id < db.total_songs:
             ui.warning_line(
-                f"{txt_doc} Warning: only {db.songs_with_id}/{db.total_songs} songs have an id"
+                f"{txt_doc} Only {db.songs_with_id}/{db.total_songs} songs have an id",
+                source="Metadata", category="song-ids", log_path=log_path,
+                affected_count=db.total_songs - db.songs_with_id,
             )
 
         # Also warn about malformed ids (not matching [a-z0-9-]+)
         if bad_id_count > 0:
             ui.warning_line(
                 f"{txt_doc} Warning: there were {bad_id_count} malformed song ids. "
-                "Run ulsbs-bookmeta --check-song-ids for more info."
+                "Run ulsbs-bookmeta --check-song-ids for more info.",
+                source="Metadata", category="song-ids", log_path=log_path,
+                affected_count=bad_id_count,
             )
     except Exception as e:
         # Do not abort the job: metadata is an optional post-processing step.
         write_text(log_path, f"Song database build failed: {e!r}\n")
-        ui.warning_line(f"{txt_doc} Warning: failed to build internal song database: {e}")
+        ui.warning_line(f"{txt_doc} Failed to build internal song database: {e}",
+                        source="Metadata", category="unavailable", log_path=log_path)
         step += 1
         return None, step
 
@@ -1160,7 +1280,8 @@ def step_midi_audio(
     txt_doc = ui.fmt_doc(job)
 
     if db is None:
-        ui.warning_line(f"{txt_doc} No internal db; skipping midi/audio")
+        ui.warning_line(f"{txt_doc} No internal db; skipping midi/audio",
+                        source="Media", category="skipped")
         return step
 
     result_dir = cfg.runtime.project_paths.result_dir
@@ -1182,6 +1303,7 @@ def step_midi_audio(
         safe_rm_tree(cur_res_midi)
         ensure_dir(cur_res_midi)
         log_midi = job.compile_dir / f"{step:02d}_grab-midi.log"
+        write_text(log_midi, "")
         copy_error_count = 0
 
         for song in songs_with_midi:
@@ -1215,7 +1337,9 @@ def step_midi_audio(
                 )
 
         if copy_error_count > 0:
-            ui.warning_line(f"{txt_doc} Failed to copy {copy_error_count} MIDI files")
+            ui.warning_line(f"{txt_doc} Failed to copy {copy_error_count} MIDI files",
+                            source="Media", category="missing-midi", log_path=log_midi,
+                            affected_count=copy_error_count)
 
         # Copy midi README, if set in config, into midi result dir
         readme_midi = cfg.mididir_readme_file
@@ -1227,7 +1351,8 @@ def step_midi_audio(
                     log_midi,
                     f"Warning: Readme for MIDI directories does not exist: {readme_midi}\n",
                 )
-                ui.warning_line(f"{txt_doc} Readme for MIDI dir does not exist: {readme_midi}")
+                ui.warning_line(f"{txt_doc} Readme for MIDI dir does not exist: {readme_midi}",
+                                source="Media", category="missing-readme", log_path=log_midi)
         resultlist.append_line(RESULT_TYPE_MIDIDIR, cur_res_midi.name)
         step += 1
 
@@ -1238,6 +1363,8 @@ def step_midi_audio(
         safe_rm_tree(cur_res_audio)
         ensure_dir(cur_res_audio)
         log_audio = job.compile_dir / f"{step:02d}_encode-audio.log"
+        write_text(log_audio, "")
+        _track_log(ui, log_audio, "Audio")
 
         for song in songs_with_midi:
             midi_abs_path = job.compile_dir / song.midi_compile_file_relative
@@ -1338,7 +1465,8 @@ def step_midi_audio(
                     log_audio,
                     f"Warning: Readme for audio directories does not exist: {readme_audio}\n",
                 )
-                ui.warning_line(f"{txt_doc} Readme for audio does not exist: {readme_audio}")
+                ui.warning_line(f"{txt_doc} Readme for audio does not exist: {readme_audio}",
+                                source="Media", category="missing-readme", log_path=log_audio)
         resultlist.append_line(RESULT_TYPE_AUDIODIR, cur_res_audio.name)
         step += 1
 
@@ -1346,66 +1474,31 @@ def step_midi_audio(
 
 
 def analyze_warnings(
-    ui: UI, cfg: Config, job: Job, lilypond_log: Path, last_lualatex_log: Path
+    ui: UI, cfg: Config, job: Job, lilypond_log: Path | None, last_lualatex_log: Path | None
 ) -> int:
-    """Count and summarize warnings from lilypond and LuaLaTeX logs."""
-    txt_doc = ui.fmt_doc(job)
-    total_warn = 0
-    lp_all_warn = 0
-    tex_all_warn = 0
-    try:
-        # LilyPond warnings (skip for lyrics variant)
-        if job.variant != "lyrics" and lilypond_log and lilypond_log.exists():
-            lp_log_txt = read_text(lilypond_log)
-            lp_all_warn = len(re.findall(r"warning", lp_log_txt, flags=re.I))
-            lp_bar_warn = len(re.findall(r"warning: barcheck", lp_log_txt, flags=re.I))
-            lp_auto_warn = len(
-                re.findall(
-                    r"warning: Unable to auto-detect default settings", lp_log_txt, flags=re.I
-                )
-            )
-            if lp_all_warn > 0 and lp_auto_warn == 1:
-                lp_all_warn -= 1
-            if lp_all_warn:
-                ui.warning_line(
-                    f"{txt_doc} Lilypond warnings - all: {lp_all_warn} (barcheck: {lp_bar_warn})"
-                )
-            total_warn += lp_all_warn
-    except Exception:
-        ui.warning_line(f"{txt_doc} Lilypond warnings - failed to read the log file")
-
-    try:
-        # TeX warnings (from the last LuaLaTeX pass)
-        if last_lualatex_log and last_lualatex_log.exists():
-            lt_log_txt = read_text(last_lualatex_log)
-            tex_all_warn = len(re.findall(r"warning", lt_log_txt, flags=re.I))
-            tex_font_warn = len(re.findall(r"Font Warning", lt_log_txt, flags=re.I))
-            if tex_all_warn:
-                ui.warning_line(
-                    f"{txt_doc} TeX warnings - all: {tex_all_warn} (font: {tex_font_warn})"
-                )
-            if tex_font_warn > 20:
-                ui.space_line(ui.colorize("Concerning amount of font warnings!", ui.C_RED))
-            total_warn += tex_all_warn
-
-    except Exception:
-        ui.warning_line(f"{txt_doc} TeX warnings - failed to read the log file")
-
-    if total_warn > 0 and not cfg.clean_temp:
-        if lp_all_warn:
-            ui.see_line(
-                TEMP_DIRNAME
-                + "/"
-                + str(lilypond_log.relative_to(lilypond_log.parent.parent.parent))
-            )
-        if tex_all_warn:
-            ui.see_line(
-                TEMP_DIRNAME
-                + "/"
-                + str(last_lualatex_log.relative_to(last_lualatex_log.parent.parent.parent))
-            )
-
-    return total_warn
+    """Collect tool diagnostics, selecting only the final LuaLaTeX invocation."""
+    diagnostics = ui.diagnostics if isinstance(ui, _JobUI) else []
+    logs = dict(ui.tool_logs) if isinstance(ui, _JobUI) else {}
+    if lilypond_log is not None:
+        logs[lilypond_log] = "LilyPond"
+    if last_lualatex_log is not None:
+        logs[last_lualatex_log] = "TeX"
+    for path, source in logs.items():
+        if source == "LilyPond" and job.variant == "lyrics":
+            continue
+        try:
+            text = read_text(path)
+        except OSError as error:
+            diagnostics.append(Diagnostic("Reporting", "unreadable-log",
+                                          f"Cannot inspect {source} log: {error}", path))
+            continue
+        # These native messages already have structured records above.
+        text = re.sub(r"^Warning: Readme for (?:audio|MIDI) directories.*$", "", text, flags=re.M)
+        diagnostics.extend(parse_tool_warnings(text, source, path))
+    if not isinstance(ui, _JobUI):
+        with _output_block(ui):
+            _report_warnings(ui, cfg, job, diagnostics)
+    return _warning_count(diagnostics)
 
 
 def step_lualatex_convergence(
@@ -1462,7 +1555,7 @@ def step_lualatex_convergence(
                                f"{LUALATEX_MAX_EXTRA_PASSES} extra passes", log_path)
         pass_no = 4 + extra
         ui.info_line(f"{ui.fmt_doc(job)} Rerunning LuaLaTeX pass {pass_no} "
-                     f"to settle references/resources: {'; '.join(reasons)}")
+                     "to settle references/resources")
         last_tex_log, step = step_lualatex_pass(ui, cfg, job, basename, env, step, pass_no, False)
     raise AssertionError("Unreachable LuaLaTeX convergence state")
 
@@ -1514,7 +1607,6 @@ def step_multikey_ranges(
             remove_legacy_outputs(output_dir, result_dir / RESULT_JSON_SUBDIRNAME,
                                   basename.removesuffix("_MULTIKEY"))
             write_text(log_path, "Source disables PDF layers; previous package retired.\n")
-            ui.warning_line(f"{ui.fmt_doc(job)} Skipping multikey companion: source disables PDF layers")
             return None, step + 1
 
         if (ordinary_job is None or ordinary_job.multikey
@@ -1527,10 +1619,14 @@ def step_multikey_ranges(
 
         # Retained debug builds may contain old staged ranges; never reuse them.
         safe_rm_tree(job.compile_dir / "ranges")
+        def range_warning(message):
+            ui.warning_line(f"{ui.fmt_doc(job)} {message}", source="Packaging",
+                            category="oversized-range", log_path=log_path)
+
         staged_index = package_ranges(
             job.compile_dir / f"{basename}.pdf", canonical, envelope,
             job.compile_dir / "ranges", max_pages=cfg.multikey_max_pages_per_range,
-            target_bytes=cfg.multikey_target_max_range_bytes, warn=ui.warning_line,
+            target_bytes=cfg.multikey_target_max_range_bytes, warn=range_warning,
         )
         names = publish_package(staged_index, output_dir, canonical)
         published = True
@@ -1539,9 +1635,12 @@ def step_multikey_ranges(
                 RESULT_TYPE_MULTIKEY_JSON if name == output_name else RESULT_TYPE_MULTIKEY_PDF, name,
             )
         remove_legacy_outputs(output_dir, result_dir / RESULT_JSON_SUBDIRNAME, canonical.stem)
+        write_text(log_path, "Published MULTIKEY package:\n" + "\n".join(names) + "\n")
 
         # The scheduler waits for the whole ordinary job, including media and
         # JSON export, so it cannot overwrite this completed-package reference.
+        # Replace its metadata last: a failed packaging step must not leave a
+        # successful ordinary job advertising an uncommitted companion.
         source_name = f"{build_job_basename(ordinary_job)}.json"
         if cfg.json and f"{RESULT_TYPE_JSON}{RESULTLIST_SEPARATOR}{source_name}" in records:
             json_dir = result_dir / RESULT_JSON_SUBDIRNAME
@@ -1551,7 +1650,6 @@ def step_multikey_ranges(
             temporary = json_dir / f".{source_name}.tmp"
             write_text(temporary, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
             os.replace(temporary, json_dir / source_name)
-        write_text(log_path, "Published MULTIKEY package:\n" + "\n".join(names) + "\n")
     except Exception as error:
         # An earlier index may describe an ordinary PDF replaced in this run.
         # Keep a newly published complete package if only bookkeeping failed.
@@ -1562,7 +1660,7 @@ def step_multikey_ranges(
     return output_index, step + 1
 
 
-def compile_one_job(
+def _compile_one_job(
     ui: UI,
     assets: EngineAssets,
     cfg: Config,
@@ -1664,6 +1762,17 @@ def compile_one_job(
             from .lilypond_scores import generate_scores
 
             generate_scores(ui, job, basename, score_sources, env, lp_include_args, verbose=cfg.verbose)
+            if isinstance(ui, _JobUI):
+                results_path = cwd / (basename + ".ulsbs-score-results.json")
+                try:
+                    score_results = json.loads(read_text(results_path))
+                    for score in score_results["scores"]:
+                        for offset in score["offsets"]:
+                            if offset["status"] == "transposed" and offset["attempts"]:
+                                _track_log(ui, cwd / offset["attempts"][-1]["log"], "LilyPond")
+                except (OSError, ValueError, KeyError, TypeError) as error:
+                    ui.warning_line(f"Cannot inspect supplemental score diagnostics: {error}",
+                                    source="Reporting", category="score-logs", log_path=results_path)
 
         # 3) indices (if not selection)
         if not basename.startswith(SELECTION_FNAME_PREFIX):
@@ -1771,20 +1880,43 @@ def compile_one_job(
         warn_count = analyze_warnings(
             ui, cfg, job, lilypond_log=lp_log, last_lualatex_log=last_tex_log
         )
+        if isinstance(ui, _JobUI):
+            ui.analyzed = True
 
         if job.multikey:
             ui.info_line(f"{txt_doc} Compilation complete; awaiting MULTIKEY range packaging.")
-        else:
-            ui.success_line(f"{txt_doc} Compilation successful!")
-            ui.space_line(f"{ui.colorize('->', ui.C_LGREEN)} {dst_pdf.relative_to(result_dir.parent)}")
         return CompilationResult(warning_count=warn_count, next_step=step)
     finally:
         lock.release()
 
 
+def compile_one_job(ui: UI, assets: EngineAssets, cfg: Config, job: Job) -> CompilationResult:
+    worker_ui = _JobUI(ui, job)
+    with resultlist.job_scope(job), _capture_library_warnings(worker_ui):
+        try:
+            result = _compile_one_job(worker_ui, assets, cfg, job)
+        except Exception as error:
+            if not worker_ui.analyzed:
+                analyze_warnings(worker_ui, cfg, job, None, worker_ui.last_tex_log)
+            failure = error if isinstance(error, CompileError) else CompileError(str(error))
+            failure.diagnostics = tuple(worker_ui.diagnostics)
+            resultlist.discard_job(job)
+            write_diagnostic_report(cfg, job, failure.diagnostics, "failed")
+            if failure is error:
+                raise
+            raise failure from error
+        result = replace(result, diagnostics=tuple(worker_ui.diagnostics),
+                         warning_count=_warning_count(worker_ui.diagnostics))
+        if not job.multikey:
+            write_diagnostic_report(cfg, job, result.diagnostics, "success")
+            resultlist.commit_job(job)
+            _report_success(ui, cfg, job, result.diagnostics)
+        return result
+
+
 def finish_multikey_job(
     ui: UI, cfg: Config, job: Job, ordinary_job: Job, compilation: CompilationResult,
-) -> int:
+) -> PackagingResult:
     """Publish a compiled MULTIKEY job after its ordinary counterpart succeeds.
 
     This worker never waits for another future. Reacquire the same per-job lock
@@ -1792,28 +1924,85 @@ def finish_multikey_job(
     and run ``step_multikey_ranges``. The coordinator must keep the private
     compile directory until this task finishes; CLI cleanup happens afterward.
 
-    Report final success only for a published package. Return the compiler's
-    warning count, adding one for an explicitly layer-disabled source without
-    announcing publication. Packaging failures use the ordinary job diagnostic
-    path and release the lock before propagating to the coordinator.
+    Report final success only for a published package. Explicitly layer-disabled
+    sources are skipped, not additional warnings. Packaging failures retain
+    compilation diagnostics and release the lock before reaching the coordinator.
     """
-    lock = JobLock(job.compile_dir)
-    lock.acquire()
-    try:
+    worker_ui = _JobUI(ui, job, compilation.diagnostics)
+    with resultlist.job_scope(job), _capture_library_warnings(worker_ui):
+        lock = JobLock(job.compile_dir)
+        lock.acquire()
         try:
-            output, _ = step_multikey_ranges(
-                ui, cfg, job, build_job_basename(job), ordinary_job, compilation.next_step,
-            )
-        except CompileError as error:
-            die_log(ui, cfg, job, cwd=job.compile_dir, message=str(error), log_path=error.log_path)
-        if output is None:
-            return compilation.warning_count + 1
-        ui.success_line(f"{ui.fmt_doc(job)} Compilation and MULTIKEY packaging successful!")
-        ui.space_line(f"{ui.colorize('->', ui.C_LGREEN)} "
-                      f"{output.relative_to(cfg.runtime.project_paths.result_dir.parent)}")
-        return compilation.warning_count
-    finally:
-        lock.release()
+            metadata_path = (cfg.runtime.project_paths.result_dir / RESULT_JSON_SUBDIRNAME
+                             / (build_job_basename(ordinary_job) + ".json"))
+            metadata_before = None
+            try:
+                if cfg.json and metadata_path.is_file():
+                    metadata_before = read_text(metadata_path)
+                output, _ = step_multikey_ranges(
+                    worker_ui, cfg, job, build_job_basename(job), ordinary_job, compilation.next_step,
+                )
+                diagnostics = tuple(worker_ui.diagnostics)
+                count = compilation.warning_count + _warning_count(diagnostics[len(compilation.diagnostics):])
+                write_diagnostic_report(cfg, job, diagnostics, "skipped" if output is None else "success")
+                resultlist.commit_job(job)
+            except Exception as error:
+                if metadata_before is not None:
+                    temporary = metadata_path.with_suffix(".rollback.tmp")
+                    write_text(temporary, metadata_before)
+                    os.replace(temporary, metadata_path)
+                failure = error if isinstance(error, CompileError) else CompileError(str(error))
+                failure.diagnostics = tuple(worker_ui.diagnostics)
+                resultlist.discard_job(job)
+                write_diagnostic_report(cfg, job, failure.diagnostics, "failed")
+                if failure is error:
+                    raise
+                raise failure from error
+            if output is None:
+                with _output_block(ui):
+                    _report_warnings(ui, cfg, job, diagnostics)
+                    ui.noexec_line(f"{ui.fmt_doc(job)} Multikey companion skipped: source disables PDF layers")
+            else:
+                _report_success(ui, cfg, job, diagnostics, multikey=True)
+            return PackagingResult(count, diagnostics, skipped=output is None)
+        finally:
+            lock.release()
+
+
+def _run_job_phase(function, job, *args):
+    # Also scopes callers that replace a worker (e.g. tests or alternate runners).
+    with resultlist.job_scope(job):
+        return function(*args)
+
+
+def _report_failure(ui, cfg, failure, seen):
+    excerpt = ""
+    if failure.log_path is not None:
+        try:
+            text = read_text(failure.log_path)
+            # Warnings are rendered from the authoritative final-pass collector,
+            # never from an arbitrary error-tail (e.g. lilypond-book preflight).
+            error_text = strip_tex_warnings(text)
+            lines = error_text.splitlines()
+            # Only a concrete source diagnostic can establish a shared failure.
+            match = re.search(r"^.*?([^\s:]+\.tex:\d+: .+)$", text, re.M)
+            signature = (failure.job.doc_tex_abs, match[1]) if match else None
+            if not cfg.verbose and signature is not None and signature in seen:
+                excerpt = f"Same source error as {ui.fmt_doc(seen[signature])}: {match[1]}"
+            else:
+                if signature is not None:
+                    seen[signature] = failure.job
+                if cfg.max_log_lines > 0:
+                    excerpt = "\n".join(lines[-cfg.max_log_lines:])
+        except OSError as error:
+            excerpt = f"Could not read error log: {error}"
+    with _output_block(ui):
+        _report_warnings(ui, cfg, failure.job, failure.diagnostics)
+        ui.fail_line(f"{ui.fmt_doc(failure.job)} {failure.reason}")
+        if failure.log_path is not None and failure.log_path.exists():
+            ui.see_line(_diagnostic_path(failure.log_path, cfg))
+        if excerpt:
+            ui.space_line(excerpt)
 
 
 def run_jobs_parallel(
@@ -1848,12 +2037,22 @@ def run_jobs_parallel(
     compiled: dict[Job, CompilationResult] = {}
     packaging_started: set[Job] = set()
     stop_requested = {"value": False}
+    seen_errors = {}
 
-    def record_failure(job: Job, reason: str) -> None:
+    def record_failure(job: Job, reason: str, *, error=None, blocked=False) -> None:
         """Deduplicate dependency failure and a later error from its running job."""
-        if job not in failed:
+        diagnostics = tuple(getattr(error, "diagnostics", ()))
+        if not diagnostics and job in compiled:
+            diagnostics = compiled[job].diagnostics
+        failure = JobFailure(job, reason, diagnostics, getattr(error, "log_path", None), blocked)
+        if job not in failed or (not blocked and any(f.job == job and f.blocked for f in failures)):
             failed.add(job)
-            failures.append(JobFailure(job, reason))
+            failures[:] = [item for item in failures if item.job != job]
+            failures.append(failure)
+            resultlist.discard_job(job)
+            write_diagnostic_report(cfg, job, diagnostics, "blocked" if blocked else "failed")
+            if not blocked:
+                _report_failure(ui, cfg, failure, seen_errors)
 
     def handle_sigint(signum, frame):
         """Request cooperative job cancellation without raising in the signal handler."""
@@ -1866,7 +2065,21 @@ def run_jobs_parallel(
     ABORT_EVENT.clear()
 
     try:
-        with cf.ThreadPoolExecutor(max_workers=cfg.max_parallel) as ex:
+        # Install one run-wide dispatcher, not competing process-global warning
+        # contexts in individual threads. Attribution is worker-context local.
+        with warnings.catch_warnings(), cf.ThreadPoolExecutor(max_workers=cfg.max_parallel) as ex:
+            original_showwarning = warnings.showwarning
+
+            def showwarning(message, category, filename, lineno, file=None, line=None):
+                worker_ui = _active_job_ui.get()
+                if worker_ui is None:
+                    original_showwarning(message, category, filename, lineno, file, line)
+                else:
+                    worker_ui.warning_line(f"{message} ({filename}:{lineno})",
+                                           source="Python", category=category.__name__)
+
+            warnings.showwarning = showwarning
+            warnings.simplefilter("always")
             # Each future maps to (job, is_packaging). Compilation returns a
             # handoff object; packaging returns the final integer warning count.
             fut_map = {}
@@ -1875,9 +2088,9 @@ def run_jobs_parallel(
             companions = {(job.doc_tex_abs, job.variant): job for job in jobs if job.multikey}
             for job in jobs:
                 if job.multikey and (job.doc_tex_abs, job.variant) not in ordinary:
-                    record_failure(job, "No matching ordinary edition in this run")
+                    record_failure(job, "No matching ordinary edition in this run", blocked=True)
                 else:
-                    fut_map[ex.submit(compile_one_job, ui, assets, cfg, job)] = (job, False)
+                    fut_map[ex.submit(_run_job_phase, compile_one_job, job, ui, assets, cfg, job)] = (job, False)
 
             # Compilation and packaging use the same bounded pool. Only this
             # coordinator waits on futures; workers never wait on one another.
@@ -1896,25 +2109,36 @@ def run_jobs_parallel(
                     except Exception as error:
                         if ABORT_EVENT.is_set():
                             continue
-                        record_failure(job, str(error))
+                        record_failure(job, str(error), error=error)
                         if not job.multikey:
                             companion = companions.get((job.doc_tex_abs, job.variant))
                             if companion is not None:
-                                record_failure(companion, "Matching ordinary edition failed")
+                                record_failure(companion, "Matching ordinary edition failed", blocked=True)
                     else:
                         if packaging:
-                            successes.append(JobSuccess(job=job, warning_count=result))
+                            resultlist.commit_job(job)
+                            successes.append(JobSuccess(job, result.warning_count,
+                                                        result.diagnostics, result.skipped))
                             continue
                         compiled[job] = result
+                        if job in failed:
+                            resultlist.discard_job(job)
+                            for index, failure in enumerate(failures):
+                                if failure.job == job and failure.blocked:
+                                    failures[index] = replace(failure, diagnostics=result.diagnostics)
+                                    write_diagnostic_report(cfg, job, result.diagnostics, "blocked")
+                            continue
                         if not job.multikey:
-                            successes.append(JobSuccess(job=job, warning_count=result.warning_count))
+                            resultlist.commit_job(job)
+                            successes.append(JobSuccess(job=job, warning_count=result.warning_count,
+                                                        diagnostics=result.diagnostics))
                         key = (job.doc_tex_abs, job.variant)
                         companion, source = companions.get(key), ordinary.get(key)
                         if (companion is not None and companion not in failed
                                 and companion not in packaging_started
                                 and companion in compiled and source in compiled):
-                            future = ex.submit(finish_multikey_job, ui, cfg, companion, source,
-                                               compiled[companion])
+                            future = ex.submit(_run_job_phase, finish_multikey_job, companion,
+                                               ui, cfg, companion, source, compiled[companion])
                             fut_map[future] = (companion, True)
                             packaging_started.add(companion)
                 if stop_requested["value"]:
@@ -1928,9 +2152,17 @@ def run_jobs_parallel(
 
     finally:
         signal.signal(signal.SIGINT, old_int)
+        for job in jobs:
+            resultlist.discard_job(job)
+
+    for failure in sorted((item for item in failures if item.blocked),
+                          key=lambda item: build_job_basename(item.job)):
+        with _output_block(ui):
+            _report_warnings(ui, cfg, failure.job, failure.diagnostics)
+            ui.noexec_line(f"BLOCKED {ui.fmt_doc(failure.job)}: {failure.reason}")
 
     return ParallelRunResult(
         successes=successes,
         failures=failures,
-        total_warnings=sum(s.warning_count for s in successes),
+        total_warnings=sum(s.warning_count for s in successes) + sum(f.warning_count for f in failures),
     )

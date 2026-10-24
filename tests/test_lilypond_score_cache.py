@@ -732,6 +732,7 @@ class ScoreCacheCliTests(unittest.TestCase):
     def run_cli(self, *, flag=True, in_container=False, delegate=False, special=None, failure=None):
         from ulsbs import cli
         from ulsbs.config import Config
+        from ulsbs.pipeline import JobSuccess, ParallelRunResult
 
         ui = Mock()
         project = SimpleNamespace(config_file=Path("ulsbs-config.toml"),
@@ -743,7 +744,7 @@ class ScoreCacheCliTests(unittest.TestCase):
                       runtime=SimpleNamespace(in_container=in_container, project_paths=project,
                                               unique_id="test"))
         events = []
-        outcome = SimpleNamespace(successes=[Mock()], failures=[], total_warnings=0)
+        outcome = ParallelRunResult(successes=[JobSuccess(Mock(), 0)], failures=[])
         mocks = dict(build_config=Mock(return_value=cfg), setup_temp_dir=Mock(),
                      build_job_queue=Mock(return_value=[Mock()]), require_tools=Mock(),
                      ensure_dir=Mock(), print_plan_summary=Mock(), deploy_results=Mock(),

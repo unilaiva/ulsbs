@@ -35,6 +35,7 @@ from ulsbs.constants import (
     RESULT_TYPE_MULTIKEY_JSON,
 )
 from ulsbs.deploy import deploy_results
+from ulsbs.diagnostics import Diagnostic
 from ulsbs.engine_assets import EngineAssets
 from ulsbs.jobs import Job, build_job_basename
 from ulsbs.lock import JobLock
@@ -51,6 +52,8 @@ class MultikeyPipelineTests(unittest.TestCase):
         self.doc.write_text("\\documentclass{ulsbs-songbook}\n", encoding="utf-8")
         self.result = self.root / "result"
         self.result.mkdir()
+        resultlist.initialize(self.result, "pipeline-test")
+        self.addCleanup(lambda: resultlist.delete() if resultlist._initialized else None)
         self.deploy = self.root / "deploy"
         self.deploy.mkdir()
         self.paths = SimpleNamespace(project_root=self.root, result_dir=self.result)
@@ -436,7 +439,7 @@ class MultikeyPipelineTests(unittest.TestCase):
                             pipeline.compile_one_job(self.ui, Mock(), self.cfg, job)
                         self.assertEqual(events, ["pass1", "pass2", "pass3", "pass4", "pass5"])
                         optimize.assert_not_called()
-                        warnings.assert_not_called()
+                        warnings.assert_called_once()
                     else:
                         compilation = pipeline.compile_one_job(self.ui, Mock(), self.cfg, job)
                         self.assertEqual(compilation.next_step, 8)
@@ -499,6 +502,7 @@ class MultikeyPipelineTests(unittest.TestCase):
         pipeline.prepare_compile_dir(self.ui, EngineAssets(), self.cfg, job)
         basename = build_job_basename(job)
         manifest = job.compile_dir / f"{basename}.ulsbs-multikey.json"
+        (job.compile_dir / f"{basename}.ulsbs-score-results.json").write_text('{"scores": []}')
 
         def latex(*args, **kwargs):
             manifest.write_text('{"has_multikey_info": true, "multikey_info": {"songs": []}}')
@@ -524,7 +528,11 @@ class MultikeyPipelineTests(unittest.TestCase):
                 cfg = replace(self.cfg, multikey_lilypond_scores=True, verbose=verbose)
                 compilation = pipeline.compile_one_job(self.ui, Mock(), cfg, job)
                 self.assertEqual(compilation, pipeline.CompilationResult(0, 5))
-                generate.assert_called_once_with(self.ui, job, basename, {}, {}, [], verbose=verbose)
+                generate.assert_called_once()
+                args = generate.call_args.args
+                self.assertIs(args[0].ui, self.ui)
+                self.assertEqual(args[1:], (job, basename, {}, {}, []))
+                self.assertEqual(generate.call_args.kwargs, {"verbose": verbose})
 
     def test_final_status_is_required_before_any_multikey_publication(self) -> None:
         payload = {"songs": []}
@@ -580,14 +588,15 @@ class MultikeyPipelineTests(unittest.TestCase):
                         package.assert_not_called()
                         self.ui.success_line.assert_not_called()
                         if status in statuses[:2]:
-                            warnings = pipeline.finish_multikey_job(
+                            packaged = pipeline.finish_multikey_job(
                                 self.ui, cfg, job, ordinary, compilation,
                             )
                             disabled = status == statuses[1]
-                            self.assertEqual(warnings, int(disabled))
+                            self.assertEqual(packaged, pipeline.PackagingResult(0, (), skipped=disabled))
                             self.assertFalse(output.exists())
                             if disabled:
-                                self.ui.warning_line.assert_called_once()
+                                self.ui.warning_line.assert_not_called()
+                                self.assertIn("skipped", self.ui.noexec_line.call_args.args[0])
                                 self.ui.success_line.assert_not_called()
                                 package.assert_not_called()
                                 sys.modules["ulsbs.multikey_publish"].remove_package.assert_called_once_with(
@@ -597,6 +606,7 @@ class MultikeyPipelineTests(unittest.TestCase):
                             else:
                                 package.assert_called_once()
                                 self.assertEqual(package.call_args.args[2], status)
+                                self.ui.success_line.assert_called_once()
                         else:
                             with self.assertRaises(pipeline.CompileError):
                                 pipeline.finish_multikey_job(
@@ -645,7 +655,10 @@ class MultikeyPipelineTests(unittest.TestCase):
                     publish.assert_not_called()
                     self.assertEqual([failure.job for failure in outcome.failures],
                                      [] if disabled else [multikey])
-                    self.assertEqual(outcome.total_warnings, int(disabled))
+                    self.assertEqual(outcome.total_warnings, 0)
+                    self.assertEqual([record.job for record in outcome.skipped],
+                                     [multikey] if disabled else [])
+                    self.assertTrue(all(record.warning_count == 0 for record in outcome.skipped))
                     self.assertEqual(companion.read_text(), "stale companion")
                     self.assertNotIn(f"{RESULT_TYPE_JSON}\t{companion.name}", resultlist.lines())
                 finally:
@@ -718,6 +731,7 @@ class MultikeyPipelineTests(unittest.TestCase):
                     self.assertEqual(canonical.read_bytes(), b"ordinary PDF")
                     self.assertFalse((self.result / "multikey" / master.name).exists())
                     self.assertFalse(stale_range.exists())
+                    kwargs["warn"]("Range remains larger than requested target")
                     return staged_index
 
                 def publish_package(*args, index_name=index_name, range_name=range_name,
@@ -748,11 +762,19 @@ class MultikeyPipelineTests(unittest.TestCase):
                     package.assert_called_once_with(
                         master, canonical, {"has_multikey_info": True, "multikey_info": payload},
                         multikey.compile_dir / "ranges", max_pages=7, target_bytes=123456,
-                        warn=self.ui.warning_line,
+                        warn=package.call_args.kwargs["warn"],
                     )
+                    self.assertTrue(callable(package.call_args.kwargs["warn"]))
+                    self.assertIsNot(package.call_args.kwargs["warn"], self.ui.warning_line)
                     publish.assert_called_once_with(staged_index, self.result / "multikey", canonical)
                     self.assertEqual(outcome.failures, [])
-                    self.assertEqual(outcome.total_warnings, 3)
+                    self.assertEqual(outcome.total_warnings, 4)
+                    packaged = next(record for record in outcome.successes if record.job == multikey)
+                    self.assertFalse(packaged.skipped)
+                    self.assertEqual(packaged.diagnostics[-1].source, "Packaging")
+                    self.assertEqual(packaged.diagnostics[-1].category, "oversized-range")
+                    self.assertIn("larger than requested", packaged.diagnostics[-1].message)
+                    self.assertEqual(outcome.skipped, [])
                     self.assertEqual({success.job for success in outcome.successes}, {ordinary, multikey})
                     self.assertIn(f"{RESULT_TYPE_MULTIKEY_PDF}\t{range_name}", resultlist.lines())
                     self.assertIn(f"{RESULT_TYPE_MULTIKEY_JSON}\t{index_name}", resultlist.lines())
@@ -822,7 +844,7 @@ class MultikeyPipelineTests(unittest.TestCase):
                     self.assertFalse(any(call.kwargs.get("job") == multikey
                                          for call in success_record.call_args_list))
                     packaged.set()
-                    return result.warning_count + 1
+                    return pipeline.PackagingResult(result.warning_count + 1, result.diagnostics)
 
                 with patch.object(pipeline, "compile_one_job", side_effect=compile_job) as compile_mock, \
                         patch.object(pipeline, "finish_multikey_job", side_effect=finish) as finish_mock, \
@@ -853,13 +875,18 @@ class MultikeyPipelineTests(unittest.TestCase):
                         mk_started.set()
                         if ordinary_first:
                             self.assertTrue(first_observed.wait(5), "ordinary failure not observed")
+                        diagnostics = (Diagnostic("TeX", "fonts", "MK font warning", occurrences=9),)
                         if multikey_fails:
-                            raise pipeline.CompileError("MK compile failed")
-                        return pipeline.CompilationResult(9, 17)
+                            error = pipeline.CompileError("MK compile failed")
+                            error.diagnostics = diagnostics
+                            raise error
+                        return pipeline.CompilationResult(9, 17, diagnostics)
                     self.assertTrue(mk_started.wait(5), "MK was not submitted concurrently")
                     if not ordinary_first:
                         self.assertTrue(first_observed.wait(5), "MK completion not observed")
-                    raise pipeline.CompileError("ordinary compile failed")
+                    error = pipeline.CompileError("ordinary compile failed", self.doc)
+                    error.diagnostics = (Diagnostic("TeX", "references", "Ordinary reference warning"),)
+                    raise error
 
                 def wait(futures, real_wait=real_wait, first_observed=first_observed, **kwargs):
                     completed, pending = real_wait(futures, **kwargs)
@@ -878,7 +905,16 @@ class MultikeyPipelineTests(unittest.TestCase):
                 publish.assert_not_called()
                 self.assertEqual(outcome.successes, [])
                 self.assertCountEqual([record.job for record in outcome.failures], [ordinary, multikey])
-                self.assertEqual(outcome.total_warnings, 0)
+                self.assertEqual(outcome.total_warnings, 10)
+                self.assertEqual({record.job for record in outcome.errors},
+                                 {ordinary, multikey} if multikey_fails else {ordinary})
+                self.assertEqual([record.job for record in outcome.blocked],
+                                 [] if multikey_fails else [multikey])
+                for record in outcome.failures:
+                    self.assertEqual(record.blocked, record.job == multikey and not multikey_fails)
+                failed_ordinary = next(record for record in outcome.errors if record.job == ordinary)
+                self.assertEqual(failed_ordinary.log_path, self.doc)
+                self.assertEqual(failed_ordinary.warning_count, 1)
 
     def test_keyboard_interrupt_during_compile_or_finish_restores_signal_handler(self) -> None:
         ordinary, multikey = self.job(), self.job(multikey=True)
@@ -911,7 +947,9 @@ class MultikeyPipelineTests(unittest.TestCase):
 
     def test_finish_uses_frozen_compilation_result_and_success_only_after_index(self) -> None:
         ordinary, multikey = self.job(), self.job(multikey=True)
-        compilation = pipeline.CompilationResult(warning_count=3, next_step=17)
+        diagnostics = (Diagnostic("TeX", "fonts", "Font substitution", occurrences=3),)
+        compilation = pipeline.CompilationResult(warning_count=3, next_step=17,
+                                                 diagnostics=diagnostics)
         with self.assertRaises(FrozenInstanceError):
             compilation.next_step = 99
         published_index = self.result / "multikey" / "book_A5_MULTIKEY_RANGES.json"
@@ -935,15 +973,20 @@ class MultikeyPipelineTests(unittest.TestCase):
                     )
                 step.assert_called_once()
                 warnings.assert_not_called()
-                self.assertEqual(count, 3 + int(output is None))
+                self.assertEqual(count, pipeline.PackagingResult(3, diagnostics, skipped=output is None))
+                report = json.loads((self.result / "diagnostics" /
+                                     (build_job_basename(multikey) + ".json")).read_text())
+                self.assertEqual(report["status"], "skipped" if output is None else "success")
+                self.assertEqual(report["warnings"][0]["occurrences"], 3)
                 if output is None:
                     self.ui.success_line.assert_not_called()
-                    self.ui.space_line.assert_not_called()
+                    self.assertFalse(any("->" in call.args[0]
+                                         for call in self.ui.space_line.call_args_list))
                 else:
                     self.ui.success_line.assert_called_once()
-                    self.ui.space_line.assert_called_once_with(
-                        "-> result/multikey/book_A5_MULTIKEY_RANGES.json",
-                    )
+                    self.assertIn("MULTIKEY packaging successful with 3 warnings",
+                                  self.ui.success_line.call_args.args[0])
+                    self.ui.space_line.assert_any_call("-> result/multikey/book_A5_MULTIKEY_RANGES.json")
                 released = JobLock(multikey.compile_dir)
                 released.acquire()
                 released.release()
@@ -988,6 +1031,16 @@ class MultikeyPipelineTests(unittest.TestCase):
                     publish.assert_not_called()
                     expected = {ordinary, multikey} if mode == "failed" else {multikey}
                     self.assertEqual({failure.job for failure in outcome.failures}, expected)
+                    if mode in ("absent", "failed", "wrong-variant"):
+                        self.assertEqual([record.job for record in outcome.blocked], [multikey])
+                        self.assertTrue(next(record for record in outcome.failures
+                                             if record.job == multikey).blocked)
+                    if mode == "failed":
+                        self.assertEqual([record.job for record in outcome.errors], [ordinary])
+                        self.assertFalse(resultlist.exists())
+                        for failed_job in (ordinary, multikey):
+                            with resultlist.job_scope(failed_job):
+                                self.assertEqual(resultlist.lines(), [])
                     if mode == "missing-inventory":
                         self.assertIn(multikey, started)
                     self.assertEqual(stale.read_text(), "stale invalid JSON")
@@ -1096,6 +1149,37 @@ class MultikeyPipelineTests(unittest.TestCase):
         self.assertEqual(outcome.total_warnings, 2)
         self.assertEqual(resultlist.lines(), [f"{RESULT_TYPE_MAIN_PDF}\t{canonical.name}"])
 
+    def test_scheduler_isolates_fake_compile_inventory_until_final_success(self) -> None:
+        failed, successful = self.job(), self.job("charango")
+        provisional = threading.Event()
+        inspected = threading.Event()
+        failed_record = f"{RESULT_TYPE_MAIN_PDF}\t{build_job_basename(failed)}.pdf"
+        successful_name = build_job_basename(successful) + ".pdf"
+
+        def compile_job(ui, assets, cfg, job):
+            if job == failed:
+                resultlist.append_line(RESULT_TYPE_MAIN_PDF, build_job_basename(job) + ".pdf")
+                self.assertIn(failed_record, resultlist.lines())
+                provisional.set()
+                self.assertTrue(inspected.wait(5), "other worker never inspected provisional state")
+                raise pipeline.CompileError("failed after provisional publication")
+            self.assertTrue(provisional.wait(5), "failed worker never staged publication")
+            self.assertNotIn(failed_record, resultlist.lines())
+            resultlist.append_line(RESULT_TYPE_MAIN_PDF, successful_name)
+            inspected.set()
+            return pipeline.CompilationResult(0, 5)
+
+        with patch.object(pipeline, "compile_one_job", side_effect=compile_job):
+            outcome = pipeline.run_jobs_parallel(
+                self.ui, [failed, successful], Mock(), replace(self.cfg, max_parallel=2),
+            )
+        self.assertEqual([record.job for record in outcome.errors], [failed])
+        self.assertEqual([record.job for record in outcome.successes], [successful])
+        self.assertEqual(outcome.blocked, [])
+        self.assertEqual(resultlist.lines(), [f"{RESULT_TYPE_MAIN_PDF}\t{successful_name}"])
+        with resultlist.job_scope(failed):
+            self.assertNotIn(failed_record, resultlist.lines())
+
     def test_parallel_packaging_does_not_read_uninventoried_stale_json(self) -> None:
         ordinary, multikey = self.job(), self.job(multikey=True)
         directory = self.result / "json"
@@ -1147,7 +1231,8 @@ class MultikeyPipelineTests(unittest.TestCase):
                         ordinary_json.write_text(original)
                         resultlist.append_line(RESULT_TYPE_MAIN_PDF, canonical.name)
                         resultlist.append_line(RESULT_TYPE_JSON, ordinary_json.name)
-                    return pipeline.CompilationResult(3, 5)
+                    return pipeline.CompilationResult(3, 5, (
+                        Diagnostic("TeX", "fonts", "Compiler font warning", occurrences=3),))
 
                 resultlist.initialize(self.result, "packaging-error")
                 try:
@@ -1164,7 +1249,11 @@ class MultikeyPipelineTests(unittest.TestCase):
                     self.assertEqual([success.job for success in outcome.successes], [ordinary])
                     self.assertEqual([failure.job for failure in outcome.failures], [multikey])
                     self.assertIn("invalid range package", outcome.failures[0].reason)
-                    self.assertEqual(outcome.total_warnings, 3)
+                    self.assertEqual(outcome.total_warnings, 6)
+                    self.assertEqual(outcome.blocked, [])
+                    self.assertEqual([record.job for record in outcome.errors], [multikey])
+                    self.assertEqual(outcome.errors[0].warning_count, 3)
+                    self.assertIsNotNone(outcome.errors[0].log_path)
                     self.assertFalse(old_index.exists())
                     self.assertEqual(canonical.read_bytes(), b"ordinary")
                     self.assertEqual(ordinary_json.read_text(), original)
@@ -1192,6 +1281,13 @@ class MultikeyPipelineTests(unittest.TestCase):
             (multikey.compile_dir / f"{basename}.pdf").write_bytes(b"%PDF-test")
             return self.doc, 4
 
+        diagnostics = (Diagnostic("TeX", "fonts", "Font warning", occurrences=3),)
+
+        def analyze(ui, *args, **kwargs):
+            ui.diagnostics.extend(diagnostics)
+            ui.analyzed = True
+            return 3
+
         with self.packaging() as (package, publish), \
                 patch.object(pipeline, "prepare_compile_dir"), \
                 patch.object(pipeline, "build_include_paths", return_value=({}, [], [])), \
@@ -1201,7 +1297,7 @@ class MultikeyPipelineTests(unittest.TestCase):
                 patch.object(pipeline, "step_lualatex_pass", side_effect=latex), \
                 patch.object(pipeline, "step_lualatex_convergence", side_effect=lambda *args: args[-2:]), \
                 patch.object(pipeline, "step_pdf_fonts", return_value=7) as fonts, \
-                patch.object(pipeline, "analyze_warnings", return_value=3) as warnings:
+                patch.object(pipeline, "analyze_warnings", side_effect=analyze) as warnings:
             def fail(*args, **kwargs):
                 fonts.assert_called_once()
                 contender = JobLock(multikey.compile_dir)
@@ -1211,7 +1307,7 @@ class MultikeyPipelineTests(unittest.TestCase):
 
             package.side_effect = fail
             compilation = pipeline.compile_one_job(self.ui, Mock(), self.cfg, multikey)
-            self.assertEqual(compilation, pipeline.CompilationResult(3, 7))
+            self.assertEqual(compilation, pipeline.CompilationResult(3, 7, diagnostics))
             package.assert_not_called()
             self.ui.success_line.assert_not_called()
             released = JobLock(multikey.compile_dir)
@@ -1224,6 +1320,7 @@ class MultikeyPipelineTests(unittest.TestCase):
             self.ui.success_line.assert_not_called()
         self.assertEqual(error.exception.log_path, multikey.compile_dir / "07_multikey-ranges.log")
         self.assertIn("invalid range package", error.exception.log_path.read_text())
+        self.assertEqual(error.exception.diagnostics, diagnostics)
         self.assertEqual(resultlist.lines(), [f"{RESULT_TYPE_MAIN_PDF}\t{canonical.name}"])
         lock = JobLock(multikey.compile_dir)
         lock.acquire()

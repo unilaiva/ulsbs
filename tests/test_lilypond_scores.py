@@ -160,9 +160,20 @@ class LilyPondScoreTests(unittest.TestCase):
                 if changed:
                     warning = self.ui.warning_line.call_args.args[0]
                     self.assertIn(tail.name, warning)
-                    self.assertIn(scores.cache._asset_digest(data), warning)
-                    self.assertIn("ulsbs-score-cache-assets", warning)
-                    self.assertIn("before rewriting the trusted-asset manifest", warning)
+                    self.assertIn("caching, not engraving", warning)
+                    self.assertNotIn(scores.cache._asset_digest(data), warning)
+                    self.assertNotIn("ulsbs-score-cache-assets", warning)
+                    self.assertEqual(self.ui.warning_line.call_args.kwargs,
+                                     {"source": "Cache", "category": "assets"})
+        self.ui.reset_mock()
+        report, _, command = self.generate(prepared, verbose=True)
+        self.assertEqual(report["successful_offsets"], 22)
+        self.assertEqual(command.call_count, 11)
+        self.ui.warning_line.assert_called_once()
+        warning = self.ui.warning_line.call_args.args[0]
+        self.assertIn(scores.cache._asset_digest(data), warning)
+        self.assertIn("ulsbs-score-cache-assets", warning)
+        self.assertIn("before rewriting the trusted-asset manifest", warning)
 
     def test_asset_audit_errors_are_nonfatal(self):
         self.snippet()
@@ -174,6 +185,31 @@ class LilyPondScoreTests(unittest.TestCase):
         self.assertEqual(report["successful_offsets"], 11)
         self.ui.warning_line.assert_called_once()
         self.assertIn("Cannot audit LilyPond cache assets", self.ui.warning_line.call_args.args[0])
+        self.assertEqual(self.ui.warning_line.call_args.kwargs,
+                         {"source": "Cache", "category": "assets"})
+
+    def test_request_warnings_include_score_results_metadata(self):
+        self.snippet()
+        prepared = scores.prepare_scores(self.root, "book")
+        request_file = self.root / "book.ulsbs-scores.json"
+        cases = [(None, "no active score requests"),
+                 ("{invalid", "invalid requests"),
+                 (json.dumps({"schema_version": 1, "requests": [
+                     {"snippet_id": "missing", "layer_prefix": "invalid"}]}),
+                  "unmatched score request")]
+        for content, message in cases:
+            with self.subTest(message=message):
+                self.ui.reset_mock()
+                if content is not None:
+                    request_file.write_text(content)
+                report, _, command = self.generate(prepared)
+                command.assert_not_called()
+                self.assertEqual(report["scores"], [])
+                self.ui.warning_line.assert_called_once()
+                self.assertIn(message, self.ui.warning_line.call_args.args[0])
+                self.assertEqual(self.ui.warning_line.call_args.kwargs, {
+                    "source": "Scores", "category": "requests",
+                    "log_path": self.root / "book.ulsbs-score-results.json"})
 
     def test_wrapping_preserves_break_tokens_is_idempotent_and_distinguishes_paths(self):
         _, first = self.snippet("ab/lily-same", systems=2)
@@ -436,7 +472,7 @@ class LilyPondScoreTests(unittest.TestCase):
                 else:
                     self.assertEqual(messages, [])
 
-    def test_all_octaves_unplayable_warn_once_with_all_affected_offsets(self):
+    def test_all_octaves_unplayable_warn_concisely_with_verbose_offsets(self):
         self.snippet()
         prepared = scores.prepare_scores(self.root, "book")
         self.request(prepared)
@@ -452,9 +488,20 @@ class LilyPondScoreTests(unittest.TestCase):
         self.ui.warning_line.assert_called_once()
         warning = self.ui.warning_line.call_args.args[0]
         self.assertIn("No string for pitch; original notation substituted", warning)
-        self.assertIn("affected transpositions: t01 (des), t04 (e), t07 (g)", warning)
+        self.assertIn("Test song", warning)
+        self.assertIn("3 affected score/transpositions", warning)
+        self.assertNotIn("t01", warning)
+        self.assertEqual(self.ui.warning_line.call_args.kwargs, {
+            "source": "Scores", "category": "fallback", "affected_count": 3,
+            "log_path": self.root / "book.ulsbs-score-results.json"})
         self.assertEqual(dispatch.count("\\endcsname"), 8)
         self.ui.debug_line.assert_not_called()
+        self.ui.reset_mock()
+        self.generate(prepared, warn, verbose=True)
+        self.ui.warning_line.assert_called_once()
+        warning = self.ui.warning_line.call_args.args[0]
+        self.assertIn("affected transpositions: t01 (des), t04 (e), t07 (g)", warning)
+        self.assertEqual(self.ui.warning_line.call_args.kwargs["affected_count"], 3)
 
     def test_third_higher_octave_recovers_low_tab_pitches_without_skipping_validation(self):
         self.snippet(systems=2)
@@ -497,6 +544,18 @@ class LilyPondScoreTests(unittest.TestCase):
         self.assertEqual(self.ui.warning_line.call_count, 4)
         for call in self.ui.warning_line.call_args_list:
             warning = call.args[0]
+            count = 22 if "custom or unrecognized" in warning else 11
+            self.assertIn(f"{count} affected score/transpositions", warning)
+            self.assertIn("Test song", warning)
+            self.assertNotIn("t01", warning)
+            self.assertEqual(call.kwargs, {
+                "source": "Scores", "category": "fallback", "affected_count": count,
+                "log_path": self.root / "book.ulsbs-score-results.json"})
+        self.ui.reset_mock()
+        self.generate(prepared, verbose=True)
+        self.assertEqual(self.ui.warning_line.call_count, 4)
+        for call in self.ui.warning_line.call_args_list:
+            warning = call.args[0]
             self.assertEqual(warning.count("t01 (des)"), 1)
             self.assertIn("t11 (b)", warning)
             if "custom or unrecognized" in warning:
@@ -518,6 +577,13 @@ class LilyPondScoreTests(unittest.TestCase):
         warning = self.ui.warning_line.call_args.args[0]
         self.assertIn("effective key metadata is unavailable", warning)
         self.assertIn("major/minor required", warning)
+        self.assertIn("11 affected score/transpositions", warning)
+        self.assertNotIn("t01", warning)
+        self.assertEqual(self.ui.warning_line.call_args.kwargs["affected_count"], 11)
+        self.ui.reset_mock()
+        self.generate(prepared, verbose=True)
+        self.ui.warning_line.assert_called_once()
+        warning = self.ui.warning_line.call_args.args[0]
         for offset in range(1, 12):
             self.assertIn(f"t{offset:02d} (unknown)", warning)
 
@@ -793,6 +859,7 @@ class LilyPondScoreTests(unittest.TestCase):
             changed, _, command = self.generate(prepared)
             self.assertEqual(command.call_count, 11)
             self.assertEqual(changed["cache_hits"], 0)
+        self.ui.warning_line.assert_not_called()
 
     def test_changed_minimum_scale_uses_distinct_cache_keys_and_preserves_warm_reuse(self):
         self.snippet()

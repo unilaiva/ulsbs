@@ -5,6 +5,14 @@ the extension is released.
 
 ## Unreleased
 
+- Compiler warnings now use structured, source-aware diagnostic counts, compact
+  per-job summaries, clickable log paths, and retained `result/diagnostics/`
+  reports. Successful jobs remain `SUCCESS` with a warning count; related output
+  lines print atomically. Only the final LuaLaTeX invocation contributes warnings.
+- Independent jobs continue after failures, while dependency-blocked multikey
+  companions are distinguished from compilation failures. Automatic deployment
+  requires a complete successful run; explicit `--deploy-last` deploys only
+  finally successful jobs from the newest inventory, excluding partial artifacts.
 - Added `\symdim` and `\symhalfdim` macros for diminished and half-diminished chords.
 - Added optional MULTIKEY editions with independent per-song key selection, native or
   programmatic layer controls, configurable chord-name shrinking, optional strict

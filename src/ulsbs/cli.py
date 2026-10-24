@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 from pathlib import Path
 from typing import List
 
@@ -20,7 +21,7 @@ from .constants import CONFIG_FILENAME
 from .deploy import deploy_results
 from .container import run_self_in_container
 from .engine_assets import EngineAssets
-from .jobs import build_job_queue
+from .jobs import build_job_queue, build_job_basename
 from .paths import ProjectPaths
 from .pipeline import require_tools, run_jobs_parallel
 from .tempdir import setup_temp_dir, clear_temp_dir_if_no_locks
@@ -156,6 +157,33 @@ def print_plan_summary(
         )
     )
     ui.plain("")
+
+
+def print_run_summary(ui, cfg, result, jobs_count):
+    """Name affected editions without conflating warnings and job failures."""
+    succeeded = [item for item in result.successes if not item.skipped]
+    warned = [item for item in succeeded if item.warning_count]
+    ui.plain("")
+    text = (f"Finished: {jobs_count} jobs; {len(succeeded)} succeeded "
+            f"({len(warned)} with warnings), {len(result.errors)} failed, "
+            f"{len(result.blocked)} blocked, {len(result.skipped)} skipped.")
+    if result.failures:
+        ui.fail_line(text)
+    else:
+        ui.success_line(text)
+    if result.total_warnings:
+        ui.warning_line(f"{result.total_warnings} warning diagnostics across all job outcomes.", record=False)
+    for item in sorted(warned, key=lambda item: build_job_basename(item.job)):
+        ui.space_line(f"{ui.fmt_doc(item.job)}: {item.warning_count} warnings")
+    for item in sorted(result.failures, key=lambda item: build_job_basename(item.job)):
+        label = "BLOCKED" if item.blocked else "FAILED"
+        ui.space_line(f"{label} {ui.fmt_doc(item.job)}: {item.reason}")
+    if result.total_warnings:
+        ui.see_line(str(cfg.runtime.project_paths.result_dir / "diagnostics"))
+        if cfg.clean_temp and not result.failures:
+            ui.space_line("Diagnostic reports are retained; use --keep-temp for full tool logs.")
+    if isinstance(ui, UI) and ui.run_diagnostics:
+        ui.space_line(f"Run-level advisories: {len(ui.run_diagnostics)} (separate from job warnings).")
 
 
 def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
@@ -309,9 +337,23 @@ def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
         else: # deploy_last
             resultlist_files = resultlist.resultfiles_in_dir(proj.result_dir)
             if len(resultlist_files) > 0:
-                for reslist in resultlist_files:
-                    resultlist.initialize_with_file(reslist)
-                    deploy_results(ui=ui, cfg=cfg)
+                # An aborted run can leave older inventories alongside its own.
+                # Never deploy those against files overwritten by a newer run.
+                reslist = max(resultlist_files, key=lambda path: (path.stat().st_mtime_ns, path.name))
+                resultlist.initialize_with_file(reslist)
+                records = resultlist.lines()
+                incomplete = any(
+                    "Compilation ABORTED" in line
+                    or re.search(r"Jobs (?:failed|blocked): [1-9]\d*", line)
+                    for line in records
+                )
+                if incomplete:
+                    ui.info_line("Explicit partial deployment: only inventoried successful jobs "
+                                 "from this incomplete run will be deployed.")
+                deploy_results(ui=ui, cfg=cfg)
+                for obsolete in resultlist_files:
+                    if obsolete != reslist:
+                        obsolete.unlink(missing_ok=True)
             else:
                 ui.nodeploy_line("Nothing to deploy!")
         ui.plain("")
@@ -454,22 +496,14 @@ def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
     else:
         ui.info_line("Temp is kept.")
 
-    if result.successes:
-        ui.plain("")
-        ui.success_line(f"{'All' if len(result.successes) == len(jobs) else len(result.successes)} jobs succeeded.")
-        if result.total_warnings:
-            ui.warning_line(f"Tools' output logs contained a total of {result.total_warnings} warnings for all jobs together.")
-            if cfg.clean_temp:
-                ui.space_line("To keep the logs for analyzing them, run with --keep-temp")
+    print_run_summary(ui, cfg, result, len(jobs))
 
     if result.failures:
-        ui.plain("")
-        ui.fail_line(f"{'All' if len(result.failures) == len(jobs) else 'Some'} jobs failed:")
-        for f in result.failures:
-            ui.fail_line(f"  - {ui.fmt_doc(f.job)} -> {f.reason}")
         if cfg.deploy:
             ui.plain("")
-            ui.nodeploy_line("Nothing is deployed due to failures.")
+            ui.nodeploy_line("Automatic deployment skipped because the run was incomplete.")
+        ui.space_line("Successful results remain in result/. To deploy them explicitly, "
+                      "run ulsbs-compile --deploy-last")
         ui.plain("")
         return 1
 

@@ -279,6 +279,7 @@ def generate_scores(ui, job, basename: str, scores: dict[str, Score],
     started = time.perf_counter()
     directory = job.compile_dir
     request_file = directory / (basename + ".ulsbs-scores.json")
+    result_file = directory / (basename + ".ulsbs-score-results.json")
     requests = []
     if request_file.is_file():
         try:
@@ -287,9 +288,11 @@ def generate_scores(ui, job, basename: str, scores: dict[str, Score],
                 raise ValueError("unsupported request schema")
             requests = envelope["requests"]
         except (ValueError, TypeError, AttributeError) as error:
-            ui.warning_line(f"{ui.fmt_doc(job)} Multikey LilyPond: invalid requests ({error}); using originals")
+            ui.warning_line(f"{ui.fmt_doc(job)} Multikey LilyPond: invalid requests ({error}); using originals",
+                            source="Scores", category="requests", log_path=result_file)
     elif scores:
-        ui.warning_line(f"{ui.fmt_doc(job)} Multikey LilyPond: no active score requests; using originals")
+        ui.warning_line(f"{ui.fmt_doc(job)} Multikey LilyPond: no active score requests; using originals",
+                        source="Scores", category="requests", log_path=result_file)
 
     dispatch, results = [], []
     warnings = {}
@@ -300,16 +303,20 @@ def generate_scores(ui, job, basename: str, scores: dict[str, Score],
         try:
             for path, digest, trusted in cache.audit_assets([asset_directory]):
                 if not trusted:
+                    detail = (
+                        f" (SHA-256 {digest}). Run python3 -m ulsbs.lilypond_score_cache "
+                        f"{shlex.quote(str(asset_directory))} (installed alias: ulsbs-score-cache-assets) "
+                        "and review changed files and dependencies before rewriting the trusted-asset "
+                        "manifest with --rewrite."
+                    ) if verbose else ""
                     ui.warning_line(
                         f"{ui.fmt_doc(job)} Multikey LilyPond cache asset {path.name} is not audited "
-                        f"(SHA-256 {digest}); affected score caching may be disabled, not engraving. "
-                        "Run python3 -m ulsbs.lilypond_score_cache "
-                        f"{shlex.quote(str(asset_directory))} (installed alias: ulsbs-score-cache-assets) "
-                        "and review changed files "
-                        "and dependencies before rewriting the trusted-asset manifest with --rewrite.")
+                        f"and may disable affected score caching, not engraving.{detail}",
+                        source="Cache", category="assets")
         except (OSError, ValueError) as error:
             ui.warning_line(f"{ui.fmt_doc(job)} Cannot audit LilyPond cache assets: {error}; "
-                            "normal cache eligibility checks still apply")
+                            "normal cache eligibility checks still apply",
+                            source="Cache", category="assets")
     toolchain = cache.toolchain_fingerprint(env=env, cwd=directory) if requests else None
     statistics = {"engravings": 0, "cache_hits": 0}
     successes = fallbacks = attempts = 0
@@ -320,7 +327,8 @@ def generate_scores(ui, job, basename: str, scores: dict[str, Score],
         prefix = request.get("layer_prefix", "")
         if score is None or not isinstance(prefix, str) or not re.fullmatch(
                 r"ulsbs:transpose:v1:id:[a-z0-9-]+(?::o\d+)?", prefix):
-            ui.warning_line(f"{ui.fmt_doc(job)} Multikey LilyPond: unmatched score request; using original")
+            ui.warning_line(f"{ui.fmt_doc(job)} Multikey LilyPond: unmatched score request; using original",
+                            source="Scores", category="requests", log_path=result_file)
             continue
         key, targets = request.get("key"), request.get("targets")
         reason = score.unsupported
@@ -390,22 +398,28 @@ def generate_scores(ui, job, basename: str, scores: dict[str, Score],
             if outcome["status"] == "fallback":
                 fallbacks += 1
                 warning = warnings.setdefault((prefix, outcome["reason"]), {
-                    "title": request.get("title"), "scores": {}, "offsets": {},
+                    "title": request.get("title"), "scores": {}, "offsets": {}, "alternatives": set(),
                 })
                 warning["scores"][score.identity] = None
                 warning["offsets"][(offset, target_label)] = None
+                warning["alternatives"].add((score.identity, signature, offset))
             record["offsets"].append(outcome)
         results.append(record)
     for (prefix, reason), warning in warnings.items():
-        affected = ", ".join(f"t{offset:02d} ({label})" for offset, label in sorted(warning["offsets"]))
+        affected_count = len(warning["alternatives"])
+        detail = ""
+        if verbose:
+            affected = ", ".join(f"t{offset:02d} ({label})" for offset, label in sorted(warning["offsets"]))
+            detail = (f"; {prefix} score={','.join(warning['scores'])}; "
+                      f"affected transpositions: {affected}")
         ui.warning_line(
-            f"{ui.fmt_doc(job)} Multikey LilyPond {prefix} score={','.join(warning['scores'])} "
-            f"title={warning['title']!r}: {reason}; original notation substituted; "
-            f"affected transpositions: {affected}"
+            f"{ui.fmt_doc(job)} Multikey LilyPond title={warning['title']!r}: {reason}; "
+            f"original notation substituted for {affected_count} affected score/transpositions{detail}",
+            source="Scores", category="fallback", log_path=result_file, affected_count=affected_count,
         )
     write_text(directory / (basename + ".ulsbs-score-variants.tex"),
                _minimum_scale_tex() + "".join(line + "\n" for line in dispatch))
-    write_text(directory / (basename + ".ulsbs-score-results.json"), json.dumps({
+    write_text(result_file, json.dumps({
         "schema_version": 1, "scores": results, "attempts": attempts,
         "elapsed_seconds": round(time.perf_counter() - started, 3),
         **statistics,
