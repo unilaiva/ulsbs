@@ -3,8 +3,7 @@
 % If you want different paper size, rename this file to not include _A5 and
 % change the paper option to e.g. "paper={a4paper}".
 %
-% See ulsbs/src/ulsbs/assets/tex/ulsbs-songbook.cls file for all available
-% document class options.
+% See ulsbs/WRITING_SONGBOOKS.md for document class options and song syntax.
 
 \documentclass[
   paper={a5paper},
@@ -20,9 +19,8 @@
   This is a songbook created with ULSBS (Unilaiva Songbook System).
 }
 
-% To setup your songbook further, see ulsbs/src/ulsbs/assets/tex/ulsbs.sty for
-% options to set, especially \newif definitions in "Style and other settings"
-% section.
+% For visibility switches and fonts, see the layout and style reference in
+% ulsbs/WRITING_SONGBOOKS.md. Put preamble settings here, after the class loads.
 
 \begin{document}
 
@@ -43,7 +41,7 @@
 \begin{songs}{titleidx,authidx,tagidx}
 
 % Example song
-\beginsong{Example Song}[by={Example Author},key={C}]
+\beginsong{Example Song}[id={example-song},by={Example Author},key={C}]
   \beginverse
     |\[C]This is an example |song line.
     Another |\[G7]line of |\[C]lyrics.

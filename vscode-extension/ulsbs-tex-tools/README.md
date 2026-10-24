@@ -1,70 +1,178 @@
-# ULSBS TeX Tools (VS Code Extension)
+# ULSBS TeX Tools for VS Code
 
-This extension provides editing support for **ULSBS songbook LaTeX files** in
-Visual Studio Code.
+Editing and build shortcuts for songbooks written with
+[ULSBS](https://github.com/unilaiva/ulsbs). The extension helps you navigate large
+song collections, insert ULSBS markup, and compile the books that use the file
+you are editing.
 
-It is meant to be used with the **ULSBS (Unilaiva Songbook System)** package:
+- Navigate songs and included files through the **Songbooks** sidebar and editor outline.
+- Insert chord, melody, verse, translation, and score markup with snippets and completions.
+- See structural diagnostics, folding, and chord/measure/melody decorations while editing.
+- Compile one book, all discovered books, or the books affected by the active file.
+- Create an A5 main document from the bundled songbook template.
 
-- ULSBS repository: <https://github.com/unilaiva/ulsbs>
-- ULSBS documentation: <https://github.com/unilaiva/ulsbs/blob/main/README.md>
-- Extension changelog: [CHANGELOG.md](CHANGELOG.md)
+The extension does **not** install the ULSBS engine, LaTeX, or LilyPond. To create
+your first project or set up compilation, follow the
+[ULSBS README](https://github.com/unilaiva/ulsbs/blob/main/README.md). For song
+syntax and book customization, use
+[Writing Songbooks](https://github.com/unilaiva/ulsbs/blob/main/WRITING_SONGBOOKS.md).
 
-The extension is useful in songbook workspaces that contain `ulsbs-config.toml`
-and either:
+## Contents
 
-- a vendored `ulsbs/` directory, or
-- a wrapper script such as `ulsbs-compile`
+- [Contents](#contents)
+- [Installation](#installation)
+- [Getting started](#getting-started)
+  - [Create a main document](#create-a-main-document)
+- [Compiling songbooks](#compiling-songbooks)
+- [Editing features](#editing-features)
+  - [Snippets and completions](#snippets-and-completions)
+  - [Chords and melody hints](#chords-and-melody-hints)
+- [Configuration](#configuration)
+- [Browser support](#browser-support)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+- [License](#license)
 
-## Features
+## Installation
 
-The extension adds ULSBS-aware editing support for LaTeX files, including:
+The extension is shipped as source in the ULSBS repository. Build a `.vsix`
+package and install it locally. You need VS Code 1.112.0 or newer and a current
+Node.js LTS release with npm to build the package. Node.js is not needed just
+to use an already-built VSIX.
 
-- snippets for common ULSBS song structures
-- completion suggestions for common ULSBS environments (including `explanation`, `passage`, `feeler`, `intersong`)
-- melody-block pitch and marker completions inside `\[ ... ]`
-- a LaTeX grammar injection that scopes same-line chord annotations as `meta.ulsbs.chord.latex`
-- scoped `\melodyPrimaryPosition{normal|low}`, `\melodySecondaryPosition{above|below|same}`, and `\melodyStyleMapping{normal|swapped}` completions
-- indentation and folding for song environments
-- Outline / breadcrumb structure for songs and related blocks
-- parsing and warnings for common structural issues
-- a ULSBS sidebar view for discovered songbooks in the workspace
-- commands for compiling songbooks with `ulsbs-compile`
+1. From a songbook project containing the `ulsbs/` submodule, open a terminal and run:
 
-It understands ULSBS-specific structures such as:
-
-```tex
-\beginsong ... \endsong
-\beginverse ... \endverse
-\beginverse[n] ... \endverse
-\beginverse* ... \endverse
-\beginverse*[n] ... \endverse
-\beginverse+ ... \endverse
-\beginverse+[n] ... \endverse
-\beginverse*+ ... \endverse
-\beginverse*+[n] ... \endverse
-\beginrep ... \endrep
-\begin{songs} ... \end{songs}
-\begin{translation} ... \end{translation}
-\begin{lilypond} ... \end{lilypond}
-\begin{explanation} ... \end{explanation}
-\begin{passage} ... \end{passage}
-\begin{feeler} ... \end{feeler}
-\begin{intersong} ... \end{intersong}
-\[ ... ]
+```sh
+cd ulsbs/vscode-extension/ulsbs-tex-tools
+npm ci
+npm run package
 ```
 
-### Melody blocks
+If you opened the ULSBS engine checkout itself, the directory is instead
+`vscode-extension/ulsbs-tex-tools`. The package command builds the web bundle
+and creates `ulsbs-tex-tools-<version>.vsix` in that directory.
 
-Inside a chord definition, write melody content as:
+2. Install the generated file using **Extensions > ... > Install from VSIX...**,
+   or run this command from the directory containing it:
 
-```tex
-\[<[!] PRIMARY-NOTES[;SECONDARY-NOTES][ @ horizontal-offset]>Chord]
-\[^<[!] PRIMARY-NOTES[;SECONDARY-NOTES][ @ horizontal-offset]>Chord]
+```sh
+code --install-extension ulsbs-tex-tools-<version>.vsix
 ```
 
-For example:
+Replace `<version>` with the actual version in the generated filename. Reload
+VS Code if prompted. To update from a newer checkout, repeat the build and
+installation steps.
+
+## Getting started
+
+1. Open your **songbook project root** in VS Code, not just an individual song
+   file or the engine subdirectory. The recommended layout has
+   `ulsbs-config.toml`, main `.tex` documents, and `ulsbs/` in that folder.
+2. Open a `.tex` song file and check that its language mode is **LaTeX**.
+3. Select **ULSBS** in the Activity Bar to open the **Songbooks** view. Expand a
+   book to navigate its included files and songs; selecting an entry opens its source.
+4. Use the command palette and search for `ULSBS` to see the available actions.
+
+With `ulsbsTexTools.enable` set to `auto` (the default), any of these workspace
+markers enables ULSBS-specific features:
+
+- `ulsbs-config.toml`
+- `ulsbs/pyproject.toml`
+- `ulsbs/ulsbs-compile`
+
+These are alternative detection markers, not a requirement to have all three.
+A compiler script is needed for compilation, but not for editing. You can set
+`ulsbsTexTools.enable` to `on` to enable the features without automatic detection.
+
+### Create a main document
+
+Run **ULSBS: Create new songbook** from the command palette or the Songbooks
+toolbar. It prompts for a name and creates `<name>_A5.tex` from the bundled
+template, then opens the file. It does not overwrite an existing file.
+
+This action requires the vendored engine at `ulsbs/` and uses the **first
+workspace folder** in a multi-root workspace. It creates the main document,
+not a complete project: add its filename to `songbooks` in `ulsbs-config.toml`
+if you want the normal CLI build to select it. A wrapper-only or separately
+installed engine can still compile existing documents, but does not satisfy
+this template command's vendored-class check.
+
+## Compiling songbooks
+
+Compilation runs the configured ULSBS script in the **ULSBS Build** terminal.
+The script needs the same Python/container or host-toolchain setup as a
+command-line build. The extension is a shortcut to that build, not a replacement
+for it.
+
+| Command | What it builds |
+|---|---|
+| **ULSBS: Compile current context** | Every discovered main book that includes the active file, or the active main book itself |
+| **ULSBS: Compile all songbooks** | All main documents discovered in the relevant workspace folder |
+| **ULSBS: Compile this songbook** | The selected book in the Songbooks view |
+| **ULSBS: Compile this songbook with profile** | The selected book, with explicit profile selection |
+| **ULSBS: Choose compile profile** | Select the active build profile |
+| **ULSBS: Open configuration (ulsbs-config.toml)** | Open the project configuration |
+| **ULSBS: Refresh workspace index** | Rescan documents and their include relationships |
+
+The Songbooks view has build actions in its toolbar and each book's context
+menu. It also shows the active profile and books affected by the current file.
+If a song collection belongs to several books, compiling its current context
+can start several book builds.
+
+Build commands reuse the active profile, initially `default`. Use **Choose
+compile profile** or **Compile this songbook with profile** to select another.
+Names come from `[profiles.NAME]` headings in the root configuration;
+`default` is always available. Selection normally opens a picker. When
+`ulsbsTexTools.askProfileOnCompile` is `false`, those profile-selection actions
+apply `ulsbsTexTools.defaultProfile` without opening the picker.
+
+In a multi-root workspace, **Compile all songbooks** uses the active file's
+workspace folder, or the first folder when there is no active file.
+
+The extension passes the discovered main-document paths explicitly to the
+compiler. In particular, **Compile all songbooks** means all discovered mains,
+not only those listed in the selected config profile's `songbooks` array.
+Use the CLI directly when you want the configuration alone to select books,
+or when you need flags such as `--quick`.
+
+## Editing features
+
+The extension understands `\beginsong` / `\endsong`, all canonical
+`\beginverse` modifier combinations, repeat blocks, chord annotations, and
+environments such as `translation`, `explanation`, `passage`, `feeler`,
+`intersong`, `lilywrap`, and `lilypond`.
+
+It provides outline entries, folding and indentation, structural warnings in
+VS Code's diagnostics, and context-aware completions. These checks are not a
+full TeX or LilyPond validator; the compiler remains authoritative.
+
+### Snippets and completions
+
+In a LaTeX document, type a prefix and select the suggestion. If it does not
+appear automatically, invoke **Trigger Suggest** (usually Ctrl+Space).
+Use Tab to move between a snippet's editable fields.
+
+| Prefix | Inserts |
+|---|---|
+| `\[` | A chord annotation |
+| `melodychord` | A chord with a leading melody block |
+| `melodychordzero` | A zero-advance melody block and chord |
+| `melodychordskip` | An annotation excluded from chord memorization |
+| `translation`, `explanation`, `feeler` | The corresponding text environment |
+| `lilywrap` | Wrapped LilyPond environment delimiters |
+| `melodyPrimaryPosition`, `melodySecondaryPosition`, `melodyStyleMapping` | Scoped melody-placement/style commands |
+
+Snippets provide a starting point, not a complete song or score. Fill in any
+required arguments and music using the writing guide's examples.
+
+### Chords and melody hints
+
+Same-line ULSBS `\[ ... ]` annotations receive chord-aware syntax highlighting
+rather than ordinary display-math highlighting. Melody blocks are recognized
+only immediately after `\[` or one leading `^`:
 
 ```tex
+\[Am]lyrics
 \[<C>Am]Love
 \[<C D E;E F G>F]Two melodies
 \[^<*A/_C;EF_G@.2em>Am]Marked phrase
@@ -73,154 +181,124 @@ For example:
 \[<!C@1em>Am]
 ```
 
-The melody block must begin immediately after `\[` or after one leading `^`; it is not recognized elsewhere in the annotation. The chord, if present, follows the closing `>`. Use uppercase note names so transposition works. Spaces between items are optional: pitches are `A` through `G` with an optional `#` or `&`; `_` is an empty slot, `/` is a circled unpitched marker, and `*` is a beat mark. Beat marks are valid only inside the angle brackets. The optional leading `!` renders melody layers normally but gives them zero advance and disables that annotation's minimum whitespace; a chord after `>` keeps its natural width. The optional secondary sequence follows `;`; `@` adjusts the whole block. Configure the lanes with `\melodyPrimaryPosition{normal|low}` (default: `normal`) and `\melodySecondaryPosition{above|below|same}`. With a normal primary, secondary `above`, `same`, and `below` use the high, normal, and low lanes. With a low primary, they use the normal, low, and below-low lanes; below-low may intentionally overlap lyrics. Configure visual styles independently with `\melodyStyleMapping{normal|swapped}`. `same` overlays the secondary melody on the primary lane and is useful when migrating baseline alternate-only notes.
+Pitches use uppercase A--G with optional `#` or `&`. `_` is an empty slot,
+`/` an unpitched circled marker, and `*` a beat mark inside a melody block.
+The secondary sequence follows `;`, `@` adds an offset, and a leading `!` gives
+the melody zero advance. A leading caret excludes the annotation from chord
+memorization; bare carets in lyrics replay saved annotations.
 
-Only one melody block is supported in an annotation. To combine blocks at the same anchor, use adjacent annotations with a zero-advance block first, for example `\[<!C>]\[<D>Am]`.
+Only one melody block is supported per annotation. To share an anchor between
+two blocks, use a zero-advance block first: `\[<!C>]\[<D>Am]`.
+The editor subtly decorates `<`, `>`, and the leading `!`; an unclosed melody
+block marks the opening delimiter as incomplete. Compilation reports malformed
+syntax independently.
 
-A leading caret, as in `\[^<C>Am]`, excludes the complete annotation from chord memorization. A bare caret in lyric text replays the next full saved annotation.
-
-The opening and closing melody delimiters, `<` and `>`, and the leading `!` modifier have a distinct subtle editor decoration. When a valid opening `<` has no closing `>` before the annotation's `]`, the opening delimiter is marked as incomplete; TeX remains responsible for reporting the malformed melody block when compiled.
-
-## Installation
-
-The extension is currently shipped as **source** inside the ULSBS repository.
-To install it locally, build a `.vsix` package.
-
-Requirement: `npm`
-
-### 1. Install tooling
-
-```sh
-cd ulsbs/vscode-extension/ulsbs-tex-tools
-npm ci
-```
-
-### 2. Build the extension package
-
-```sh
-npm run package
-```
-
-This creates a file like:
-
-- `ulsbs-tex-tools-x.y.z.vsix`
-
-### 3. Install into VS Code
-
-From command line:
-
-```sh
-code --install-extension ulsbs-tex-tools-x.y.z.vsix
-```
-
-Or from within VS Code:
-
-- **Extensions -> ... -> Install from VSIX...**
-
-Then reload VS Code.
-
-## Usage
-
-In a detected ULSBS workspace, the extension can:
-
-- discover songbooks from the workspace
-- show them in the **ULSBS** activity-bar view
-- run `ulsbs-compile` commands from VS Code
-- help navigate song structures in the editor outline
-
-By default, the extension auto-enables itself only when it detects a ULSBS
-workspace.
-
-Common detection markers include:
-
-- `ulsbs-config.toml`
-- `ulsbs/pyproject.toml`
-- `ulsbs/ulsbs-compile`
+For all placement, spacing, replay, and visibility rules, see
+[Melody hints and beat marks](https://github.com/unilaiva/ulsbs/blob/main/WRITING_SONGBOOKS.md#melody-hints-and-beat-marks).
 
 ## Configuration
 
-Available settings include:
+Change these through VS Code Settings by searching for `ulsbsTexTools`, or in
+your workspace's `.vscode/settings.json`. These are **editor settings**, separate
+from the compiler's `ulsbs-config.toml`.
 
-- `ulsbsTexTools.enable`
-  - `auto`, `on`, or `off`
-- `ulsbsTexTools.compileCommand`
-  - path to the compile script, relative to the workspace root
-  - default: `ulsbs/ulsbs-compile`
-- `ulsbsTexTools.askProfileOnCompile`
-  - ask for a ULSBS profile when compiling
-- `ulsbsTexTools.defaultProfile`
-  - fallback profile if prompting is disabled
-- `ulsbsTexTools.autoRefreshDiagnostics`
-  - refresh diagnostics automatically on edits and saves
-- `ulsbsTexTools.fileGlob`, `ulsbsTexTools.excludeGlob`
-  - control which files are scanned for all extension features
-- `ulsbsTexTools.songbookExcludeGlob`
-  - adds glob patterns to the Songbooks view denylist without disabling editing
-    features for matching files
+| Setting | Default | Purpose |
+|---|---|---|
+| `ulsbsTexTools.enable` | `"auto"` | Auto-detect a project, force features `"on"`, or turn them `"off"` |
+| `ulsbsTexTools.compileCommand` | `"ulsbs/ulsbs-compile"` | Compiler script path, relative to the relevant workspace folder |
+| `ulsbsTexTools.askProfileOnCompile` | `true` | Show a picker for profile-selection actions |
+| `ulsbsTexTools.defaultProfile` | `"default"` | Profile applied by those actions when the picker is disabled |
+| `ulsbsTexTools.autoRefreshDiagnostics` | `true` | Update structural diagnostics automatically on edits and saves |
+| `ulsbsTexTools.fileGlob` | `"**/*.*tex"` | TeX-like files considered for indexing and editing features |
+| `ulsbsTexTools.excludeGlob` | See below | General scan/editing exclusions |
+| `ulsbsTexTools.songbookExcludeGlob` | `[]` | Additional Songbooks-discovery exclusions, without disabling editing features |
 
-Songbook discovery always skips files inside hidden directories (directories
-whose names begin with `.`), `ulsbs/tests`, and `tests/fixtures`. Patterns from
-`ulsbsTexTools.songbookExcludeGlob` are added to these built-in exclusions
-rather than replacing them.
+For example, if your compiler wrapper is at the project root:
 
-If your project uses a root-level wrapper script instead of
-`ulsbs/ulsbs-compile`, change `ulsbsTexTools.compileCommand` accordingly, for
-example to `./ulsbs-compile`.
+```json
+{
+  "ulsbsTexTools.compileCommand": "./ulsbs-compile",
+  "ulsbsTexTools.askProfileOnCompile": false,
+  "ulsbsTexTools.defaultProfile": "default"
+}
+```
 
-## Development
+General exclusions default to `**/temp/**`, `**/ulsbs/assets/tex/**`, and
+`**/ulsbs-tex-tools/assets/**`. Internal extension-template exclusions are always
+added, even when you override that setting.
 
-To test the extension during development:
-
-1. Open this folder in VS Code:
-   - `ulsbs/vscode-extension/ulsbs-tex-tools`
-2. Press **F5**
-
-This launches a **VS Code Extension Development Host** with the extension
-loaded.
-
-Quick cheat sheet:
-
-- snippets (static templates): `snippets/latex.json`
-- injected LaTeX grammar: `syntaxes/ulsbs-chord.injection.tmLanguage.json`
-- grammar fixture check: `npm run test:grammar`
-- completions (context-aware suggestions + some block snippets): `core/completions.js`
-- indentation / folding: `language-configuration.json`
-- tokenizer for structural macros/environments: `core/songsyntax.js`
-- parser (structure + issue production): `core/parser.js`
-- issue helpers (VS Code-independent): `core/issues.js`
-- diagnostics adapter (issues -> VS Code diagnostics): `core/diagnostics.js`
-- symbols / outline provider: `core/symbols.js`
-- verse / lilypond region helpers (decorations): `core/regions.js`
-- workspace detection: `core/workspace.js`
-- workspace scanning / songbook index: `core/songbooks.js`
-- sidebar tree view: `core/tree.js`
-- compile commands: `core/compile.js`
-- chord decorations: `core/chords.js`
-- measure bar decorations: `core/measures.js`
-- shared active-editor update wiring: `core/editor-updater.js`
-- supported file types / exclusions: `core/filetypes.js`
-- extension entry point: `extension.js`
-- settings: `package.json`, `core/config.js`
-- command UI helpers: `core/ui.js`
-- new songbook template: `assets/songbook-template_A5.tex`
-
-### Architecture notes
-
-- If you add a new ULSBS block/macro:
-  1. Add tokens in `core/songsyntax.js`.
-  2. Add structure + misuse warnings in `core/parser.js`.
-  3. Diagnostics will pick up warnings automatically via `core/diagnostics.js`.
-  4. Add outline mapping in `core/symbols.js` if you want it in the Outline view.
-  5. Add context-aware suggestions in `core/completions.js` (and/or a static snippet in `snippets/latex.json`).
+Songbook discovery also always skips hidden directories (names beginning with
+`.`), `ulsbs/tests`, and `tests/fixtures`. `songbookExcludeGlob` adds to those
+built-in exclusions rather than replacing them. Use it to hide a document from
+the Songbooks view while keeping ULSBS editing features in that file.
 
 ## Browser support
 
-In addition to the desktop version, the extension includes a web build for:
+The package includes a web build for editing and navigation in `vscode.dev`,
+`github.dev`, and browser-based Codespaces. Availability still depends on the
+workspace's files and the installed extension.
 
-- `vscode.dev`
-- `github.dev`
-- Codespaces
+The extension's **compile commands are disabled in browser-only VS Code**,
+including a browser-based Codespaces session. They require a desktop VS Code
+UI with a terminal and a usable compiler environment. The web build does not
+run LaTeX or LilyPond in the browser.
+
+## Troubleshooting
+
+- **No ULSBS features:** open the project folder, check its detection markers
+  and the `enable` setting, and use LaTeX language mode for `.tex` documents.
+- **Songbooks view is empty:** check that main documents contain
+  `\documentclass` or `\begin{document}`, are covered by `fileGlob`, and are not
+  excluded. Run **ULSBS: Refresh workspace index**.
+- **Current context finds no book:** the active file must be a main document
+  or reachable through its indexed `\input` / `\include` dependencies. Check
+  include paths and refresh the index.
+- **Compiler script not found:** check `compileCommand` relative to the
+  relevant workspace folder. A root-level wrapper needs `./ulsbs-compile`.
+- **Build fails:** inspect the **ULSBS Build** terminal and test the compiler
+  directly from the project root. The extension does not install build tools.
+- **Create new songbook fails:** this command needs the vendored engine in the
+  first workspace folder and will not overwrite an existing filename.
+- **Profile is missing:** define it under `[profiles.NAME]` in the project-root
+  config, then choose the profile again.
+
+## Development
+
+From this extension directory, run `npm ci` to install development tooling.
+Open the directory itself in VS Code and press **F5** to launch an Extension
+Development Host. `npm run compile-web` builds the browser bundle;
+`npm run watch-web` rebuilds it while developing.
+
+Run the focused regression checks:
+
+```sh
+npm run test:grammar
+npm run test:songbooks
+npm run test:verse
+```
+
+Source navigation:
+
+| Area | Files |
+|---|---|
+| Entry point and settings | `extension.js`, `package.json`, `core/config.js` |
+| Static snippets and contextual completions | `snippets/latex.json`, `core/completions.js` |
+| LaTeX injection grammar | `syntaxes/ulsbs-chord.injection.tmLanguage.json` |
+| Indentation and folding | `language-configuration.json` |
+| Tokens and structural parsing | `core/songsyntax.js`, `core/parser.js` |
+| Issues and VS Code diagnostics | `core/issues.js`, `core/diagnostics.js` |
+| Outline symbols and region tracking | `core/symbols.js`, `core/regions.js` |
+| Detection, indexing, and file selection | `core/workspace.js`, `core/songbooks.js`, `core/filetypes.js` |
+| Songbooks sidebar and build actions | `core/tree.js`, `core/compile.js`, `core/ui.js` |
+| Decorations and shared editor updates | `core/chords.js`, `core/measures.js`, `core/editor-updater.js` |
+| New-book template | `assets/songbook-template_A5.tex` |
+
+When adding ULSBS syntax, update the tokenizer and parser first, then any issue
+handling, outline mapping, completions, snippets, grammar, and tests affected by
+the change. Keep author-facing syntax aligned with the ULSBS writing guide.
+
+See the [extension changelog](CHANGELOG.md) for release history.
 
 ## License
 
-GNU General Public License version 3 or later (GPL 3.0+)
+GNU General Public License version 3 or later (GPL 3.0+).

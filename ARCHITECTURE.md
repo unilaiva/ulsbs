@@ -1,7 +1,8 @@
 # ULSBS Architecture
 
-This reference describes ULSBS internals and implementation contracts. For writing
-sources and compiling books, start with the [README](README.md).
+This reference describes ULSBS internals and implementation contracts. For setup
+and compilation, start with the [README](README.md). For song syntax and book
+customization, use [Writing Songbooks](WRITING_SONGBOOKS.md).
 
 - [Developer Navigation](#developer-navigation)
 - [Fixed Policies and Version Ownership](#fixed-policies-and-version-ownership)
@@ -78,8 +79,9 @@ All published jobs run `pipeline.py:step_pdf_fonts` after the final
 LuaLaTeX pass, before publishing the job PDF to `result/`. The step calls
 `pdf_fonts.py:deduplicate_fonts` on the canonical job PDF, so publication,
 printouts, and cover extraction all consume the same validated artifact. It also
-runs for quick, lyrics-only, instrument, and multikey editions. Multikey jobs first
-validate their final-pass metadata; disabled companions are still skipped before
+runs for quick builds, ordinary editions of every variant, and supported multikey
+editions. Multikey jobs first validate their final-pass metadata; disabled
+companions are still skipped before
 optimization or publication. LilyPond generation, the processed source tree,
 MIDI/audio associations, and JSON export contracts are unchanged.
 
@@ -129,9 +131,12 @@ duplication; substantial distinct-subset overhead may remain.
 
 ### Build jobs and publication
 
-`Job.multikey` is a boolean orthogonal to the musical variant. Each selected
-non-lyrics variant has an ordinary job and, when `multikey-books` is enabled, a
-multikey job for the same source and variant. Lyrics-only jobs remain ordinary.
+`Job.variant` identifies the default, lyrics-only, or instrument variant;
+`Job.multikey` is a separate boolean selecting the multikey edition. Each
+selected variant has an ordinary job. Currently, only default and instrument
+variants also get a multikey job when `multikey-books` is enabled. Lyrics-only
+variants remain ordinary-only; this is a generation restriction, not a different
+level in the variant hierarchy.
 The existing `ULSBS-EXTRA-VARIANTS` comment selects instrument variants.
 
 Ordinary and multikey compilations run independently in the same bounded
@@ -275,19 +280,20 @@ direct-page Link destinations rather than attempting automatic normalization;
 the protocol's permitted normalization is not an implemented fallback.
 
 Multikey jobs suppress even intermediate LilyPond MIDI generation, not merely
-its publication. Ordinary optional variants suppress that MIDI
+its publication. Ordinary editions of non-default variants suppress that MIDI
 include only when neither MIDI export nor audio export is actually enabled for
 the variant. Each export requires both its general feature flag and its
 respective `midifiles-allow-for-optional-variants` or
 `audiofiles-allow-for-optional-variants` opt-in. `--no-midi` and `--no-audio`
 independently disable their respective exports even when an optional-variant
-opt-in is set. The main ordinary variant retains its original MIDI include.
+opt-in is set. The default variant's ordinary edition retains its original MIDI
+include.
 
 With opt-ins, both MIDI copying and audio encoding resolve
 `song.midi_compile_file_relative` against that job's `compile_dir`, consuming
-variant-local MIDI rather than reusing the main variant's files. Usual defaults
-export media only from the main ordinary variant. Audio-only export still needs
-intermediate MIDI and the internal song metadata database, even with MIDI and
+variant-local MIDI rather than reusing the default variant's files. Usual defaults
+export media only from the default variant's ordinary edition. Audio-only export
+still needs intermediate MIDI and the internal song metadata database, even with MIDI and
 JSON exports disabled. `--no-midi` suppresses published MIDI files, not the
 intermediate MIDI required by enabled audio; the metadata database is built when
 JSON, actual MIDI export, or actual audio export needs it. LilyPond processing and score

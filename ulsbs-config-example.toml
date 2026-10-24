@@ -1,183 +1,208 @@
 # SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# ulsbs-config-example.toml
+# ULSBS example configuration
+# ===========================
 #
-# Copy this file into your project as ulsbs-config.toml and edit to your needs.
-# Everything here is TOML; lines starting with # are comments.
+# Getting started:
+# 1. Copy this file to your project root as ulsbs-config.toml.
+# 2. Add your main .tex documents to songbooks below.
+# 3. Review the output switches; most extra outputs are enabled by default.
+# 4. Run ./ulsbs/ulsbs-compile from the project root.
 #
-# Key naming:
-# - You can use dashed-keys (use-container) or snake_case (use_container); they are equivalent.
-# - You may also use boolean negations like no-deploy = true (only true is meaningful).
+# You do not need every setting. For a smaller starting point, see the minimal
+# configuration in README.md. Song syntax is documented in WRITING_SONGBOOKS.md.
 #
-# Precedence (lowest -> highest):
-#   built-ins < flat config (this root table) < profiles (with inherit + merge-keys) < env vars
-#   < CLI flags
+# This is TOML: lines beginning with # are comments. Uncomment an example to
+# enable it. Keep project-wide settings above the [profiles] section at the end;
+# settings written after a profile heading belong to that profile.
 #
-# Profiles and inheritance:
-# - The flat config (this root table) acts as the parent of every profile that does not set
-#   inherit-from.
-# - If a profile inherits from another profile, its parent already includes flat.
+# Setting names may use dashes or underscores: create-printouts and
+# create_printouts are equivalent. Boolean settings use true or false, without
+# quotes. A negation such as no-deploy = true is an alternative to deploy = false;
+# no-deploy = false has no effect. Do not set both forms in the same table.
 #
-# Array merging vs replacement:
-# - By default, when a child profile specifies an array key, it REPLACES the parent's array.
-# - To MERGE specific arrays for a child profile, list their names in that profile's merge-keys
-#   array.
-#   * For merged arrays: result = parent + (child items not already present) -> order is preserved,
-#     no duplicates.
-#   * If a listed key is provided by the child but is not an array (or the parent is not an array),
-#     it's an error.
-# - merge-keys affects only parent->child profile merging (where the parent may be flat or another
-#   profile).
+# Precedence, from lowest to highest:
+# built-in defaults < project settings < selected profile < environment < CLI
+# Profiles and array merging are explained beside the examples at the end.
 #
-# Files and globs:
-# - songbooks/common-* accept file paths or glob patterns (?, *). Relative paths are resolved
-#   against this file's directory.
-# - Duplicates are removed; results are absolute, sorted paths.
-# - common-* files don't need to exist when running inside a container; they are only used for
-#   deploying on the host.
+# CLI overrides for individual runs:
+# --quick builds only the default variant's ordinary PDF, skips extras/deploy,
+# and keeps temporary files.
+# --no-printouts, --no-coverimage, --no-json, --no-midi, and --no-audio omit outputs.
+# --no-lyric and --no-extrainstr omit extra variants.
+# --no-multikey omits multikey editions.
+# --no-deploy skips deployment; --no-container uses the host toolchain.
+# Explicit .tex arguments replace the configured songbook selection.
+# Run ./ulsbs/ulsbs-compile --help for the complete CLI reference.
 #
-# Special modes:
-# - shell: run only an interactive shell and do nothing else.
-# - deploy-last: perform only the "deploy last" step and do nothing else.
-# - deploy-common: perform only the "deploy common" step and do nothing else.
-# - pull: run "git pull --rebase ; git submodule update --init --recursive" in the project root
-#   before doing anything else.
-#   See cli.py for more information on CLI behaviors.
-#
-# Environment overrides (optional):
-# - ULSBS_USE_SYSTEM_TMP_FOR_TEMP=true|false   -> sets use-system-tmp
-# - ULSBS_MAX_CONTAINER_MEM_GB=6               -> container memory limit in GiB
-#                                                 (also used when deriving max-parallel)
-#   * If explicitly set to 0 or a negative value, ulsbs will NOT pass any
-#     --memory/--memory-swap arguments to the container engine (unlimited).
-#     This does not change the internal memory/max-parallel heuristics.
-# - ULSBS_MAX_PARALLEL=8                       -> upper bound for parallel jobs (0 or unset = auto)
-# - ULSBS_CONTAINER_ENGINE=auto|docker|podman  -> sets container-engine
-#
-# CLI highlights (override config):
-# - Flags like --no-container, --container-rebuild, --shell, --pull, --sequential, --max-parallel,
-#   --no-deploy, --no-printouts, --no-coverimage, --no-json, --no-midi, --no-audio,
-#   --no-extrainstr, --no-lyric, --no-multikey, -q/--quick, --deploy-last, --deploy-common,
-#   --max-log-lines.
-# - Passing files on the CLI overrides songbook selection.
+# Optional environment overrides (set in your shell, not as TOML keys):
+# ULSBS_CONTAINER_ENGINE=auto|docker|podman selects the container engine.
+# ULSBS_MAX_PARALLEL=8 limits concurrent jobs; unset or 0 means automatic.
+# ULSBS_MAX_CONTAINER_MEM_GB=6 sets the container memory limit in GiB.
+#   A value of 0 or less removes the container memory limit, but does not disable
+#   automatic job-count heuristics. Provide enough memory if raising parallelism.
+# ULSBS_USE_SYSTEM_TMP_FOR_TEMP=true puts build intermediates under system /tmp
+#   instead of project-local temp/. A memory-backed /tmp can increase RAM use.
 
 
-
-# SETTINGS
-# ========
-
-# Execution
-shell = false                # SPECIAL MODE: only run shell, do nothing else
-pull = false                 # SPECIAL: run 'git pull --rebase ; git submodule update --init --recursive'
-                             # before anything else
-
-sequential = false           # if true, behaves like max-parallel = 1
-clean-temp = true            # remove temp data after run
-                             # (alias: keep-temp = true -> clean-temp = false)
-# keep-temp = true           # optional alias; if set, it inverts clean-temp (do not set both)
-
-# Features and modes
-deploy = true                # default: true
-deploy-last = false          # SPECIAL MODE: only run the "deploy last" action
-deploy-common = false        # SPECIAL MODE: only run the "deploy common" action
-# Optional: override deploy directory (default: <project root>/deploy)
-# If set explicitly (here or via --deploy-dir), it must exist and be a directory on the host.
-#deploy-dir = "deploy"
-
-create-printouts = true      # default: true
-coverimage = true            # default: true
-json = true                  # default: true
-midifiles = true             # default: true
-audiofiles = true            # default: true
-# Optional ordinary variants normally do not export media. Explicit opt-ins use
-# each variant's own generated MIDI, not the main variant's files:
-midifiles-allow-for-optional-variants = false # requires midifiles = true
-audiofiles-allow-for-optional-variants = false # requires audiofiles = true
-# --no-midi and --no-audio independently disable their respective exports.
-# Enabled audio still needs intermediate MIDI and internal metadata even when
-# exported MIDI files or JSON export are disabled.
-# Multikey jobs never generate MIDI or audio regardless of these opt-ins.
-extrainstrumentbooks = true  # default: true
-lyricbooks = true            # default: true
-fast-audio-encode = false    # default: false; if true, use faster audio encoding (limiter instead of loudnorm)
-multikey-books = false       # default: false; set true to add a MULTIKEY layered edition for each non-lyrics variant
-multikey-max-pages-per-range = 50 # positive integer; nominal maximum physical pages per range
-multikey-target-max-range-bytes = 33554432 # positive integer; 32 MiB target, adaptive bisection down to one page
-# A single page exceeding the byte target is retained with a warning and its true size.
-multikey-layer-ui = "native" # native (default) or hidden; hidden keeps layers discoverable
-multikey-min-chordname-scale = 0.85 # default: 0.85; number in [0.5, 1]; 1 disables chord-name shrinking
-# Applies to alternative TeX chord names only; original layout, melody hints,
-# key badges and LilyPond score-image fitting are unchanged. Long names may overhang.
-multikey-require-song-ids = false # fail multikey jobs on missing/invalid IDs; CLI: --require-song-ids
-# IDs use lowercase letters, digits and dashes. Without strict validation,
-# missing/invalid IDs skip a song's layers with a warning. Source files are not rewritten.
-multikey-lilypond-scores = false # experimental opt-in; only for non-lyrics multikey PDFs
-# Supports standard single-/multi-system snippets with validated musical breaks.
-# Unsupported/failed offsets fall back to the complete original score.
-# Valid alternatives use the persistent home cache; ordinary/lyrics PDFs are unchanged.
-# Normal profile inheritance applies: profiles can enable or disable extras,
-# including enabling them when the root multikey-books setting is false.
-# --no-multikey and -q/--quick disable multikey packages for one invocation.
-# Ordinary PDFs are always retained; lyrics-only variants never get multikey editions.
-# Paths: Book_A5.pdf + multikey/Book_A5_MULTIKEY_RANGES.json
-#        + multikey/Book_A5_MULTIKEY_RANGE_1-50.pdf (and remaining ranges).
-# Instrument example: multikey/Book_CHARANGO_A5_MULTIKEY_RANGE_1-50.pdf.
-# Both result/ and deploy/ use this layout; no full multikey PDF is published.
-# The required protocol-v1 index is generated even with json = false. Ordinary
-# JSON exports stay in json/ and reference multikey_json_file, not multikey_file.
-# The finalized schema-v2 manifest is external JSON only, never embedded in PDF XMP.
-# Packaging requires qpdf >= 11.0 and runtime validation of layers, geometry and
-# strict canonical named links; unsupported links fail packaging, not silently drop.
-# Multikey jobs do not create printouts, MIDI, audio or covers.
-
-# Cover image extraction and modified PNGs
-cover-image-height = 1024    # default: 1024; height in pixels for pdftoppm -scale-to-y
-
-# Advanced rules for modified cover PNGs (optional).
-# Each modified-cover-png rule controls how to create a widened PNG for
-# matching songbook TeX filenames. Rules are evaluated in order; if multiple
-# rules match a filename, the LAST matching rule wins.
-#
-# width-multiplier (required):
-#   - Factor applied to the original PNG width to get the widened width.
-#   - 0 means "make the image square": width = original height.
-# songbook-filenames (optional, default "*"):
-#   - Glob matched against the TeX filename only (e.g. "mysongbook*.tex").
-#   - Must not contain path components (no "/" or "\\").
-# color (optional, default "white"):
-#   - ImageMagick color used both for explicit painting and the added border.
-# paint-area-rects / paint-area-rect (optional):
-#   - One or more rectangles, each as [x1, y1, x2, y2].
-#   - Coordinates are floats between 0.0 and 1.0, with bottom-left (0,0)
-#     as origin; e.g. [0, 0, 0.5, 0.5] covers the lower-left quarter.
-#
-# Example rules (commented out by default):
-#
-# modified-cover-png = [
-#   { width-multiplier = 0,   # make square default for all songbooks
-#     songbook-filenames = "*.tex",
-#   },
-#   { width-multiplier = 1.3, # special case for some songbooks
-#     songbook-filenames = "unilaiva-astral-transparencia*.tex",
-#     color = "white",
-#     paint-area-rects = [
-#       # Clear a small area at the lower-left corner
-#       [0.0, 0.0, 0.18, 0.25],
-#     ],
-#   },
-#   { width-multiplier = 0,   # make square for all other songbooks
-#     songbook-filenames = "*.tex",
-#   },
-# ]
-
-# Files (relative to this TOML file's directory unless absolute). Globs supported (?, *).
-# songbooks are the primary inputs and must exist (unless overridden by CLI files).
+# Book selection
+# ==============
+# List main documents, not individual song include files. Paths are relative to
+# this config file. Globs such as "my-books/*_A5.tex" are also accepted.
+# Main documents must be inside the project, or symlinked into it.
+# Uncomment and edit this example; an empty list selects no books unless you
+# supply documents on the command line.
 songbooks = [
-  # "songbooks/**/*.toml",
+  # "my-songbook_A5.tex",
 ]
 
-# These are only used for deploying (host-side). They may be outside the project.
+
+# Execution
+# =========
+sequential = false           # true runs one compilation job at a time
+clean-temp = true            # remove temporary build files after a successful run
+# keep-temp = true          # alternative to clean-temp = false; do not set both
+
+# Special actions: normally leave these false.
+shell = false                # open a compiler-container shell instead of compiling
+pull = false                 # git pull --rebase, then update submodules before building
+
+
+# Deployment
+# ==========
+# Deployment copies outputs and configured extra files to a local directory;
+# it does not upload them to a website. Set false to keep only result/ outputs.
+deploy = true
+
+# The default destination is <project root>/deploy. An explicit destination must
+# already exist on the host; relative paths start at this config's directory.
+# deploy-dir = "deploy"
+
+# Special actions: deploy existing files without compiling new books.
+deploy-last = false          # deploy outputs recorded by the previous build
+deploy-common = false        # deploy only the common-deploy-* files below
+
+
+# Book variants and extra outputs
+# ===============================
+# Each main document always produces its default variant's ordinary PDF.
+# Lyrics-only and instrument variants are peers derived from the same source.
+# Each variant has an ordinary edition; eligible variants can also have a
+# multikey edition (see below). These switches control additional outputs.
+# Tools and suitable source content must also be available;
+# see README.md for requirements and output locations.
+create-printouts = true      # A5-on-A4 home-printing PDFs for _A5 main documents
+coverimage = true            # extract the first PDF page as a cover PNG
+json = true                  # export songbook metadata as JSON
+extrainstrumentbooks = true  # build variants named in the ULSBS-EXTRA-VARIANTS comment
+lyricbooks = true            # build a lyrics-only variant from the same sources
+
+
+# MIDI and audio
+# ==============
+# These require LilyPond music that generates MIDI. Lyrics/chords alone do not
+# generate accompaniment. Audio export also needs the audio tools in README.md.
+midifiles = true             # publish MIDI files
+audiofiles = true            # encode and publish MP3 audio
+fast-audio-encode = false    # true uses a faster limiter instead of loudness normalization
+
+# By default, only the default variant's ordinary edition exports media.
+# These opt-ins let other variants' ordinary editions export their own MIDI/audio,
+# not the default variant's files.
+# Each opt-in also requires its corresponding general export switch above.
+midifiles-allow-for-optional-variants = false
+audiofiles-allow-for-optional-variants = false
+
+# --no-midi disables published MIDI, not the intermediate MIDI needed by enabled
+# audio export. --no-audio independently disables audio. Disabling JSON export
+# does not prevent either media export. Multikey editions never generate media.
+
+
+# Multikey editions
+# =================
+# Add reader-selectable keys to default and instrument variants. Lyrics-only
+# variants currently have no multikey edition. Each multikey edition has a JSON
+# index and layered page-range PDFs in result/multikey/ and deploy/multikey/,
+# alongside the ordinary PDF. There is no published full-book multikey PDF.
+# Keep the index and all its ranges together when sharing an edition.
+# See README.md's "Multikey PDF editions" section for viewer compatibility.
+multikey-books = false
+
+# Experimental opt-in: also transpose supported full LilyPond scores, in addition
+# to chords, melody hints, and key badges. Has no effect without multikey-books.
+# Unsupported scores or failed alternatives retain the original score. Successful
+# alternatives are cached for later builds; ordinary-edition scores are unchanged.
+multikey-lilypond-scores = false
+
+# Range sizing: both settings require positive integers (no decimal point).
+# Smaller ranges may be produced to meet the byte target. A single page over
+# the target is kept with a warning. Page numbers are physical PDF pages,
+# including covers, not printed page labels. Read the index for exact ranges.
+multikey-max-pages-per-range = 50
+multikey-target-max-range-bytes = 33554432 # 32 MiB per range (a target, not a hard limit)
+
+# "native" requests the viewer's layer list. "hidden" requests hiding that list
+# for viewers with their own key controls; layers still exist and some viewers
+# may expose them anyway.
+multikey-layer-ui = "native"
+
+# Minimum scale for alternative TeX chord names: a number from 0.5 to 1.
+# Use 1 to disable shrinking; long names may then overhang. This does not alter
+# original layout, melody hints, key badges, or full-score image fitting.
+multikey-min-chordname-scale = 0.85
+
+# Song IDs use lowercase letters, digits, and dashes. By default, a missing or
+# invalid ID skips that song's layers with a warning. Set true to fail instead
+# (CLI equivalent: --require-song-ids). Compilation never assigns IDs for you.
+multikey-require-song-ids = false
+
+# Example package:
+# Book_A5.pdf
+# multikey/Book_A5_MULTIKEY_RANGES.json
+# multikey/Book_A5_MULTIKEY_RANGE_1-50.pdf (plus any remaining ranges)
+#
+# The index is required even with json = false; that switch controls the ordinary
+# metadata export. Multikey editions do not add printouts, MIDI, audio, or covers.
+# Validation failures stop publication rather than publishing incomplete output.
+# Profiles may enable or disable multikey settings in either direction.
+# --no-multikey and --quick disable multikey editions for one invocation.
+
+
+# Cover images
+# ============
+cover-image-height = 1024    # extracted PNG height in pixels
+
+# Optional modified-cover-png rules create widened or square cover images.
+# They require ImageMagick's magick command. Rules match main .tex filenames;
+# the LAST matching rule wins. Put catch-all rules BEFORE more specific rules.
+#
+# Rule fields:
+# width-multiplier: required, nonnegative width factor; 0 makes width = height.
+# songbook-filenames: optional filename glob, default "*"; no directory paths.
+# color: optional ImageMagick color, default "white", for added/painted areas.
+# paint-area-rects: optional list of rectangles, each [x1, y1, x2, y2].
+#   Coordinates run from 0 to 1 with bottom-left origin; x1 < x2 and y1 < y2.
+#   Example: [0, 0, 0.5, 0.5] paints the lower-left quarter.
+#   For one rectangle, paint-area-rect = [x1, y1, x2, y2] is also accepted.
+#   Use either paint-area-rect or paint-area-rects, not both in the same rule.
+#
+# Uncomment the whole block to enable these example rules:
+# modified-cover-png = [
+#   { width-multiplier = 0 }, # square by default
+#   { width-multiplier = 1.3, songbook-filenames = "my-songbook_A5.tex" },
+# ]
+# Keep each {...} rule on one line; TOML inline tables cannot span lines.
+# Add color and paint-area-rects fields to a rule if it needs painted areas.
+
+
+# Extra deployment files
+# ======================
+# These lists are used only for deployment on the host. Paths may be absolute
+# or relative to this config, including files outside the project. Globs support
+# * and ? (and ** for recursive matching); duplicate paths are removed.
+# Listed files must exist on the host, and patterns must match actual files.
+# Leave unused lists empty. Container-side compilation does not require them.
 common-deploy-icons = [
   # "assets/icons/*.png",
 ]
@@ -191,77 +216,76 @@ common-deploy-other = [
   # "assets/other/**/*",
 ]
 
-# Single-file settings (relative to this file; absolute paths not allowed).
-# Must exist if given.
-mididir_readme_file = "assets/audio-dirs-readme.md"
-audiodir_readme_file = "assets/audio-dirs-readme.md"
-
-# Misc
-max-log-lines = 20           # default: 20 (clamped to [0,1000])
+# Optional README files to include in the exported MIDI and audio directories.
+# Uncomment only after creating these files. Paths must be relative to this
+# config file (not absolute), and the referenced files must exist.
+# mididir_readme_file = "assets/audio-dirs-readme.md"
+# audiodir_readme_file = "assets/audio-dirs-readme.md"
 
 
+# Diagnostics
+# ===========
+max-log-lines = 20           # error-log lines shown in terminal output; clamped to 0..1000
 
-# PROFILES
+
+# Profiles
 # ========
-
-# All profiles will inherit all settings given without a profile (flat).
-# The profile specific settings will overwrite these.
+# Select a profile with ./ulsbs/ulsbs-compile --profile NAME.
+# With no --profile option, the implicit "default" profile is selected.
+# These examples demonstrate inheritance; edit or remove profiles you do not use.
+# They use the root songbooks list unless you explicitly override it.
+#
+# Settings above [profiles] are the project-wide (root) settings. A profile
+# inherits them unless inherit-from names another profile, which itself inherits
+# the root settings. Values set by a child override inherited values.
+#
+# Arrays REPLACE inherited arrays by default. To append instead, list the array
+# names in the CHILD profile's merge-keys. Merging keeps the parent's items, then
+# adds new child items in order, without duplicates. Both values must be arrays.
+# This applies only across that parent/child boundary, not to CLI file arguments.
 
 [profiles]
 
-# The "default" profile always exists implicitly; it inherits from flat.
-# You can override or extend values here if needed.
+# The default profile exists even if you omit this table. Add overrides here
+# to change normal builds without changing what other profiles inherit.
 [profiles.default]
-# merge-keys = []           # optional; see below
-# Example: turn on sequential just for default profile
 # sequential = true
 
-
-# A base profile that tweaks feature flags; it inherits from flat automatically.
+# A reusable base: inherit root settings, disable printouts and deployment.
 [profiles.base]
 create-printouts = false
-# Demonstrate negation support (equivalent to deploy = false):
-no-deploy = true
+no-deploy = true             # same as deploy = false
 
-# Demonstrate array replacement: if you set songbooks here and do NOT list it in merge-keys
-# in a child profile, the child profile's songbooks will REPLACE this list.
-songbooks = [
-  # "songbooks/base/*.toml",
-  # "songbooks/shared/*.toml",
-]
-
-
-# A dev profile that inherits from base; flat is already included in base.
+# Fast local checks: inherit base's disabled printouts/deployment, build only the
+# main PDF, and keep intermediate files for troubleshooting.
+# This uses ordinary profile settings; --quick itself is a CLI-only option.
 [profiles.dev]
 inherit-from = "base"
-# Merge only common-deploy-icons from parent; other arrays replace by default
-merge-keys = ["common-deploy-icons"]
+lyricbooks = false
+extrainstrumentbooks = false
+multikey-books = false
+coverimage = false
+json = false
+midifiles = false
+audiofiles = false
+clean-temp = false
 
-# Child adds icons; duplicates are ignored, order preserved -> parent + new uniques
-common-deploy-icons = [
-  # "assets/icons/dev-only.png",
-]
+# Optionally restrict development builds to one book. This REPLACES the entire
+# inherited songbooks list rather than adding to it.
+# songbooks = ["my-songbook_A5.tex"]
 
-# Songbooks here will REPLACE base.songbooks because songbooks is not in merge-keys
-songbooks = [
-  # "songbooks/dev/*.toml",
-]
-
-# Re-enable deploy for dev (overrides base's no-deploy)
-deploy = true
-
-
-# A prod profile that does not inherit from another profile; it inherits from flat.
+# Publication builds: inherit root settings, not the development/base overrides
+# or profiles.default. Merge additional deployment files into the root lists.
 [profiles.prod]
-# Merge only common-deploy-metadata from parent (flat); other arrays replace by default
-merge-keys = ["common-deploy-metadata"]
+deploy = true
+create-printouts = true
+lyricbooks = false
+merge-keys = ["common-deploy-icons", "common-deploy-metadata"]
+
+common-deploy-icons = [
+  # "assets/icons/prod-only.png",
+]
 
 common-deploy-metadata = [
   # "assets/metadata/prod/*.json",
 ]
-
-# Example replacements
-create-printouts = true
-lyricbooks = false
-
-# You can also use dashed or snake_case interchangeably for the supported keys.
