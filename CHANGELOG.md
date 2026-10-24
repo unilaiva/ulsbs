@@ -5,6 +5,8 @@ the extension is released.
 
 ## Unreleased
 
+## v0.2.2 - 2026-10-24
+
 - Compiler warnings now use structured, source-aware diagnostic counts, compact
   per-job summaries, clickable log paths, and retained `_DIAGNOSTICS.json` reports
   under `result/diagnostics/` with host paths. Successful jobs remain `SUCCESS`

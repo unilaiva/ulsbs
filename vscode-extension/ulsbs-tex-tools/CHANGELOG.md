@@ -5,6 +5,8 @@ the extension is released.
 
 ## Unreleased
 
+## v0.2.2 - 2026-10-24
+
 - Added editing support for every canonical `\beginverse` modifier combination,
   including unnumbered `*`, melody-spacing `+`, and `[n]` indentation.
 - Added a `ulsbsTexTools.songbookExcludeGlob` setting for adding Songbooks view
