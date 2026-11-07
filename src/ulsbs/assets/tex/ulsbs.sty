@@ -125,6 +125,11 @@
            unicode,
            colorlinks]{hyperref}
 
+% LuaTeX already copies an imported PDF's transparency group. The graphics
+% driver's synthetic group otherwise duplicates /Group and overrides its policy.
+% Drivers without this injection need no change.
+\patchcmd{\Gread@pdf}{\Gread@transgrouptrue}{\Gread@transgroupfalse}{}{}
+
 % The \ulSongbookType macro contains by default 'chorded', but it can be defined
 % to be 'lyric' before including this file to produce lyrics-only songbooks.
 % Further display choices use explicit setters such as \ulShowNotes{false}

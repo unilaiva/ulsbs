@@ -5,8 +5,10 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
+import random
 import shutil
 import subprocess
 import tempfile
@@ -25,6 +27,7 @@ from ulsbs.engine_assets import EngineAssets
 from ulsbs.jobs import Job, build_job_basename
 from ulsbs.multikey_ranges import validate_index
 from ulsbs.pdf_fonts import _check_equivalent, deduplicate_fonts
+from test_tex_integration import compile_fixture
 
 
 class LilyPondFontSharingTests(unittest.TestCase):
@@ -33,6 +36,63 @@ class LilyPondFontSharingTests(unittest.TestCase):
         for tool in ("lilypond-book", "lilypond", "lualatex", "qpdf", "pdffonts", "pdftoppm", "pdftotext"):
             if shutil.which(tool) is None:
                 raise unittest.SkipTest(f"{tool} is not installed")
+
+    def test_imported_pdf_transparency_groups_survive_cover_and_graphics_inclusion(self):
+        files = {}
+        program = random.Random(42).randbytes(8192)
+        for grouped in (False, True):
+            with pikepdf.Pdf.new() as pdf:
+                page = pdf.add_blank_page(page_size=(120, 120))
+                if grouped:
+                    page.Group = pikepdf.Dictionary(
+                        Type=pikepdf.Name.Group, S=pikepdf.Name.Transparency,
+                        CS=pikepdf.Name.DeviceRGB, I=True, K=False,
+                    )
+                fonts = pikepdf.Dictionary()
+                for index in range(2):
+                    fonts[f"/F{index}"] = pdf.make_indirect(pikepdf.Dictionary(
+                        Type=pikepdf.Name.Font, Subtype=pikepdf.Name.TrueType,
+                        BaseFont=pikepdf.Name("/ABCDEF+Test"),
+                        FontDescriptor=pdf.make_indirect(pikepdf.Dictionary(
+                            Type=pikepdf.Name.FontDescriptor,
+                            FontName=pikepdf.Name("/ABCDEF+Test"),
+                            FontFile2=pdf.make_stream(program),
+                        )),
+                    ))
+                page.Resources.Font = fonts
+                buffer = io.BytesIO()
+                pdf.save(buffer)
+                files[f"{'grouped' if grouped else 'plain'}.pdf"] = buffer.getvalue()
+        files["source-effects.tex"] = rb"""
+\documentclass{ulsbs-songbook}
+\begin{document}
+\ulCoverPage*{grouped.pdf}
+\includegraphics[width=50pt]{grouped.pdf}
+\includegraphics[width=50pt]{plain.pdf}
+\end{document}
+"""
+        _, data = compile_fixture("source-effects", files=files, multikey=False)
+        with tempfile.TemporaryDirectory(prefix="ulsbs-imported-pdf-") as temporary:
+            path = Path(temporary) / "book.pdf"
+            path.write_bytes(data)
+            with pikepdf.open(path, attempt_recovery=False) as pdf:
+                check = getattr(pdf, "check_pdf_syntax", None) or pdf.check
+                self.assertEqual(check(), [])
+                forms = [obj for obj in pdf.objects if isinstance(obj, pikepdf.Stream)
+                         and obj.get("/PTEX.PageNumber") == 1]
+                self.assertEqual(len(forms), 3)
+                groups = [form.Group for form in forms if "/Group" in form]
+                self.assertEqual(len(groups), 2)
+                for group in groups:
+                    self.assertEqual(group, pikepdf.Dictionary(
+                        Type=pikepdf.Name.Group, S=pikepdf.Name.Transparency,
+                        CS=pikepdf.Name.DeviceRGB, I=True, K=False,
+                    ))
+            before, after, removed = deduplicate_fonts(path)
+            self.assertLess(after, before)
+            self.assertGreater(removed, 0)
+            with pikepdf.open(io.BytesIO(data)) as original, pikepdf.open(path) as optimized:
+                _check_equivalent(original, optimized)
 
     def test_cold_and_warm_pipeline_preserve_embedded_fonts_staging_and_midi(self):
         self.check_cold_and_warm_pipeline(multikey=False)

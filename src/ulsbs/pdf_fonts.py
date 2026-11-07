@@ -114,8 +114,8 @@ def deduplicate_fonts(path: Path) -> tuple[int, int, int]:
             return before, before, 0
         # Ubuntu's pikepdf 9.x calls this check(); 10.x renamed the API.
         check_syntax = getattr(pikepdf.Pdf, "check_pdf_syntax", None) or pikepdf.Pdf.check
-        if check_syntax(pdf):
-            raise ValueError("Input PDF failed syntax validation")
+        if diagnostics := check_syntax(pdf):
+            raise ValueError("Input PDF failed syntax validation:\n" + "\n".join(diagnostics))
         # Keep the input graph unchanged for validation against the saved candidate.
         with pikepdf.open(path, attempt_recovery=False) as original:
             for descriptor, key, canonical in replacements:
@@ -129,8 +129,9 @@ def deduplicate_fonts(path: Path) -> tuple[int, int, int]:
                 if after >= before:
                     return before, before, 0
                 with pikepdf.open(temporary, attempt_recovery=False) as candidate:
-                    if check_syntax(candidate):
-                        raise ValueError("Font-sharing candidate failed syntax validation")
+                    if diagnostics := check_syntax(candidate):
+                        raise ValueError("Font-sharing candidate failed syntax validation:\n"
+                                         + "\n".join(diagnostics))
                     _check_equivalent(original, candidate)
                 os.chmod(temporary, stat.S_IMODE(path.stat().st_mode))
                 os.replace(temporary, path)
