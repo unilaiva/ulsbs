@@ -76,8 +76,7 @@ class LilyPondFontSharingTests(unittest.TestCase):
             path = Path(temporary) / "book.pdf"
             path.write_bytes(data)
             with pikepdf.open(path, attempt_recovery=False) as pdf:
-                check = getattr(pdf, "check_pdf_syntax", None) or pdf.check
-                self.assertEqual(check(), [])
+                self.assertEqual(pdf.check_pdf_syntax(), [])
                 forms = [obj for obj in pdf.objects if isinstance(obj, pikepdf.Stream)
                          and obj.get("/PTEX.PageNumber") == 1]
                 self.assertEqual(len(forms), 3)

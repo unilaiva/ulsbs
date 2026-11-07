@@ -154,12 +154,15 @@ class PipelinePdfFontsTests(unittest.TestCase):
                     resultlist.delete()
 
     def test_require_tools_checks_pikepdf_without_external_optimizer(self) -> None:
-        with patch.object(pipeline, "which", return_value="/bin/tool") as which, \
-                patch.object(pipeline.importlib.util, "find_spec", return_value=object()) as spec:
-            pipeline.require_tools()
-        self.assertEqual([call.args[0] for call in which.call_args_list],
-                         ["lualatex", "lilypond-book"])
-        spec.assert_called_once_with("pikepdf")
+        for installed in ("10.0.0", "10.3.0", "11.0.0"):
+            with self.subTest(installed=installed), \
+                    patch.object(pipeline, "which", return_value="/bin/tool") as which, \
+                    patch.object(pipeline.importlib.metadata, "version",
+                                 return_value=installed) as version:
+                pipeline.require_tools()
+                self.assertEqual([call.args[0] for call in which.call_args_list],
+                                 ["lualatex", "lilypond-book"])
+                version.assert_called_once_with("pikepdf")
 
     def test_standard_pipeline_has_no_external_index_stage_and_gates_publication(self) -> None:
         request = ("Package ulsbs-index Warning: Index data changed. "
@@ -208,19 +211,24 @@ class PipelinePdfFontsTests(unittest.TestCase):
                 finally:
                     resultlist.delete()
 
-    def test_require_tools_explains_install_and_container_rebuild(self) -> None:
-        with patch.object(pipeline, "which", return_value="/bin/tool"), \
-                patch.object(pipeline.importlib.util, "find_spec", return_value=None):
-            with self.assertRaises(SystemExit) as caught:
-                pipeline.require_tools()
-        message = str(caught.exception)
-        for text in ("pikepdf>=8", "python3-pikepdf", "rebuild the compiler container"):
-            self.assertIn(text, message)
+    def test_require_tools_rejects_missing_or_unsupported_pikepdf(self) -> None:
+        for installed in (None, "8.15.1", "9.11.0"):
+            missing = pipeline.importlib.metadata.PackageNotFoundError("pikepdf")
+            with self.subTest(installed=installed), \
+                    patch.object(pipeline, "which", return_value="/bin/tool"), \
+                    patch.object(pipeline.importlib.metadata, "version", return_value=installed,
+                                 side_effect=missing if installed is None else None):
+                with self.assertRaises(SystemExit) as caught:
+                    pipeline.require_tools()
+                message = str(caught.exception)
+                for text in ("pikepdf>=10", installed or "not installed", "python3-pikepdf",
+                             "rebuild the compiler container"):
+                    self.assertIn(text, message)
 
     def test_multikey_preflights_qpdf_without_requiring_it_for_ordinary_jobs(self) -> None:
         """Missing extraction tooling fails early only when range output is requested."""
         with patch.object(pipeline, "which", return_value="/bin/tool"), \
-                patch.object(pipeline.importlib.util, "find_spec", return_value=object()), \
+                patch.object(pipeline.importlib.metadata, "version", return_value="10.3.0"), \
                 patch("ulsbs.multikey_ranges.qpdf_version", return_value="12.2.0") as version:
             pipeline.require_tools()
             version.assert_not_called()

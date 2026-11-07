@@ -40,6 +40,8 @@
 - Removed inherited `sr` metadata, song-reference accessors and three-braced
   metadata input. V2 migration diagnoses these for review instead of creating
   runtime aliases or converting scripture references into tags.
+- Require `pikepdf` 10+ for PDF optimization, matching the compiler image.
+  Older host installations must be upgraded before compilation.
 - Documented native module ownership, lifecycle hooks, custom metadata keys,
   verse/chord token boundaries and manual LuaLaTeX builds. Multikey layer names,
   effective-original layout, occurrence identity, external range manifests and

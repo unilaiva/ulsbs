@@ -16,7 +16,7 @@ This file is part of the 'ulsbs' package.
 from __future__ import annotations
 
 import concurrent.futures as cf
-import importlib.util
+import importlib.metadata
 import json
 import os
 import re
@@ -365,10 +365,17 @@ def require_tools(*, multikey: bool = False) -> None:
     for t in ("lualatex", "lilypond-book"):
         if which(t) is None:
             raise SystemExit(f"'{t}' binary not found in PATH")
-    if importlib.util.find_spec("pikepdf") is None:
+    try:
+        installed = importlib.metadata.version("pikepdf")
+    except importlib.metadata.PackageNotFoundError:
+        installed = "not installed"
+    major = re.match(r"\d+", installed)
+    if major is None or int(major[0]) < 10:
         raise SystemExit(
-            "Python dependency 'pikepdf' is required for PDF font deduplication. "
-            "Install it with pip install 'pikepdf>=8' (or apt install python3-pikepdf), "
+            f"Python dependency 'pikepdf>=10' is required for PDF font deduplication "
+            f"(found: {installed}). "
+            "Install it with pip install --upgrade 'pikepdf>=10' "
+            "(or apt install python3-pikepdf if version 10+ is available), "
             "or rebuild the compiler container."
         )
     if multikey:

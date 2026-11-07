@@ -469,12 +469,12 @@ companions are still skipped before
 optimization or publication. LilyPond generation, the processed source tree,
 MIDI/audio associations, and JSON export contracts are unchanged.
 
-Font sharing is always enabled. `pikepdf>=8` is a required compiler dependency,
-checked before compilation even when there are no scores
+Font sharing is always enabled. `pikepdf>=10` is a required compiler dependency,
+with its installed version checked before compilation even when there are no scores
 or duplicate fonts. The container installs `python3-pikepdf`; host installation
 and image-rebuild instructions are in the [README requirements](README.md#requirements).
-No external optimizer executable is required. Syntax checking supports both the
-older `Pdf.check()` API and its replacement, `Pdf.check_pdf_syntax()`.
+No external optimizer executable is required. Syntax checking uses
+`Pdf.check_pdf_syntax()` directly.
 
 The optimizer shares only identical decoded `/FontFile`, `/FontFile2`, or
 `/FontFile3` streams whose semantic dictionaries also match. Hashes locate

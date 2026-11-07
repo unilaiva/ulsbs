@@ -90,15 +90,6 @@ class FontSharingTests(unittest.TestCase):
         self.assertEqual(deduplicate_fonts(self.path), (len(original), len(original), 0))
         self.assert_untouched(original)
 
-    def test_ubuntu_pikepdf_legacy_syntax_check_api(self):
-        self.make_pdf()
-        check = pikepdf.Pdf.check_pdf_syntax if hasattr(pikepdf.Pdf, "check_pdf_syntax") else pikepdf.Pdf.check
-        with patch.object(pikepdf.Pdf, "check", check, create=True), \
-                patch.object(pikepdf.Pdf, "check_pdf_syntax", None, create=True):
-            before, after, removed = deduplicate_fonts(self.path)
-        self.assertLess(after, before)
-        self.assertEqual(removed, 1)
-
     def test_validation_failure_preserves_original_and_cleans_candidate(self):
         self.make_pdf()
         original = self.path.read_bytes()
@@ -108,14 +99,13 @@ class FontSharingTests(unittest.TestCase):
         self.assert_untouched(original)
 
     def test_syntax_failure_reports_diagnostics_and_preserves_original(self):
-        check = "check_pdf_syntax" if hasattr(pikepdf.Pdf, "check_pdf_syntax") else "check"
         diagnostic = "dictionary has duplicated key /Group"
         for stage, results in (("Input PDF", [[diagnostic]]),
                                ("Font-sharing candidate", [[], [diagnostic]])):
             with self.subTest(stage=stage):
                 self.make_pdf()
                 original = self.path.read_bytes()
-                with patch.object(pikepdf.Pdf, check, side_effect=results):
+                with patch.object(pikepdf.Pdf, "check_pdf_syntax", side_effect=results):
                     with self.assertRaises(ValueError) as caught:
                         deduplicate_fonts(self.path)
                 self.assertEqual(str(caught.exception),

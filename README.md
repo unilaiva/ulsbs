@@ -519,7 +519,7 @@ Host mode requires a compatible toolchain, including:
 - A recent LaTeX distribution with `lualatex` (LuaLaTeX).
 - LilyPond with `lilypond-book`.
 - `bash` and Python 3.11+.
-- Python package `pikepdf` 8+ (mandatory for PDF optimization).
+- Python package `pikepdf` 10+ (mandatory for PDF optimization).
 - `qpdf` 12.2.0+ when multikey generation is enabled.
 - Noto fonts (`Noto Sans`, `Noto Serif`, with needed weights).
 
@@ -575,9 +575,9 @@ Docker group commands.
 If `docker` is unavailable inside WSL, start Docker Desktop and verify its WSL
 integration settings.
 
-#### Ubuntu 24.04 host build (`--no-container`)
+#### Ubuntu 26.04 host build (`--no-container`)
 
-Ubuntu 24.04 is a reference host setup. Install the toolchain:
+Ubuntu 26.04 is a reference host setup. Install the toolchain:
 
 ```sh
 sudo apt update
