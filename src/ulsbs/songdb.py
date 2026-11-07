@@ -338,7 +338,7 @@ class SongInfo:
     - title_slug:
         ASCII filename-friendly stem derived from the primary title.
     - number:
-        Song number taken from the current songnum counter, if known.
+        Song number taken from the current ulSongNumber counter, if known.
     - options:
         Parsed optional key/value arguments given to \\beginsong[..].
     - source_file_relative:
@@ -450,7 +450,7 @@ class BookInfo:
     - document_class:
         The class name given to \\documentclass{...}.
     - paper:
-        Paper size identifier (cls option paper / \\ulPapersize).
+        Paper size identifier (cls option paper / \\ulPaperSize).
     - maintitle:
         Main book title (cls option maintitle / \\ulMainBookTitle).
     - subtitle:
@@ -503,7 +503,7 @@ class BookInfo:
 
 # Map from LaTeX command name (without leading backslash) to BookInfo field name.
 _BOOK_COMMAND_TO_FIELD: Dict[str, str] = {
-    "ulPapersize": "paper",
+    "ulPaperSize": "paper",
     "ulMainBookTitle": "maintitle",
     "ulSubBookTitle": "subtitle",
     "ulSubSubBookTitle": "subsubtitle",
@@ -958,7 +958,7 @@ class SongbookData:
 
 
 _INPUT_MACROS = ("\\input", "\\include")
-_CHAPTER_MACROS = ("\\ulMainChapter", "\\chapter", "\\songchapter")
+_CHAPTER_MACROS = ("\\ulMainChapter", "\\chapter", "\\ulSongChapter")
 
 # Macros whose braced argument should be preserved in lyrics (name without
 # leading backslash). For these, the macro name and braces are stripped but
@@ -2414,8 +2414,8 @@ def build_song_database(
             if any(src.startswith(m, i) for m in _CHAPTER_MACROS):
                 if src.startswith("\\ulMainChapter", i):
                     macro = "\\ulMainChapter"
-                elif src.startswith("\\songchapter", i):
-                    macro = "\\songchapter"
+                elif src.startswith("\\ulSongChapter", i):
+                    macro = "\\ulSongChapter"
                 else:
                     macro = "\\chapter"
                 i += len(macro)
@@ -2449,10 +2449,10 @@ def build_song_database(
                 )
                 chapters.append(chap)
                 current_chapter = chap
-                # Do *not* reset songnum; we follow whatever \setcounter does
+                # Do *not* reset ulSongNumber; we follow whatever \setcounter does
                 continue
 
-            # songnum counter
+            # ulSongNumber counter
             if src.startswith("\\setcounter", i):
                 i += len("\\setcounter")
                 while i < n and src[i].isspace():
@@ -2474,7 +2474,7 @@ def build_song_database(
                     val_str, i = _parse_braced_argument(src, i)
                 except ValueError:
                     continue
-                if counter_name == "songnum":
+                if counter_name == "ulSongNumber":
                     try:
                         current_songnum = int(val_str.strip())
                     except ValueError:

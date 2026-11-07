@@ -408,8 +408,8 @@ class MultikeyConfigTests(unittest.TestCase):
                             )
                             definitions = (
                                 f"\\newcommand{{\\ulPdfTranspositionLayers}}{{{value}}}\n"
-                                 f"\\newcommand{{\\ulPdfTranspositionLayerUI}}{{{ui}}}\n"
-                                   "\\newcommand{\\ulPdfTranspositionRequireSongIDs}{false}\n"
+                                 f"\\newcommand{{\\ulPdfTranspositionLayerUi}}{{{ui}}}\n"
+                                   "\\newcommand{\\ulPdfTranspositionRequireSongIds}{false}\n"
                                    "\\newcommand{\\ulPdfTranspositionMinimumScale}{0.85}\n"
                                   "\\newcommand{\\ulMultikeyLilypondScores}{false}\n"
                             )
@@ -419,7 +419,7 @@ class MultikeyConfigTests(unittest.TestCase):
                                 result.index("\\documentclass"),
                             )
                             self.assertLess(
-                                result.index("\\ulPdfTranspositionLayerUI"),
+                                result.index("\\ulPdfTranspositionLayerUi"),
                                 result.index("\\usepackage"),
                             )
                             if variant != "default":
@@ -459,7 +459,7 @@ class MultikeyConfigTests(unittest.TestCase):
             job = Job(doc, doc.stem, "default", compile_dir, multikey=multikey)
             text = make_variant_tex(job, cfg).read_text(encoding="utf-8")
             self.assertLess(
-                text.index("\\newcommand{\\ulPdfTranspositionRequireSongIDs}{true}"),
+                text.index("\\newcommand{\\ulPdfTranspositionRequireSongIds}{true}"),
                 text.index("\\documentclass"),
             )
 

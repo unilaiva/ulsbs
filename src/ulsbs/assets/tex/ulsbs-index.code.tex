@@ -1,0 +1,118 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Index collection bridge.
+% This file is part of the 'ulsbs' package.
+%
+% Loaded after common styling and before song lifecycle/display. Requires
+% LuaLaTeX, expl3 and the bundled index-state Lua module (which owns records,
+% sorting and previous-pass snapshot persistence).
+% TeX owns global declaration lookups and local serialization scratch. Loading
+% reads the prior snapshot; begin-document starts collection, retained late-Lua
+% nodes commit records at shipout, and enddocument/end publishes the next pass.
+
+\ProvidesFile{ulsbs-index.code.tex}[In-process index collection]
+
+\makeatletter
+\directlua{ulsbs_index_state = dofile(assert(kpse.find_file("ulsbs-index-state.lua", "tex"),
+  "Missing ulsbs-index-state.lua; reinstall the ULSBS TeX assets"))}
+\directlua{ulsbs_index_state.start("\luaescapestring{\jobname}", \if@filesw true\else false\fi)}
+\ExplSyntaxOn
+\prop_new:N \g__ulsbs_index_kinds_prop
+\prop_new:N \g__ulsbs_index_filenames_prop
+
+% {filename}: select the book-wide tag definitions before collection starts.
+% Resolution is deferred until a tag index is requested; unused tags need no file.
+\DeclareDocumentCommand \ulTagFile {m}
+  {\directlua{ulsbs_index_state.tag_file("\luaescapestring{#1}")}}
+\@onlypreamble\ulTagFile
+
+% #1: index ID; #2: kind; #3: filename stem. Populate TeX lookups globally;
+% the song-facing declaration adapter separately registers/validates Lua state.
+\cs_new_protected:Npn \ulsbs_index_declare:nnn #1#2#3
+  {
+    \prop_gput:Nnn \g__ulsbs_index_kinds_prop {#1}{#2}
+    \prop_gput:Nnn \g__ulsbs_index_filenames_prop {#1}{#3}
+  }
+\tl_new:N \l__ulsbs_index_tokens_tl
+\tl_new:N \l__ulsbs_index_literal_tl
+\tl_new:N \l__ulsbs_index_template_tl
+\tl_new:N \l__ulsbs_index_token_tl
+\tl_new:N \l__ulsbs_index_title_tl
+\tl_new:N \l__ulsbs_index_label_tl
+\tl_new:N \l__ulsbs_index_target_tl
+\tl_new:N \l__ulsbs_index_chapter_tl
+\tl_new:N \l__ulsbs_index_handle_tl
+
+% No arguments. Append the current literal as an escaped Lua string/table part
+% and clear it. Adjacent parts delimit deferred page insertions, not source code.
+\cs_new_protected:Npn \__ulsbs_index_template_part:
+  {
+    \tl_put_right:Nx \l__ulsbs_index_template_tl
+      {"\luaescapestring{\l__ulsbs_index_literal_tl}",}
+    \tl_clear:N \l__ulsbs_index_literal_tl
+  }
+
+% Expand as a protected write would, but never execute the saved tokens.
+% Page references are typed template boundaries, not magic text substitutions.
+% #1: field tokens; #2: output tl variable. Return Lua table syntax containing
+% literal string parts, split at actual thepage tokens. Active characters become
+% literal characters; protected commands remain data. Local scanning overrides
+% do not escape the group, but the result is assigned in the caller's scope.
+\cs_new_protected:Npn \__ulsbs_index_serialize:nN #1#2
+  {
+    \group_begin:
+    \cs_set_eq:NN \thepage \scan_stop:
+    \cs_set_eq:NN \protect \@unexpandable@protect
+    \int_step_inline:nn {255}
+      {\cs_set:Npx \__ulsbs_index_active: {\char_generate:nn {##1}{12}}
+       \char_set_active_eq:nN {##1}\__ulsbs_index_active:}
+    \tl_set:Nx \l__ulsbs_index_tokens_tl {#1}
+    \tl_clear:N \l__ulsbs_index_literal_tl
+    \tl_set:Nn \l__ulsbs_index_template_tl {\c_left_brace_str}
+    \tl_analysis_map_inline:Nn \l__ulsbs_index_tokens_tl
+      {
+        \int_compare:nNnTF {##2}<{0}
+          {
+            \tl_set:Nx \l__ulsbs_index_token_tl
+              {\exp_args:No \tl_to_str:n {##1}}
+            \str_if_eq:eeF {\l__ulsbs_index_token_tl}
+              {\token_to_str:N \protect\c_space_tl}
+              {
+                \str_if_eq:eeTF {\l__ulsbs_index_token_tl}
+                  {\token_to_str:N \thepage\c_space_tl}
+                  {\__ulsbs_index_template_part:}
+                  {\tl_put_right:NV \l__ulsbs_index_literal_tl \l__ulsbs_index_token_tl}
+              }
+          }
+          {\tl_put_right:Nx \l__ulsbs_index_literal_tl {\char_generate:nn {##2}{12}}}
+      }
+    \__ulsbs_index_template_part:
+    \tl_put_right:Nn \l__ulsbs_index_template_tl {\c_right_brace_str}
+    \exp_args:NNNV \group_end: \tl_set:Nn #2\l__ulsbs_index_template_tl
+  }
+
+% #1: index ID; #2: title; #3: reference label; #4: target; #5: chapter.
+% Serialize/stage now and emit a late-Lua node carrying the numeric handle.
+% Only shipped nodes resolve page templates and commit; copied fit probes never
+% execute them, discarded boxes contribute nothing, and replay markers distinguish
+% intentionally repeated selected output without evaluating metadata again.
+\cs_new_protected:Npn \ulsbs_index_record:nnnnn #1#2#3#4#5
+  {
+    \__ulsbs_index_serialize:nN {#2}\l__ulsbs_index_title_tl
+    \__ulsbs_index_serialize:nN {#3}\l__ulsbs_index_label_tl
+    \__ulsbs_index_serialize:nN {#4}\l__ulsbs_index_target_tl
+    \__ulsbs_index_serialize:nN {#5}\l__ulsbs_index_chapter_tl
+    \directlua{token.set_macro("l__ulsbs_index_handle_tl",tostring(ulsbs_index_state.stage(
+      "\luaescapestring{#1}",\l__ulsbs_index_title_tl,\l__ulsbs_index_label_tl,
+      \l__ulsbs_index_target_tl,\l__ulsbs_index_chapter_tl,true)))}
+    \exp_args:Nx \latelua {ulsbs_index_state.ship(\l__ulsbs_index_handle_tl,nil,
+      "\exp_not:n {\luaescapestring{\thepage}}")}
+  }
+
+\ExplSyntaxOff
+% Capture source identity and final write/visibility policy before song input.
+\AddToHook{begindocument}{\directlua{ulsbs_index_state.begin_document(\if@filesw\ifulSongIndexes true\else false\fi\else false\fi, status.filename)}}
+% All shipped semantic events are available before publishing the next snapshot.
+\AddToHook{enddocument/end}{\directlua{ulsbs_index_state.finish()}}
+\makeatother

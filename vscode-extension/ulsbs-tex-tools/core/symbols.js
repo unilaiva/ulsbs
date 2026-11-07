@@ -122,8 +122,12 @@ function registerSymbolProvider(vscode, context) {
               regex: /\\chapter\*?(?:\[(.*?)\])?\{([^}]*)\}/g
             },
             {
-              type: "songchapter",
-              regex: /\\songchapter\*?(?:\[(.*?)\])?\{([^}]*)\}/g
+              type: "ulSongChapter",
+              regex: /\\ulSongChapter\*?(?:\[(.*?)\])?\{([^}]*)\}/g
+            },
+            {
+              type: "ulSongSection",
+              regex: /\\ulSongSection\*?(?:\[(.*?)\])?\{([^}]*)\}/g
             },
             {
               type: "section",
@@ -175,11 +179,11 @@ function registerSymbolProvider(vscode, context) {
                   continue;
                 }
 
-                if (def.type === "chapter" || def.type === "songchapter") {
+                if (def.type === "chapter" || def.type === "ulSongChapter") {
                   const shortTitle = (match[1] || "").trim();
                   const longTitle = (match[2] || "").trim();
                   const name = shortTitle || longTitle || "Chapter";
-                  const detail = def.type === "chapter" ? "\\chapter" : "\\songchapter";
+                  const detail = `\\${def.type}`;
 
                   atomic.push({
                     line: lineIndex,
@@ -195,15 +199,15 @@ function registerSymbolProvider(vscode, context) {
                   continue;
                 }
 
-                if (def.type === "section" || def.type === "subsection") {
+                if (def.type === "section" || def.type === "subsection" || def.type === "ulSongSection") {
                   const shortTitle = (match[1] || "").trim();
                   const longTitle = (match[2] || "").trim();
                   const name =
                     shortTitle ||
                     longTitle ||
-                    (def.type === "section" ? "Section" : "Subsection");
+                    (def.type === "subsection" ? "Subsection" : "Section");
 
-                  const detail = def.type === "section" ? "\\section" : "\\subsection";
+                  const detail = `\\${def.type}`;
 
                   atomic.push({
                     line: lineIndex,

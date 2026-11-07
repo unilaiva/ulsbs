@@ -287,7 +287,6 @@ class MultikeyPipelineTests(unittest.TestCase):
                     with patch.object(pipeline, "prepare_compile_dir"), \
                             patch.object(pipeline, "build_include_paths", return_value=({}, [], [])), \
                             patch.object(pipeline, "step_lilypond_book", side_effect=lilypond) as engraving, \
-                            patch.object(pipeline, "step_texlua_indices", side_effect=lambda *args: args[-1] + 1), \
                             patch.object(pipeline, "step_lualatex_pass", side_effect=latex) as passes, \
                             patch.object(pipeline, "step_lualatex_convergence", side_effect=lambda *args: args[-2:]) as convergence, \
                             patch.dict(sys.modules, {"ulsbs.pdf_fonts": SimpleNamespace(deduplicate_fonts=optimizer)}), \
@@ -429,7 +428,6 @@ class MultikeyPipelineTests(unittest.TestCase):
                 with patch.object(pipeline, "prepare_compile_dir"), \
                         patch.object(pipeline, "build_include_paths", return_value=({}, [], [])), \
                         patch.object(pipeline, "step_lilypond_book", return_value=(self.doc, self.doc, 2)), \
-                        patch.object(pipeline, "step_texlua_indices", return_value=4), \
                         patch.object(pipeline, "step_lualatex_pass", side_effect=latex), \
                         patch("ulsbs.multikey_ranges.check_pdf_property_resources", side_effect=checks), \
                         patch.object(pipeline, "step_pdf_fonts", side_effect=fonts) as optimize, \
@@ -442,9 +440,9 @@ class MultikeyPipelineTests(unittest.TestCase):
                         warnings.assert_called_once()
                     else:
                         compilation = pipeline.compile_one_job(self.ui, Mock(), self.cfg, job)
-                        self.assertEqual(compilation.next_step, 8)
+                        self.assertEqual(compilation.next_step, 7)
                         self.assertEqual(warnings.call_args.kwargs["last_lualatex_log"],
-                                         job.compile_dir / "06_lualatex-pass4.log")
+                                         job.compile_dir / "05_lualatex-pass4.log")
                         optimize.assert_called_once()
                 released = JobLock(job.compile_dir)
                 released.acquire()
@@ -517,7 +515,6 @@ class MultikeyPipelineTests(unittest.TestCase):
                     patch.object(pipeline, "build_include_paths", return_value=({}, [], [])), \
                     patch.object(pipeline, "step_lilypond_book", return_value=(
                         job.compile_dir / f"{basename}.tex", self.doc, 2)), \
-                    patch.object(pipeline, "step_texlua_indices", return_value=3), \
                     patch.object(pipeline, "step_lualatex_pass", side_effect=latex), \
                     patch.object(pipeline, "step_lualatex_convergence", side_effect=lambda *args: args[-2:]), \
                     patch.object(pipeline, "step_pdf_fonts", return_value=5), \
@@ -577,7 +574,6 @@ class MultikeyPipelineTests(unittest.TestCase):
                             patch.object(pipeline, "prepare_compile_dir"), \
                             patch.object(pipeline, "build_include_paths", return_value=({}, [], [])), \
                             patch.object(pipeline, "step_lilypond_book", return_value=(job.compile_dir / f"{basename}.tex", self.doc, 2)) as engraving, \
-                            patch.object(pipeline, "step_texlua_indices", return_value=3), \
                             patch.object(pipeline, "run_cmd", side_effect=latex), \
                             patch.object(pipeline, "step_lualatex_convergence", side_effect=lambda *args: args[-2:]), \
                             patch.object(pipeline, "step_pdf_fonts", return_value=7) as fonts, \
@@ -1293,7 +1289,6 @@ class MultikeyPipelineTests(unittest.TestCase):
                 patch.object(pipeline, "build_include_paths", return_value=({}, [], [])), \
                 patch.object(pipeline, "step_lilypond_book", return_value=(
                     multikey.compile_dir / f"{basename}.tex", self.doc, 2)), \
-                patch.object(pipeline, "step_texlua_indices", return_value=3), \
                 patch.object(pipeline, "step_lualatex_pass", side_effect=latex), \
                 patch.object(pipeline, "step_lualatex_convergence", side_effect=lambda *args: args[-2:]), \
                 patch.object(pipeline, "step_pdf_fonts", return_value=7) as fonts, \
@@ -1331,7 +1326,7 @@ class MultikeyPipelineTests(unittest.TestCase):
             job = self.job(multikey=True)
             output = pipeline.make_variant_tex(job, replace(self.cfg, multikey_require_song_ids=required))
             text = output.read_text(encoding="utf-8")
-            macro = r"\newcommand{\ulPdfTranspositionRequireSongIDs}{" + str(required).lower() + "}"
+            macro = r"\newcommand{\ulPdfTranspositionRequireSongIds}{" + str(required).lower() + "}"
             self.assertLess(text.index(macro), text.index(r"\documentclass"))
 
     def test_job_details_are_verbose_only_and_report_effective_outputs(self) -> None:

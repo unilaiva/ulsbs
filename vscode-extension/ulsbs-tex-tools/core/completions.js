@@ -62,6 +62,7 @@ function computeCompletionContext(document, position) {
   let passageDepth = 0;
   let feelerDepth = 0;
   let intersongDepth = 0;
+  let documentStarted = false;
 
   for (let line = 0; line <= position.line; line++) {
     let text = document.lineAt(line).text;
@@ -70,6 +71,7 @@ function computeCompletionContext(document, position) {
     }
 
     const code = stripComment(text);
+    if (/\\begin\{document\}/.test(code)) documentStarted = true;
     const tokens = tokenizeSongLine(code, line);
 
     for (const token of tokens) {
@@ -161,6 +163,7 @@ function computeCompletionContext(document, position) {
     inPassage: passageDepth > 0,
     inFeeler: feelerDepth > 0,
     inIntersong: intersongDepth > 0,
+    documentStarted,
 
     inChordLine
   };
@@ -322,10 +325,9 @@ function registerCompletionProvider(vscode, context) {
             /**
              * @type {{
              *   name: string,
-             *   hasLang?: boolean,
+             *   beginArgs?: string,
              *   allowBegin: (ctx: any) => boolean,
-             *   allowEnd: (ctx: any) => boolean,
-             *   beginSnippet?: (name: string) => string
+             *   allowEnd: (ctx: any) => boolean
              * }[]}
              */
             const envs = [
@@ -333,15 +335,15 @@ function registerCompletionProvider(vscode, context) {
                 name: "explanation",
                 title: "Explanation environment (ULSBS)",
                 doc: "Explanation environment (optional language code).",
-                hasLang: true,
+                beginArgs: "[$1]",
                 allowBegin: () => true,
                 allowEnd: (ctx) => ctx.inExplanation
               },
               {
                 name: "passage",
                 title: "Passage environment (ULSBS)",
-                doc: "Passage environment (optional language code).",
-                hasLang: true,
+                doc: "Passage environment with an optional language code and a required title argument (which may be empty).",
+                beginArgs: "[$1]{${2:Title}}",
                 allowBegin: () => true,
                 allowEnd: (ctx) => ctx.inPassage
               },
@@ -355,15 +357,16 @@ function registerCompletionProvider(vscode, context) {
               {
                 name: "intersong",
                 title: "Intersong environment (ULSBS)",
-                doc: "Intersong blocks must be between songs (not inside a song) within songs environment.",
+                doc: "Intersong blocks must be between songs (not inside a song) within ulSongs environment.",
                 // Begin only between songs, and do not nest intersong blocks.
                 allowBegin: (ctx) => !ctx.inSong && !ctx.inIntersong,
                 allowEnd: (ctx) => ctx.inIntersong
               },
               {
-                name: "songs",
+                name: "ulSongs",
                 title: "Songs environment (ULSBS)",
-                doc: "Songs environment (best-effort local-file detection).",
+                doc: "Song collection with a required comma-separated index list (empty to collect no indices; best-effort local-file detection).",
+                beginArgs: "{${1:titleidx,authidx,tagidx}}",
                 // Best-effort, local-file only.
                 allowBegin: (ctx) => !ctx.inSong && !ctx.inSongsEnv,
                 allowEnd: (ctx) => ctx.inSongsEnv
@@ -372,7 +375,7 @@ function registerCompletionProvider(vscode, context) {
                 name: "translation",
                 title: "Translation environment (ULSBS)",
                 doc: "Translation environment (optional language code).",
-                hasLang: true,
+                beginArgs: "[$1]",
                 allowBegin: () => true,
                 allowEnd: (ctx) => ctx.inTranslation
               },
@@ -414,12 +417,11 @@ function registerCompletionProvider(vscode, context) {
                 item.range = replaceRange;
 
                 if (envCtx.kind === "begin") {
-                  const langSnippet = e.hasLang ? "[$1]" : "";
-                  const defaultSnippet = `${e.name}}${langSnippet}\n$0\n\\end{${e.name}}`;
-                  const snippetText = e.beginSnippet ? e.beginSnippet(e.name) : defaultSnippet;
+                  const argsSnippet = e.beginArgs || "";
+                  const snippetText = `${e.name}}${argsSnippet}\n$0\n\\end{${e.name}}`;
                   item.insertText = new vscode.SnippetString(snippetText);
 
-                  const code = `\\begin{${e.name}}${langSnippet}\n...\n\\end{${e.name}}`;
+                  const code = `\\begin{${e.name}}${argsSnippet}\n...\n\\end{${e.name}}`;
                   item.documentation = makeCompletionDoc(
                     vscode,
                     e.title || "ULSBS environment",
@@ -451,6 +453,20 @@ function registerCompletionProvider(vscode, context) {
           /** @type {{name:string, snippet: string, isAllowed: (ctx:any)=>boolean, title: string, doc: string}[]} */
           const snippetMacros = [
             {
+              name: "ulTagFile",
+              title: "Tag-definition file (ULSBS)",
+              doc: "Preamble-only filename setter. Default lookup checks include/tags.txt, then tags.txt. An explicit missing file is an error, with no default fallback.",
+              snippet: "ulTagFile{${1:tags.txt}}",
+              isAllowed: (ctx) => !ctx.documentStarted && !ctx.inSong && !ctx.inSongsEnv
+            },
+            ...["ulNewIndex", "ulNewAuthorIndex", "ulNewTagIndex"].map((name) => ({
+              name,
+              title: `${name === "ulNewIndex" ? "Title" : name === "ulNewAuthorIndex" ? "Author" : "Tag"} index declaration (ULSBS)`,
+              doc: "Declare an index with a custom identifier and a separate filename stem in the preamble. Route ulSongs blocks to the identifier.",
+              snippet: name + "{${1:customidx}}{${2:idx_custom}}",
+              isAllowed: (ctx) => !ctx.documentStarted && !ctx.inSong && !ctx.inSongsEnv
+            })),
+            {
               name: "beginsong",
               title: "Song (ULSBS)",
               doc: "Insert a `\\beginsong{...}` ... `\\endsong` block.",
@@ -477,24 +493,24 @@ function registerCompletionProvider(vscode, context) {
               isAllowed: (ctx) => ctx.inVerse || ctx.inTranslation
             },
             {
-              name: "melodyPrimaryPosition",
+              name: "ulMelodyPrimaryPosition",
               title: "Primary melody position (ULSBS)",
               doc: "Place the primary melody on its normal or low lane in the current TeX scope. The default is `normal`.",
-              snippet: "melodyPrimaryPosition{${1|normal,low|}}",
+              snippet: "ulMelodyPrimaryPosition{${1|normal,low|}}",
               isAllowed: () => true
             },
             {
-              name: "melodySecondaryPosition",
+              name: "ulMelodySecondaryPosition",
               title: "Secondary melody position (ULSBS)",
               doc: "Place the semantic secondary melody above, below, or on the primary lane in the current TeX scope. Use `same` for migrated baseline alternate-only notes.",
-              snippet: "melodySecondaryPosition{${1|above,below,same|}}",
+              snippet: "ulMelodySecondaryPosition{${1|above,below,same|}}",
               isAllowed: () => true
             },
             {
-              name: "melodyStyleMapping",
+              name: "ulMelodyStyleMapping",
               title: "Melody style mapping (ULSBS)",
               doc: "Map primary and secondary melodies to their normal or swapped visual styles in the current TeX scope.",
-              snippet: "melodyStyleMapping{${1|normal,swapped|}}",
+              snippet: "ulMelodyStyleMapping{${1|normal,swapped|}}",
               isAllowed: () => true
             }
           ];

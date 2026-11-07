@@ -141,7 +141,7 @@ unrelated: warning: not from converter
 
     def test_step_sources_accept_actual_program_names_and_barchecks(self):
         for source, program in (("Audio", "fluidsynth"), ("Images", "magick"),
-                                ("Index", "songidx"), ("ConTeXt", "context")):
+                                ("Index", "Index"), ("ConTeXt", "context")):
             with self.subTest(source=source):
                 result, = parse_tool_warnings(f"{program}: warning: current issue\n", source)
                 self.assertEqual(result.source, source)

@@ -1,0 +1,480 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Cover, imprint, contents and main-chapter presentation commands.
+% This file is part of the 'ulsbs' package.
+%
+% Load: ulsbs.sty, at the start of the front matter/song-content phase, after
+% book defaults, typography and the complete ulsbs-style.code.tex policy.
+% Requires: book-type switches, xparse, etoolbox, graphicx, pdfpages,
+% hyperref, microtype and the document class's chapter/contents machinery.
+% Image helpers (imagel/imagecc) are defined later, before document-time use.
+% State: inherits @ as a letter; no enclosing group or catcode changes. Allocates
+% cover geometry immediately from current page dimensions. Icon setters change
+% caller-scope filename macros; chapter setup updates title/image macros and
+% globally sets currentchaptercolor. Commands emit pages/TOC entries on use,
+% not on load. The adjacent no-argument lyric-joining glyph jw is retained here
+% to preserve the original contiguous definition order.
+
+\ProvidesFile{ulsbs-frontmatter.code.tex}[ULSBS front matter and chapters]
+
+% BEGIN front matter
+
+% Sizes, gaps and positions for mode icons
+
+% The following offsets are required so that the top and left are exactly at
+% the margin positions (used inside the book). See e.g.:
+% https://tex.stackexchange.com/questions/287119/using-headsep-with-the-geometry-and-fanchyhdr-packages
+\newlength\ulCoverPermanentIconSize\ulCoverPermanentIconSize=.090169\textwidth% 0.618034^5 is approximately 0.090169
+\newlength\ulCoverPermanentIconGap\ulCoverPermanentIconGap=.021286\textwidth% % 0.618034^8 = 0.021286
+\newlength\ulCoverVariableIconSize\ulCoverVariableIconSize=\ulCoverPermanentIconSize
+\newlength\ulCoverVariableIconGap\ulCoverVariableIconGap=\ulCoverPermanentIconGap
+\newlength\ulCoverIconLeftOffset\ulCoverIconLeftOffset=\dimexpr-\parindent\relax%
+%\newlength\ulCoverIconTopOffset\ulCoverIconTopOffset=\dimexpr-\topskip-\headsep-\baselineskip-0.4pt\relax%
+\newlength\ulCoverIconTopOffset\ulCoverIconTopOffset=\dimexpr-\topskip-\headsep-\headheight\relax%
+
+% No-argument alternatives for ulInsertCoverIcons. Read defined coviperm*/
+% covivar* filenames and emit graphics/gaps in the named corner/orientation.
+% Missing filename macros are skipped; these commands do not set icon state.
+
+\newcommand{\ulInsertCoverIconsVtl}{% top left, vertical
+  \ifdefined\ulsbs@covipermi\hspace{\ulCoverIconLeftOffset}\includegraphics[height=\ulCoverPermanentIconSize]{\ulsbs@covipermi}\fi%
+  \ifdefined\ulsbs@covipermii\par\vspace{\ulCoverPermanentIconGap}\hspace{\ulCoverIconLeftOffset}\includegraphics[height=\ulCoverPermanentIconSize]{\ulsbs@covipermii}\fi%
+  \ifdefined\ulsbs@covipermiii\par\vspace{\ulCoverPermanentIconGap}\hspace{\ulCoverIconLeftOffset}\includegraphics[height=\ulCoverPermanentIconSize]{\ulsbs@covipermiii}\fi%
+  \ifdefined\ulsbs@covipermiv\par\vspace{\ulCoverPermanentIconGap}\hspace{\ulCoverIconLeftOffset}\includegraphics[height=\ulCoverPermanentIconSize]{\ulsbs@covipermiv}\fi%
+  \ifdefined\ulsbs@covipermv\par\vspace{\ulCoverPermanentIconGap}\hspace{\ulCoverIconLeftOffset}\includegraphics[height=\ulCoverPermanentIconSize]{\ulsbs@covipermv}\fi%
+  \ifdefined\ulsbs@covipermvi\par\vspace{\ulCoverPermanentIconGap}\hspace{\ulCoverIconLeftOffset}\includegraphics[height=\ulCoverPermanentIconSize]{\ulsbs@covipermvi}\fi%
+  \ifdefined\ulsbs@covipermvii\par\vspace{\ulCoverPermanentIconGap}\hspace{\ulCoverIconLeftOffset}\includegraphics[height=\ulCoverPermanentIconSize]{\ulsbs@covipermvii}\fi%
+  \ifdefined\ulsbs@covipermviii\par\vspace{\ulCoverPermanentIconGap}\hspace{\ulCoverIconLeftOffset}\includegraphics[height=\ulCoverPermanentIconSize]{\ulsbs@covipermviii}\fi%
+  \ifdefined\ulsbs@covivari\par\vspace{\ulCoverVariableIconGap}\hspace{\ulCoverIconLeftOffset}\includegraphics[height=\ulCoverVariableIconSize]{\ulsbs@covivari}\fi%
+  \ifdefined\ulsbs@covivarii\par\vspace{\ulCoverVariableIconGap}\hspace{\ulCoverIconLeftOffset}\includegraphics[height=\ulCoverVariableIconSize]{\ulsbs@covivarii}\fi%
+  \ifdefined\ulsbs@covivariii\par\vspace{\ulCoverVariableIconGap}\hspace{\ulCoverIconLeftOffset}\includegraphics[height=\ulCoverVariableIconSize]{\ulsbs@covivariii}\fi%
+  \ifdefined\ulsbs@covivariv\par\vspace{\ulCoverVariableIconGap}\hspace{\ulCoverIconLeftOffset}\includegraphics[height=\ulCoverVariableIconSize]{\ulsbs@covivariv}\fi%
+  \ifdefined\ulsbs@covivarvi\par\vspace{\ulCoverVariableIconGap}\hspace{\ulCoverIconLeftOffset}\includegraphics[height=\ulCoverVariableIconSize]{\ulsbs@covivarvi}\fi%
+  \ifdefined\ulsbs@covivarvii\par\vspace{\ulCoverVariableIconGap}\hspace{\ulCoverIconLeftOffset}\includegraphics[height=\ulCoverVariableIconSize]{\ulsbs@covivarvii}\fi%
+  \ifdefined\ulsbs@covivarviii\par\vspace{\ulCoverVariableIconGap}\hspace{\ulCoverIconLeftOffset}\includegraphics[height=\ulCoverVariableIconSize]{\ulsbs@covivarviii}\fi%
+}
+
+\newcommand{\ulInsertCoverIconsVtr}{% top right, vertical
+  \ifdefined\ulsbs@covipermi\hfill\includegraphics[height=\ulCoverPermanentIconSize]{\ulsbs@covipermi}\fi%
+  \ifdefined\ulsbs@covipermii\par\vspace{\ulCoverPermanentIconGap}\hfill\includegraphics[height=\ulCoverPermanentIconSize]{\ulsbs@covipermii}\fi%
+  \ifdefined\ulsbs@covipermiii\par\vspace{\ulCoverPermanentIconGap}\hfill\includegraphics[height=\ulCoverPermanentIconSize]{\ulsbs@covipermiii}\fi%
+  \ifdefined\ulsbs@covipermiv\par\vspace{\ulCoverPermanentIconGap}\hfill\includegraphics[height=\ulCoverPermanentIconSize]{\ulsbs@covipermiv}\fi%
+  \ifdefined\ulsbs@covipermv\par\vspace{\ulCoverPermanentIconGap}\hfill\includegraphics[height=\ulCoverPermanentIconSize]{\ulsbs@covipermv}\fi%
+  \ifdefined\ulsbs@covipermvi\par\vspace{\ulCoverPermanentIconGap}\hfill\includegraphics[height=\ulCoverPermanentIconSize]{\ulsbs@covipermvi}\fi%
+  \ifdefined\ulsbs@covipermvii\par\vspace{\ulCoverPermanentIconGap}\hfill\includegraphics[height=\ulCoverPermanentIconSize]{\ulsbs@covipermvii}\fi%
+  \ifdefined\ulsbs@covipermviii\par\vspace{\ulCoverPermanentIconGap}\hfill\includegraphics[height=\ulCoverPermanentIconSize]{\ulsbs@covipermviii}\fi%
+  \ifdefined\ulsbs@covivari\par\vspace{\ulCoverVariableIconGap}\hfill\includegraphics[height=\ulCoverVariableIconSize]{\ulsbs@covivari}\fi%
+  \ifdefined\ulsbs@covivarii\par\vspace{\ulCoverVariableIconGap}\hfill\includegraphics[height=\ulCoverVariableIconSize]{\ulsbs@covivarii}\fi%
+  \ifdefined\ulsbs@covivariii\par\vspace{\ulCoverVariableIconGap}\hfill\includegraphics[height=\ulCoverVariableIconSize]{\ulsbs@covivariii}\fi%
+  \ifdefined\ulsbs@covivariv\par\vspace{\ulCoverVariableIconGap}\hfill\includegraphics[height=\ulCoverVariableIconSize]{\ulsbs@covivariv}\fi%
+  \ifdefined\ulsbs@covivarv\par\vspace{\ulCoverVariableIconGap}\hfill\includegraphics[height=\ulCoverVariableIconSize]{\ulsbs@covivarv}\fi%
+  \ifdefined\ulsbs@covivarvi\par\vspace{\ulCoverVariableIconGap}\hfill\includegraphics[height=\ulCoverVariableIconSize]{\ulsbs@covivarvi}\fi%
+  \ifdefined\ulsbs@covivarvii\par\vspace{\ulCoverVariableIconGap}\hfill\includegraphics[height=\ulCoverVariableIconSize]{\ulsbs@covivarvii}\fi%
+  \ifdefined\ulsbs@covivarviii\par\vspace{\ulCoverVariableIconGap}\hfill\includegraphics[height=\ulCoverVariableIconSize]{\ulsbs@covivarviii}\fi%
+}
+
+\newcommand{\ulInsertCoverIconsHtl}{% top left, horizontal
+  \hspace{\ulCoverIconLeftOffset}%
+  \ifdefined\ulsbs@covipermi\includegraphics[width=\ulCoverPermanentIconSize]{\ulsbs@covipermi}\hspace{\ulCoverPermanentIconGap}\fi%
+  \ifdefined\ulsbs@covipermii\includegraphics[width=\ulCoverPermanentIconSize]{\ulsbs@covipermii}\hspace{\ulCoverPermanentIconGap}\fi%
+  \ifdefined\ulsbs@covipermiii\includegraphics[width=\ulCoverPermanentIconSize]{\ulsbs@covipermiii}\hspace{\ulCoverPermanentIconGap}\fi%
+  \ifdefined\ulsbs@covipermiv\includegraphics[width=\ulCoverPermanentIconSize]{\ulsbs@covipermiv}\hspace{\ulCoverPermanentIconGap}\fi%
+  \ifdefined\ulsbs@covipermv\includegraphics[width=\ulCoverPermanentIconSize]{\ulsbs@covipermv}\hspace{\ulCoverPermanentIconGap}\fi%
+  \ifdefined\ulsbs@covipermvi\includegraphics[width=\ulCoverPermanentIconSize]{\ulsbs@covipermvi}\hspace{\ulCoverPermanentIconGap}\fi%
+  \ifdefined\ulsbs@covipermvii\includegraphics[width=\ulCoverPermanentIconSize]{\ulsbs@covipermvii}\hspace{\ulCoverPermanentIconGap}\fi%
+  \ifdefined\ulsbs@covipermviii\includegraphics[width=\ulCoverPermanentIconSize]{\ulsbs@covipermviii}\hspace{\ulCoverPermanentIconGap}\fi%
+  \ifdefined\ulsbs@covivari\includegraphics[width=\ulCoverVariableIconSize]{\ulsbs@covivari}\hspace{\ulCoverVariableIconGap}\fi%
+  \ifdefined\ulsbs@covivarii\includegraphics[width=\ulCoverVariableIconSize]{\ulsbs@covivarii}\hspace{\ulCoverVariableIconGap}\fi%
+  \ifdefined\ulsbs@covivariii\includegraphics[width=\ulCoverVariableIconSize]{\ulsbs@covivariii}\hspace{\ulCoverVariableIconGap}\fi%
+  \ifdefined\ulsbs@covivariv\includegraphics[width=\ulCoverVariableIconSize]{\ulsbs@covivariv}\hspace{\ulCoverVariableIconGap}\fi%
+  \ifdefined\ulsbs@covivarv\includegraphics[width=\ulCoverVariableIconSize]{\ulsbs@covivarv}\hspace{\ulCoverVariableIconGap}\fi%
+  \ifdefined\ulsbs@covivarvi\includegraphics[width=\ulCoverVariableIconSize]{\ulsbs@covivarvi}\hspace{\ulCoverVariableIconGap}\fi%
+  \ifdefined\ulsbs@covivarvii\includegraphics[width=\ulCoverVariableIconSize]{\ulsbs@covivarvii}\hspace{\ulCoverVariableIconGap}\fi%
+  \ifdefined\ulsbs@covivarviii\includegraphics[width=\ulCoverVariableIconSize]{\ulsbs@covivarviii}\hspace{\ulCoverVariableIconGap}\fi%
+}
+
+\newcommand{\ulInsertCoverIconsHtr}{% top right, horizontal}
+  \hspace{\fill}%
+  \ifdefined\ulsbs@covipermi\hspace{\ulCoverPermanentIconGap}\includegraphics[width=\ulCoverPermanentIconSize]{\ulsbs@covipermi}\fi%
+  \ifdefined\ulsbs@covipermii\hspace{\ulCoverPermanentIconGap}\includegraphics[width=\ulCoverPermanentIconSize]{\ulsbs@covipermii}\fi%
+  \ifdefined\ulsbs@covipermiii\hspace{\ulCoverPermanentIconGap}\includegraphics[width=\ulCoverPermanentIconSize]{\ulsbs@covipermiii}\fi%
+  \ifdefined\ulsbs@covipermiv\hspace{\ulCoverPermanentIconGap}\includegraphics[width=\ulCoverPermanentIconSize]{\ulsbs@covipermiv}\fi%
+  \ifdefined\ulsbs@covipermv\hspace{\ulCoverPermanentIconGap}\includegraphics[width=\ulCoverPermanentIconSize]{\ulsbs@covipermv}\fi%
+  \ifdefined\ulsbs@covipermvi\hspace{\ulCoverPermanentIconGap}\includegraphics[width=\ulCoverPermanentIconSize]{\ulsbs@covipermvi}\fi%
+  \ifdefined\ulsbs@covipermvii\hspace{\ulCoverPermanentIconGap}\includegraphics[width=\ulCoverPermanentIconSize]{\ulsbs@covipermvii}\fi%
+  \ifdefined\ulsbs@covipermviii\hspace{\ulCoverPermanentIconGap}\includegraphics[width=\ulCoverPermanentIconSize]{\ulsbs@covipermviii}\fi%
+  \ifdefined\ulsbs@covivari\hspace{\ulCoverVariableIconGap}\includegraphics[width=\ulCoverVariableIconSize]{\ulsbs@covivari}\fi%
+  \ifdefined\ulsbs@covivarii\hspace{\ulCoverVariableIconGap}\includegraphics[width=\ulCoverVariableIconSize]{\ulsbs@covivarii}\fi%
+  \ifdefined\ulsbs@covivariii\hspace{\ulCoverVariableIconGap}\includegraphics[width=\ulCoverVariableIconSize]{\ulsbs@covivariii}\fi%
+  \ifdefined\ulsbs@covivariv\hspace{\ulCoverVariableIconGap}\includegraphics[width=\ulCoverVariableIconSize]{\ulsbs@covivariv}\fi%
+  \ifdefined\ulsbs@covivarv\hspace{\ulCoverVariableIconGap}\includegraphics[width=\ulCoverVariableIconSize]{\ulsbs@covivarv}\fi%
+  \ifdefined\ulsbs@covivarvi\hspace{\ulCoverVariableIconGap}\includegraphics[width=\ulCoverVariableIconSize]{\ulsbs@covivarvi}\fi%
+  \ifdefined\ulsbs@covivarvii\hspace{\ulCoverVariableIconGap}\includegraphics[width=\ulCoverVariableIconSize]{\ulsbs@covivarvii}\fi%
+  \ifdefined\ulsbs@covivarviii\hspace{\ulCoverVariableIconGap}\includegraphics[width=\ulCoverVariableIconSize]{\ulsbs@covivarviii}\fi%
+}
+
+\newcommand{\ulInsertCoverIconsVbl}{% bottom left, vertical
+  \vspace*{\fill}%
+  \ulInsertCoverIconsVtl%
+}
+
+\newcommand{\ulInsertCoverIconsVbr}{% bottom right, vertical
+  \vspace*{\fill}%
+  \ulInsertCoverIconsVtr%
+}
+
+\newcommand{\ulInsertCoverIconsHbl}{% bottom left, horizontal
+  \vspace*{\fill}%
+  \ulInsertCoverIconsHtl%
+}
+
+\newcommand{\ulInsertCoverIconsHbr}{% bottom right, horizontal
+  \vspace*{\fill}%
+  \ulInsertCoverIconsHtr%
+}
+
+\newcommand{\ulInsertCoverIconsHtc}{% top center, horizontal
+  \hfill\ulInsertCoverIconsHtl\hfill%
+}
+
+\newcommand{\ulInsertCoverIconsHbc}{% bottom center, horizontal
+  \vspace*{\fill}
+  \ulInsertCoverIconsHtc%
+}
+
+% No arguments: emit defined variant icons at text scale for the imprint.
+\newcommand\ulVariantIconsTextSize{%
+  \ifdefined\ulsbs@covivari\hspace{1ex}\includegraphics[height=2ex]{\ulsbs@covivari}\fi%
+  \ifdefined\ulsbs@covivarii\hspace{1ex}\includegraphics[height=2ex]{\ulsbs@covivarii}\fi%
+  \ifdefined\ulsbs@covivariii\hspace{1ex}\includegraphics[height=2ex]{\ulsbs@covivariii}\fi%
+  \ifdefined\ulsbs@covivariv\hspace{1ex}\includegraphics[height=2ex]{\ulsbs@covivariv}\fi%
+  \ifdefined\ulsbs@covivarv\hspace{1ex}\includegraphics[height=2ex]{\ulsbs@covivarv}\fi%
+  \ifdefined\ulsbs@covivarvi\hspace{1ex}\includegraphics[height=2ex]{\ulsbs@covivarvi}\fi%
+  \ifdefined\ulsbs@covivarvii\hspace{1ex}\includegraphics[height=2ex]{\ulsbs@covivarvii}\fi%
+  \ifdefined\ulsbs@covivarviii\hspace{1ex}\includegraphics[height=2ex]{\ulsbs@covivarviii}\fi%
+}
+
+
+% No-argument cover-icon output policy, renewable by the document. Permanent
+% filenames are covipermi through covipermviii; variable filenames are covivari
+% through covivarviii. Missing icons have undefined macros. Choose any of the
+% ulInsertCoverIcons orientation/corner helpers or provide custom output.
+\providecommand{\ulInsertCoverIcons}{\ulInsertCoverIconsHbc}%
+
+% The icon (in default image path) used to signify a book with chords.
+\providecommand{\ulChordsTagIcon}{ulsbs-tag-icon-chords_EN_512x512px}%
+
+% The icon (in default image path) used to signify a book with treble clef sheet music.
+\providecommand{\ulTrebleclefTagIcon}{ulsbs-tag-icon-sheetmusic_512x512px}%
+
+% The icon (in default image path) used to signify a book with bass clef sheet music.
+\providecommand{\ulBassclefTagIcon}{ulsbs-tag-icon-sheetmusic-bass_512x512px.png}%
+
+% The icon (in default image path) used to signify a lyrics-only book.
+\providecommand{\ulLyricsOnlyTagIcon}{ulsbs-tag-icon-lyrics-only_EN_512x512px.png}%
+
+% The icon (in default image path) used to signify a charango book.
+\providecommand{\ulCharangoTagIcon}{ulsbs-tag-icon-charango_512x512px.png}%
+
+
+% No arguments: suppress cover headers, position at its top offset, then call
+% the public icon policy. Used by ulCoverPage and pdfpages' pagecommand.
+\newcommand{\ulsbs@ulInsertCoverIcons}{%
+  \thispagestyle{empty}%
+  \vspace*{\ulCoverIconTopOffset}%
+  \ulInsertCoverIcons%
+}
+
+% Up to eight optional [filename] arguments: set permanent cover icons in the
+% caller's scope. Each omitted argument undefines its corresponding slot.
+\NewDocumentCommand{\ulSetPermanentCoverIcons}{o o o o o o o o}{%
+  \IfValueTF{#1}{\def\ulsbs@covipermi{#1}}{\let\ulsbs@covipermi\undefined}%
+  \IfValueTF{#2}{\def\ulsbs@covipermii{#2}}{\let\ulsbs@covipermii\undefined}%
+  \IfValueTF{#3}{\def\ulsbs@covipermiii{#3}}{\let\ulsbs@covipermiii\undefined}%
+  \IfValueTF{#4}{\def\ulsbs@covipermiv{#4}}{\let\ulsbs@covipermiv\undefined}%
+  \IfValueTF{#5}{\def\ulsbs@covipermv{#5}}{\let\ulsbs@covipermv\undefined}%
+  \IfValueTF{#6}{\def\ulsbs@covipermvi{#6}}{\let\ulsbs@covipermvi\undefined}%
+  \IfValueTF{#7}{\def\ulsbs@covipermvii{#7}}{\let\ulsbs@covipermvii\undefined}%
+  \IfValueTF{#8}{\def\ulsbs@covipermviii{#8}}{\let\ulsbs@covipermviii\undefined}%
+}
+
+% Up to eight optional [filename] arguments: set variable cover icons in the
+% caller's scope, undefining omitted slots. ulCoverPage may replace/clear these
+% for generated lyric-only, charango and bass-clef book types.
+\NewDocumentCommand{\ulSetVariableCoverIcons}{o o o o o o o o}{%
+  \IfValueTF{#1}{\def\ulsbs@covivari{#1}}{\let\ulsbs@covivari\undefined}%
+  \IfValueTF{#2}{\def\ulsbs@covivarii{#2}}{\let\ulsbs@covivarii\undefined}%
+  \IfValueTF{#3}{\def\ulsbs@covivariii{#3}}{\let\ulsbs@covivariii\undefined}%
+  \IfValueTF{#4}{\def\ulsbs@covivariv{#4}}{\let\ulsbs@covivariv\undefined}%
+  \IfValueTF{#5}{\def\ulsbs@covivarv{#5}}{\let\ulsbs@covivarv\undefined}%
+  \IfValueTF{#6}{\def\ulsbs@covivarvi{#6}}{\let\ulsbs@covivarvi\undefined}%
+  \IfValueTF{#7}{\def\ulsbs@covivarvii{#7}}{\let\ulsbs@covivarvii\undefined}%
+  \IfValueTF{#8}{\def\ulsbs@covivarviii{#8}}{\let\ulsbs@covivarviii\undefined}%
+}
+
+% Creates a cover page here. Ought to be the first command used after
+% \begin{document}.
+% There is one mandatory parameter, which is the cover PDF's file name without
+% path. It should reside in any of the project's include folders set up by
+% the ulsbs compiler. If the filename is left empty, a fallback page with only
+% the songbook name is generated in its stead.
+%
+% Optionally set icons in the document preamble with ulSetPermanentCoverIcons
+% and ulSetVariableCoverIcons. For generated variants, the unstarred command
+% replaces variable icons with type-specific ones; the star clears those slots.
+% Permanent slots are unchanged. The ordinary chorded type keeps variable icons.
+\NewDocumentCommand{\ulCoverPage}{s m}{%
+  \IfBooleanTF{#1}{% starred: clear variant icons for the active book type
+    \ifulLyricOnly
+      \ulSetVariableCoverIcons%
+    \else\ifulCharangoBook
+      \ulSetVariableCoverIcons%
+    \else\ifulBassclefBook
+      \ulSetVariableCoverIcons%
+    \fi\fi\fi
+  }{% unstarred: set variant icons for the active book type
+    \ifulLyricOnly
+      \ulSetVariableCoverIcons[\ulLyricsOnlyTagIcon]%
+    \else\ifulCharangoBook
+      \ulSetVariableCoverIcons[\ulChordsTagIcon][\ulTrebleclefTagIcon][\ulCharangoTagIcon]%
+    \else\ifulBassclefBook
+      \ulSetVariableCoverIcons[\ulBassclefTagIcon]%
+    \fi\fi\fi
+  }%
+  \IfBlankTF{#2}{%
+    % fallback page
+    \clearpage
+    \thispagestyle{empty}%
+    \null
+    \begin{center}
+      \vfill
+      {\Huge \ulMainBookTitle}%
+      \vfill
+    \end{center}
+    \ulsbs@ulInsertCoverIcons
+    \clearpage
+  }{%
+    % normal PDF
+    \includepdf[pages={1},pagecommand=\ulsbs@ulInsertCoverIcons]{#2}%
+  }%
+}
+
+
+% No arguments: typeset the imprint, usually on the verso after the cover.
+% Reads the loader's book-title/version/website/variant defaults; presentation
+% changes are grouped. This command does not itself force a page break.
+\newcommand{\ulImprintPage}{
+  { % must be contained within a block for the settings to not bleed
+    \thispagestyle{empty}
+    \topskip0pt
+    \normalsize
+    \vspace*{11.2ex} % align with "Contents" heading on the next page; BAD for any changes
+    \begin{center}
+      % Main title
+      {\Huge \ulMainBookTitle}
+      % Motto
+      \ifdefempty{\ulBookMotto}{}{% \ulBookMotto exists
+        \par\textit{\normalsize\ulBookMotto}
+      }%
+      % Subtitle (e.g. Part I)
+      \ifdefempty{\ulSubBookTitle}{}{% \ulSubBookTitle exists
+        \par\vspace{2ex}
+        {\Large \textbf{\ulSubBookTitle}}
+        \ifdefempty{\ulSubSubBookTitle}{}{% \ulSubSubBookTitle exists
+          \par\vspace{0.618034ex}%
+          {\normalsize \ulSubSubBookTitle}%
+        }%
+      }%
+      \par\vspace*{\fill}
+      % Variant
+      {\large \ulBookVariantPreText}
+      \par\vspace{0.618034ex}
+      {\Large%
+        \par\large\emph{%
+          \ifulLyricOnly%
+            \ulBookLyricVariantText%
+          \else%
+            \ifulCharangoBook%
+              \ulBookCharangoVariantText%
+            \else%
+              \ifulBassclefBook%
+                \ulBookBassclefVariantText%
+              \else%
+                \ulBookDefaultVariantText%
+              \fi%
+            \fi%
+          \fi}%
+        \ulVariantIconsTextSize%
+      }
+      \par\vspace{2ex}
+      % Version
+      {\large \ulBookVersionPreText}
+      \par\vspace{0.618034ex}
+      {\Large%
+        %vvvv-mm-dd % Use hardcoded date date for tagged printout releases
+        \ulBookVersion% current date, the default
+      }
+      % By
+      \par\vspace*{\fill}
+      \ifdefempty{\ulBookByText}{}{% \ulBookByText exists
+        {\large \ulBookByText}%
+      }%
+      \par\vspace*{\fill}
+      % Link pretext (used in selections)
+      \def\ulsbs@showBookWebsiteLinkPreText{true}%
+      \ifdefempty{\ulBookWebsiteLinkQrImage}{}{% not empty
+        \ifdefempty\ulBookWebsiteLink{}{% not empty
+          \let\ulsbs@showBookWebsiteLinkPreText\undefined%
+        }%
+      }%
+      \ifdefined\ulBookWebsiteLinkPreText\else\let\ulsbs@showBookWebsiteLinkPreText\undefined\fi%
+      \ifdefined\ulsbs@showBookWebsiteLinkPreText%
+        {\ulBookWebsiteLinkPreText}\par%
+      \fi
+      % website QR image
+      \ifdefempty{\ulBookWebsiteLinkQrImage}{}{% not empty
+        \imagel[3]{\ulBookWebsiteLinkQrImage} % is already centered, so 'l' version ok
+        \par
+      }%
+      % website textual link
+      \ifdefempty{\ulBookWebsiteLink}{}{% not empty
+        {\small\url{\ulBookWebsiteLink}}%
+      }%
+      % Add vspace once, if either \ulBookWebsiteLink or \ulBookWebsiteLinkQrImage,
+      % or both, exist
+      \ifdefempty{\ulBookWebsiteLinkQrImage}%
+        {% qr empty
+          \ifdefempty{\ulBookWebsiteLink}{}{% link not empty
+            \par\vspace*{\fill}%
+          }%
+        }%
+        {% qr not empty
+          \par\vspace*{\fill}
+        }%
+      \ifdefempty{\ulBookCompiledByText}{}{% not empty
+        {\footnotesize\ulBookCompiledByText}
+        \par\vspace*{\fill}
+      }%
+      \ifdefempty{\ulImprintPageFootnote}{}{% not empty
+        {\scriptsize\ulImprintPageFootnote}
+      }%
+    \end{center}
+    \vspace{-1.85ex}% workaround to align page bottom with other pages
+  }
+}
+
+% No arguments: emit contents with the TOC page style and localized page label.
+% Writes TOC material, toggles protrusion off/on, then starts a new page and
+% restores the ulsbs page style (not an arbitrary previous style).
+\newcommand{\ulToc}{
+  \pagestyle{ulsbstoc}% use alternate header style for TOC
+  % to have totally flat right edge of the dots in TOC (microtype package):
+  \microtypesetup{protrusion=false} % To have a flat right side in TOC
+  \tableofcontents % The TOC
+  \microtypesetup{protrusion=true}% back to default (microtype package)
+  % Remove the overlapping page number in the bottom of the first TOC page:
+  \addtocontents{toc}{\protect\thispagestyle{empty}}
+  % Adds text "Page" on top of the TOC:
+  \ulIfLanguage{portuguese}{%
+    \addtocontents{toc}{~\hfill\textbf{Página}\par}
+  }{%
+    \ulIfLanguage{finnish}{%
+      \addtocontents{toc}{~\hfill\textbf{Sivu}\par}
+    }{
+      \addtocontents{toc}{~\hfill\textbf{Page}\par}
+    }
+  }
+  \newpage\pagestyle{ulsbs}% return to the default header style
+}
+
+% END front matter
+
+% Creates a small arc glyph just below baseline. Use this to join two words
+% in lyrics together with an arc instead of a whitespace. The width of the
+% arc is a bit less than an ordinary whitespace. Uses \scalebox from graphicx
+% package. Usage: alma\jw ao
+\newcommand\jw{\raisebox{-.135ex}{\scalebox{.22}{\textbf{\symsmilearc}}}}
+
+% Returns the chapter symbol as a text symbol. Renew to change.
+\providecommand\ulChapterSymbol{%
+  {\ulSymbolTwoFont 🟒}%
+}
+
+\def\ulsbs@currentchaptercolor{white}
+
+% Outputs the chapter symbol defined above in color; the mandatory parameter
+% is the color name.
+\newcommand\ulsbs@coloredchaptersymbol[1]{%
+  {\textcolor{#1}\ulChapterSymbol}%
+}
+
+% Define a main book chapter; index chapters instead use songchapter.
+%
+% Usage: \ulMainChapter*[short title]{long title}{chapter color}[image filename]
+%
+% #1: optional star forwarded to chapter for an unnumbered chapter.
+% #2: optional short title for TOC/headers; omitted means use the long title.
+% #3: mandatory long title for the chapter front page.
+% #4: mandatory color name, globally saved for chapter corner marks; also used
+%     for the chapter symbol when no image is supplied.
+% #5: optional image filename, replacing the symbol (there is no second star).
+% Omit optional brackets entirely when the argument is absent; [] is supplied
+% empty content, not a request for a default.
+%
+% Examples:
+%   \ulMainChapter{Good songs}{red}
+%   \ulMainChapter[Nice chapter]{Very very nice chapter}{blue}
+%   \ulMainChapter*{Bad songs}{gray}[bad_songs_image.png]
+%
+% Effects: sets title/image macros in caller scope, calls chapter, resets dashed
+% corner marks, optionally emits a chapter-front image/symbol, and clears page.
+\NewDocumentCommand{\ulMainChapter}{s o m m o}{% star, [short title], {long title}, {color}, [image]
+  \IfValueTF{#2}{% short title is given
+    \def\ulsbs@shorttitletext{#2}%
+  }{ % short title is not given, use the long one as the short title
+    \def\ulsbs@shorttitletext{#3}%
+  }%
+  \def\ulsbs@longtitletext{#3}%
+  \gdef\ulsbs@currentchaptercolor{#4}%
+  \IfValueTF{#5}{% yes, there is image given
+    \def\ulsbs@smallchapterimage{%
+      \includegraphics[height=1em,keepaspectratio=true]{#5}%
+    }%
+    \def\ulsbs@largechapterimage{%
+      \vspace{-1em}%
+      \imagecc[1]{#5}%
+    }%
+  }{% no image given, use symbol instead
+    \def\ulsbs@smallchapterimage{\ulsbs@coloredchaptersymbol{#4}}%
+    \def\ulsbs@largechapterimage{%
+      \vfill\vspace{-1em}%
+      \begin{center}%
+        \fontsize{108pt}{128pt}\ulsbs@coloredchaptersymbol{#4}%
+      \end{center}%
+      \vfill%
+    }%
+  }%
+  \def\ulsbs@shorttitlefull{%
+    % Include the image in the chapter title string, if the image is given and
+    % the feature is turned on.
+    \texorpdfstring{% pdf indexes can't contain images (and \MakeUppercase must be protected)
+      \ifulUppercaseShortChapterTitle\protect\MakeUppercase{\expandafter\ulsbs@shorttitletext}\else\ulsbs@shorttitletext\fi%
+      \ifulShowImageInChapterName\ifdefined\ulsbs@smallchapterimage\hspace{1em}\ulsbs@smallchapterimage\fi\fi%
+    }{\protect\MakeUppercase{\expandafter\ulsbs@shorttitletext}}%
+  }
+  \def\ulsbs@longtitlefull{%
+    \ifulUppercaseLongChapterTitle\protect\MakeUppercase{\expandafter\ulsbs@longtitletext}\else\ulsbs@longtitletext\fi%
+  }
+  \IfBooleanTF{#1}{% \ulMainChapter with star, call \chapter with star also
+    \chapter*[\ulsbs@shorttitlefull]{\ulsbs@longtitlefull}%
+  }{% \ulMainChapter without star, call \chapter without it also
+    \chapter[\ulsbs@shorttitlefull]{\ulsbs@longtitlefull}%
+  }
+  % Make chapter corner marks to be non-dashed:
+  \ulsbs@chapcornermarkdashedfalse
+  % The rest setups the chapter's front page
+  \thispagestyle{empty}% to omit the page number in the bottom of the page
+  \ifulShowImageOnChapterFrontPage\ifdefined\ulsbs@largechapterimage\vspace{-1em}\ulsbs@largechapterimage\fi\fi%
+  \clearpage%
+}

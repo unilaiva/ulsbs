@@ -1,0 +1,14 @@
+% SPDX-FileCopyrightText: 2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+\begin{ulSongs}{titleidx}
+\beginsong{Long plain song}[id={long-layout}]
+\newcount\LayoutStanza
+\LayoutStanza=1
+\def\LayoutIndent{0}
+\loop
+\input{layout-stanza.tex}
+\advance\LayoutStanza1
+\ifnum\LayoutStanza<13
+\repeat
+\endsong
+\end{ulSongs}

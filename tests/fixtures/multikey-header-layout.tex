@@ -6,17 +6,17 @@
     \setlength{\textwidth}{#1}
     \setlength{\hsize}{#1}
     \setlength{\linewidth}{#1}
-    \renewcommand{\extendpostlude}{%
+    \renewcommand{\ulExtendPostlude}{%
       \hypertarget{after-#2}{After song #2.}\quad
       \hyperlink{after-#2}{Return to the end of this song.}}
-    \begin{songs}{}
+    \begin{ulSongs}{}
       \beginsong{#3}[id={#2},#4]
         \beginverse
           #5
           Another plain lyric line.
         \endverse
       \endsong
-    \end{songs}
+    \end{ulSongs}
   \endgroup
 }
 \begin{document}

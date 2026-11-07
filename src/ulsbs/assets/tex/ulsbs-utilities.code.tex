@@ -1,0 +1,266 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% General-purpose typesetting and control-flow utilities.
+% This file is part of the 'ulsbs' package.
+%
+% Load: ulsbs.sty, after the main language is selected and before style defaults.
+% Requires: init registers, etoolbox, xparse, xstring, TikZ and expl3.
+% Later-defined fonts, colors and melody symbols are resolved when macros run.
+% State: inherits @ as a letter; does not add a group or change caller catcodes.
+% Allocates circle measurement/cache registers and the global previous-paragraph
+% line count; installs para/after tracking. Circle cache entries are global,
+% keyed by font size only. The repeat loop uses caller-scope scratch counters.
+% Loads boolmap at its original position, after the utilities it accompanies.
+
+\ProvidesFile{ulsbs-utilities.code.tex}[Shared typesetting utilities]
+
+% Very small font size, smaller than \tiny
+\newcommand{\ulNanoSize}{%
+  \ifcase\@ptsize\relax
+    \@setfontsize\ulNanoSize{3.5pt}{4pt}%   10pt base
+  \or
+    \@setfontsize\ulNanoSize{4.5pt}{5.2pt}% 11pt base
+  \or
+    \@setfontsize\ulNanoSize{5pt}{6pt}%     12pt base
+  \else
+    \@setfontsize\ulNanoSize{3.5pt}{4pt}%   fallback
+  \fi
+}
+
+% Small font size, between \scriptsize and \tiny
+\newcommand{\ulMicroSize}{%
+  \ifcase\@ptsize\relax
+    \@setfontsize\ulMicroSize{6pt}{7pt}%     10pt base
+  \or
+    \@setfontsize\ulMicroSize{6.5pt}{7.5pt}% 11pt base
+  \or
+    \@setfontsize\ulMicroSize{7pt}{8pt}%     12pt base
+  \else
+    \@setfontsize\ulMicroSize{6pt}{7pt}%     fallback
+  \fi
+}
+
+% Typeset #1 in scratch box zero, then select the first following branch if
+% its width is zero, otherwise the second. This tests width, not token emptiness.
+% Example:
+%   \ulsbs@ifnowidth{\somemacro}{%
+%     EMPTY
+%   }{%
+%     NOT EMPTY
+%   }
+\newcommand{\ulsbs@ifnowidth}[1]{%
+  \begingroup%
+  \sbox\z@{#1}%
+  \expandafter\endgroup%
+  \ifdim\wd\z@=\z@%
+    \expandafter\@firstoftwo%
+  \else%
+    \expandafter\@secondoftwo%
+  \fi%
+}
+
+% Disables \lineskiplimit (by setting it to -20pt) for the scope of the given
+% parameter, also for \ulChordLineParams. Use this to surround a section you don't
+% want lineskiplimit to affect, for example to prevent chord line to jump up if
+% there are tall lyrics below it, especially when there is no chord nor beat
+% mark, but only a note hint circle high above. Optional parameter allows
+% setting the limit.
+%
+% Usage:
+%   \ilsl[<lineskiplimit>]{<stuff>}
+%
+% Example:
+%   \ilsl{\[<C#>]Älä} veljeäsi |sure
+%
+\def\ilsl{%
+  \begingroup%
+  % Make # and & \active (catcode 13) to allow them within the argument; this
+  % is how \[] expects them to be.
+  \catcode`\#=\active\relax%
+  \catcode`\&=\active\relax%
+  \ulsbs@ilsl@x
+}
+
+% Helper for \ilsl: #1 is the optional limit, #2 is long-form body content.
+% Both limit assignments and active accidental catcodes end with this group.
+\NewDocumentCommand{\ulsbs@ilsl@x}{O{-20pt} +m}{%
+  \lineskiplimit=#1\relax%
+  \renewcommand{\ulChordLineLineskipLimit}{#1}%
+  #2%
+  \endgroup%
+}
+
+
+% Gets a roman uppercase number from the number given as parameter
+\newcommand{\ulRomanUpperNumber}[1]{%
+  \expandafter\@slowromancap\romannumeral #1@%
+}
+
+% Set a length register #1 with value #2 in the global scope.
+\newlength\ulsbs@utilities@length
+\gdef\ulGlobalSetLength#1#2{%
+  \begingroup
+    \setlength\ulsbs@utilities@length{#2} % Local assignment to a temporary register
+    \global#1=\ulsbs@utilities@length     % Global assignement to #1
+                        % \relax not needed because of the following \endgroup
+  \endgroup             % \ulsbs@utilities@length is restored
+}
+
+% This rewrite ensures that empty pages created with \cleardoublepage, like the
+% empty pages at the end of chapters, do not have headers.
+\renewcommand*{\cleardoublepage}{%
+  \clearpage%
+  \if@twoside%
+    \ifodd\c@page%
+    \else%
+      \hbox{}%
+      \thispagestyle{empty}%
+      \newpage%
+      \if@twocolumn%
+        \hbox{}\newpage%
+      \fi%
+    \fi%
+  \fi%
+}
+
+% Insert an empty line when in obeylines mode, e.g. within a song verse
+\newcommand{\emptyline}{\par\hspace{0pt}\par}
+
+% Repeal the effects of \obeylines
+\newcommand\disobeylines{\catcode`\^^M=5 }%
+
+% Produces an invisible box with the vertical size (height and depth) of
+% text with highest and lowest reaching characters used in the books in the
+% current font style, but having zero width. Use this to make boxes same size,
+% etc.
+\newcommand{\ulsbs@vphantommaxtext}{\vphantom{Êg(\flt\shrp}}
+
+% If the currently active languages name (polyglossia) is the same as the
+% first argument, the second argument is expanded; otherwise the third.
+% Example \ulIfLanguage{portuguese}{Círculos}{Circles}
+\protect\newcommand\ulIfLanguage[3]{%
+  \IfStrEq{\languagename}{#1}{% equals
+    #2%
+  }{%
+    #3%
+  }%
+}
+
+% Creates a mark that takes no space (might overlap) immediately to the left of
+% current position. The mark is given as optional parameter in square brackets.
+% If the mark is not given, a right-pointing arrowhead is used. Does not leak
+% style.
+\newcommand{\marker}[1][\symrarrowhead]{%
+  \makebox[0pt][l]{{\llap{#1}}}%
+}
+
+% Creates a playout mark that takes no space (might overlap) immediately to the
+% left of current position. This similar to \pomark in Lilypond, but points to
+% the right instead of down.
+\newcommand{\pomarkr}{%
+  \marker[\color{ulPlayoutMarkColor}\symrarrowhead{ }{ }]%
+}
+
+% Circled. Use with \circled macro. This uses TikZ and is used by melody notes.
+
+% Circled: settings. Be careful in changing these globally, as they are used for
+% printing melody note hints.
+\newcommand*\ulCircledWidestSymbol{g\ulsbs@mnsharpsymbol} % widest token in the notation
+
+\newcommand*\ulCircledHorizontalPadding{.08ex} % horizontal padding for the circle with contents
+
+\newcommand*\ulCircledCircleExtraDiameter{.05ex} % extra diameter for the circle
+
+\newcommand*\ulCircledCircleVerticalShift{.1ex} % move ONLY the circle (up = positive)
+
+\newcommand*\ulCircledCircleLine{.3pt} % circle line width
+
+\newcommand*\ulCircledCircleOpacity{.7} % circle's opacity (1=opaque)
+
+\newsavebox{\ulsbs@circledCircleBox}
+\newdimen\ulsbs@circledCircleDiameter
+\newdimen\ulsbs@circledCircleRadius
+
+% Circled: compute diameter+radius for *current* font, based on
+% \ulCircledWidestSymbol. Updates global dimensions; uses dimen0 and dimen2.
+\newcommand*\ulsbs@circledCircleCompute{%
+  \sbox{\ulsbs@circledCircleBox}{\strut \ulCircledWidestSymbol}%
+  \dimen0=\wd\ulsbs@circledCircleBox
+  \dimen2=\ht\ulsbs@circledCircleBox \advance\dimen2 by \dp\ulsbs@circledCircleBox
+  \ifdim\dimen2>\dimen0 \dimen0=\dimen2\fi
+  \advance\dimen0 by \ulCircledCircleExtraDiameter
+  \global\ulsbs@circledCircleDiameter=\dimen0
+  \global\ulsbs@circledCircleRadius=\dimen0 \divide\ulsbs@circledCircleRadius by 2
+}
+
+% Circled: cache circle size per font size (keyed by \f@size).
+% Creates global cache macros on first use, then assigns the current dimensions.
+\newcommand*\ulsbs@circledCircleGetDims{%
+  \edef\ulsbs@circled@key{\f@size}%
+  \@ifundefined{ulsbs@circledCircleDiameter@\ulsbs@circled@key}{%
+    \ulsbs@circledCircleCompute
+    \expandafter\xdef\csname ulsbs@circledCircleDiameter@\ulsbs@circled@key\endcsname{\the\ulsbs@circledCircleDiameter}%
+    \expandafter\xdef\csname ulsbs@circledCircleRadius@\ulsbs@circled@key\endcsname{\the\ulsbs@circledCircleRadius}%
+  }{}%
+  \ulsbs@circledCircleDiameter=\csname ulsbs@circledCircleDiameter@\ulsbs@circled@key\endcsname\relax
+  \ulsbs@circledCircleRadius=\csname ulsbs@circledCircleRadius@\ulsbs@circled@key\endcsname\relax
+}
+
+% Circled: \circled[<circle color>]{<content>}
+% Draws a circle around the content. Used by melody notes.
+% If color is omitted, the circle uses the current color (same as surrounding text).
+\NewDocumentCommand{\circled}{o m}{%
+  \hspace{\ulCircledHorizontalPadding}%
+  \ulsbs@circledCircleGetDims
+  \tikz[baseline=(T.base)]{%
+    \node[inner sep=0pt, outer sep=0pt] (T) {%
+      \strut\makebox[\the\ulsbs@circledCircleDiameter][c]{#2}%
+    };
+    % Circle only (overlay so it doesn't affect line spacing)
+    \begin{scope}[overlay]
+      \IfValueT{#1}{\color{#1}}% sets stroke color; does NOT affect the text
+      \draw[line width=\ulCircledCircleLine, opacity=\ulCircledCircleOpacity]
+        ([yshift=\ulCircledCircleVerticalShift]T.center) circle (\the\ulsbs@circledCircleRadius);
+    \end{scope}
+    %% The following would redraw the content text to make it appear on top of
+    %% the circle if overlapping, but it slows the processing down.
+    %\node[inner sep=0pt, outer sep=0pt] (T) {%
+    %  \strut\makebox[\the\ulsbs@circledCircleDiameter][c]{#2}%
+    %};
+  }%
+  \hspace{\ulCircledHorizontalPadding}%
+}
+
+% Holds the line count of previous paragraph, updated with para/after hook below
+\newcount\ulsbs@prevparlines\ulsbs@prevparlines=0
+
+% Capture line count at end of each paragraph and save it in \ulsbs@prevparlines
+\AddToHook{para/after}{%
+  \global\ulsbs@prevparlines=\prevgraf\relax%
+}
+
+
+% \ulRepeatTimes{<count>}{<callable>}
+%
+% Invoke <callable> exactly <count> times, appending one braced, 1-based index
+% argument each time. #2 is not an inline template: literal ##1 is not replaced.
+% <count> must be accepted by \count@=<count>; nonpositive counts do nothing.
+% Uses \count@ and \@tempcnta in the current scope, as does the callable body.
+% The callable must not clobber these loop counters.
+%
+% Example:
+%   \newcount\N \N=5
+%   \newcommand{\repeated}[1]{Iteration~#1\par}
+%   \ulRepeatTimes{\N}{\repeated}
+\newcommand{\ulRepeatTimes}[2]{% #1 = count, #2 = callable receiving {index}
+  \count@=#1\relax
+  \@tempcnta=1\relax
+  \@whilenum\count@>0\do{%
+    #2{\the\@tempcnta}%
+    \advance\@tempcnta by 1\relax
+    \advance\count@ by -1\relax
+  }%
+}
+
+\input{ulsbs-boolmap.code.tex}

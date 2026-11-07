@@ -1,0 +1,185 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Font, language and Unicode-symbol setup for the book's visual style.
+% This file is part of the 'ulsbs' package.
+%
+% Load: ulsbs.sty, after PDF color-profile setup, before colors and song fonts.
+% Requires: microtype, fontspec, polyglossia, newunicodechar and graphicx;
+% the preliminary main language has already been selected. Noto fonts must be
+% installed. Persian font aliases precede Persian language registration.
+% State: inherits @ as a letter, without a wrapper group or catcode changes.
+% Declares font families, changes document family defaults and microtype sets,
+% registers Finnish/Persian and Unicode mappings, and allocates a symbol box.
+% Font selectors and symbol commands take no arguments; their effects follow
+% ordinary TeX scoping. symdim/symhalfdim isolate their font changes internally.
+
+\ProvidesFile{ulsbs-typography.code.tex}[Fonts, languages and symbols]
+
+% microtype: enable some microtype features for more fonts than in the defaults:
+\DeclareMicrotypeSet{mosttext}{encoding={OT1,T1,T2A,LY1,OT4,QX,T5,TS1,EU1,EU2,TU},
+                               size={scriptsize-Large}}
+\DeclareMicrotypeSetDefault[protrusion,spacing]{mosttext}
+
+% fontspec: setup fonts
+
+\newfontfamily{\ulNotoSerifFont}[ % Noto Serif
+  NFSSFamily=ulnotoserif,
+  Ligatures=TeX,
+  UprightFont=*-Medium,
+  BoldFont=*-ExtraBold,
+  ItalicFont=*-MediumItalic,
+  BoldItalicFont=*-ExtraBoldItalic,
+  FontFace={sl}{\shapedefault}{*-Medium},
+  FontFace={sl}{it}{*-MediumItalic},
+  FontFace={b}{\shapedefault}{*-ExtraBold},
+  FontFace={b}{it}{*-ExtraBoldItalic}
+]{Noto Serif}
+
+\newfontfamily{\ulNotoSansFont}[ % Noto Sans
+  NFSSFamily=ulnotosans,
+  Ligatures=TeX,
+  UprightFont=*-Medium,
+  BoldFont=*-ExtraBold,
+  ItalicFont=*-MediumItalic,
+  BoldItalicFont=*-ExtraBoldItalic,
+  FontFace={sl}{\shapedefault}{*-Medium},
+  FontFace={sl}{it}{*-MediumItalic},
+  FontFace={b}{\shapedefault}{*-ExtraBold},
+  FontFace={b}{it}{*-ExtraBoldItalic}
+]{Noto Sans}
+
+\newfontfamily{\ulNotoMonoFont}[ % Noto Sans Mono
+  NFSSFamily=ulnotomono,
+  Ligatures=TeX,
+  Scale=MatchLowercase,
+  UprightFont=*-Medium,
+  BoldFont=*-ExtraBold,
+  FontFace={sl}{\shapedefault}{*-Medium},
+  FontFace={b}{\shapedefault}{*-ExtraBold}
+]{Noto Sans Mono}
+
+\newfontfamily{\ulSerifHeavyFont}[ % Noto Serif, heavy
+  Ligatures=TeX,
+  UprightFont=*-Bold,
+  BoldFont=*-Black,
+  ItalicFont = *-BoldItalic,
+  BoldItalicFont = *-BlackItalic,
+  FontFace = {sl}{\shapedefault}{*-Bold},
+  FontFace = {sl}{it}{*-BoldItalic},
+  FontFace = {b}{\shapedefault}{*-Black},
+  FontFace = {b}{it}{*-BlackItalic}
+]{Noto Serif}
+
+\newfontfamily{\ulSansHeavyFont}[ % Noto Sans, heavy
+  Ligatures=TeX,
+  UprightFont=*-Bold,
+  BoldFont=*-Black,
+  ItalicFont = *-BoldItalic,
+  BoldItalicFont = *-BlackItalic,
+  FontFace = {sl}{\shapedefault}{*-Bold},
+  FontFace = {sl}{it}{*-BoldItalic},
+  FontFace = {b}{\shapedefault}{*-Black},
+  FontFace = {b}{it}{*-BlackItalic}
+] {Noto Sans}
+
+\newfontfamily{\ulSymbolFont}[ % Noto Symbols: https://fonts.google.com/noto/specimen/Noto+Sans+Symbols/glyphs
+  Ligatures=TeX,
+  UprightFont=*-Medium,
+  BoldFont=*-ExtraBold,
+  ItalicFont=*-Medium,
+  BoldItalicFont=*-ExtraBold,
+  FontFace = {sl}{\shapedefault}{*-Medium},
+  FontFace = {b}{\shapedefault}{*-ExtraBold}
+  % italic not available
+]{Noto Sans Symbols}
+
+\newfontfamily{\ulSymbolHeavyFont}[ % Noto Symbols, heavy
+  Ligatures=TeX,
+  UprightFont=*-Bold,
+  BoldFont=*-Black,
+  ItalicFont=*-Bold,
+  BoldItalicFont=*-Black,
+  FontFace = {sl}{\shapedefault}{*-Bold},
+  FontFace = {b}{\shapedefault}{*-Black}
+  % italic not available
+]{Noto Sans Symbols}
+
+\newfontfamily{\ulSymbolTwoFont}[ % Noto Symbols 2: https://fonts.google.com/noto/specimen/Noto+Sans+Symbols+2/glyphs
+  Ligatures=TeX,
+  UprightFont=*-Regular,
+  BoldFont=*-Regular,
+  ItalicFont=*-Regular,
+  BoldItalicFont=*-Regular
+]{Noto Sans Symbols2} % weights and italic not available
+
+\newfontfamily{\persianfont}[ % Noto Sans Arabic for Persian language
+  Script=Arabic,
+  Ligatures=TeX,
+  UprightFont=*-Medium,
+  BoldFont=*-ExtraBold,
+  ItalicFont=*-Medium,
+  BoldItalicFont=*-ExtraBold,
+  FontFace = {sl}{\shapedefault}{*-Medium},
+  FontFace = {b}{\shapedefault}{*-ExtraBold}
+  % italic not available
+] {Noto Sans Arabic}
+\let\persianfontsf\persianfont % Persian: reuse the Arabic family in sans-serif contexts
+\let\persianfonttt\persianfont % Persian: reuse the Arabic family in monospace contexts
+
+% Document font defaults
+\renewcommand{\rmdefault}{ulnotoserif}
+
+\renewcommand{\sfdefault}{ulnotosans}
+
+\renewcommand{\ttdefault}{ulnotomono}
+
+% Use sans-serif as the document's default family
+\renewcommand{\familydefault}{\sfdefault}
+
+% Language settings: set other languages
+
+\setotherlanguage{finnish}
+
+% Picks automatically up the \persianfont and \persianfontsf defined above.
+% Use the persian language by putting it inbetween of \begin{persian} and
+% \end{persian}.
+\setotherlanguage[numerals=eastern]{persian}
+
+% newunicodechar (symbols):
+\newunicodechar{❶}{{\ulSymbolFont ❶}}\newcommand\symone{❶}
+\newunicodechar{❷}{{\ulSymbolFont ❷}}\newcommand\symtwo{❷}
+\newunicodechar{❸}{{\ulSymbolFont ❸}}\newcommand\symthree{❸}
+\newunicodechar{❹}{{\ulSymbolFont ❹}}\newcommand\symfour{❹}
+\newunicodechar{✝}{{\ulSymbolFont ✝}}\newcommand\symcross{✝}
+\newunicodechar{☨}{{\ulSymbolFont ☨}}\newcommand\symsdcross{☨}
+\newunicodechar{⌣}{{\ulSymbolFont ⌣}}\newcommand\symsmilearc{⌣}
+\newunicodechar{⭠}{{\ulSymbolTwoFont ⭠}}\newcommand\symlarrow{⭠}
+\newunicodechar{⭢}{{\ulSymbolTwoFont ⭢}}\newcommand\symrarrow{⭢}
+\newunicodechar{⮀}{{\ulSymbolTwoFont ⮀}}\newcommand\symlrarrow{⮀}
+\newunicodechar{⮁}{{\ulSymbolTwoFont ⮁}}\newcommand\symudarrow{⮁}
+\newunicodechar{⮞}{{\ulSymbolTwoFont ⮞}}\newcommand\symrarrowhead{⮞}
+
+% No arguments: emit the degree character used to size diminished symbols.
+\newcommand*{\ulsbs@degreechar}{\char"00B0\relax}
+\newsavebox{\ulsbs@dimbox}
+
+% No arguments: diminished symbol, a small circle in the chord font.
+\DeclareRobustCommand{\symdim}{%
+  {\ulNotoSansFont\mdseries\upshape\ulsbs@degreechar}%
+}
+
+% No arguments: half-diminished symbol, scaled/raised ø matching ° dimensions.
+% Uses graphicx's \scalebox and a locally measured scratch box.
+\DeclareRobustCommand{\symhalfdim}{%
+  \begingroup
+  \ulNotoSansFont\mdseries\upshape
+  \sbox{\ulsbs@dimbox}{\ulsbs@degreechar}%
+  \leavevmode
+  \raisebox{.40em}[\ht\ulsbs@dimbox][\dp\ulsbs@dimbox]{%
+    \makebox[\wd\ulsbs@dimbox][c]{%
+      \scalebox{.65}{\char"00F8\relax}%
+    }%
+  }%
+  \endgroup
+}

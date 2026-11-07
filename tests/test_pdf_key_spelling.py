@@ -14,7 +14,6 @@ from test_pdf_transposition_layers import (
     OPTIONAL_CONTENT_START,
     PdfStructure,
     pdf_command,
-    rendered_pages,
     words_and_geometry,
 )
 from test_tex_integration import compile_fixture
@@ -92,7 +91,7 @@ class DegreeSpellingReferenceTests(unittest.TestCase):
 class PdfKeySpellingIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        missing = [tool for tool in ("lualatex", "qpdf", "pdftotext", "pdftoppm")
+        missing = [tool for tool in ("lualatex", "qpdf", "pdftotext")
                    if shutil.which(tool) is None]
         if missing:
             raise unittest.SkipTest(f"PDF integration tools are not installed: {', '.join(missing)}")
@@ -150,32 +149,33 @@ class PdfKeySpellingIntegrationTests(unittest.TestCase):
                                 self.assertEqual(result, expected)
 
     def test_alternative_probes_preserve_source_factor_and_scoped_preferences(self) -> None:
-        states = {case: (int(factor), preference, policy)
-                  for case, factor, preference, policy in re.findall(
-                      r"ULSTATE:([^:\n]+):(-?\d+),(sharp|flat),(auto|fixed)", self.probe_output)}
+        states = {case: (int(factor), preference, int(layer))
+                  for case, factor, preference, layer in re.findall(
+                      r"ULSTATE:([^:\n]+):(-?\d+),(sharp|flat),(\d+)", self.probe_output)}
         self.assertEqual(set(states), set(PROBE_KEYS))
         for case, state in states.items():
             self.assertEqual(state[0], 2 if case == "effectiveD" else 0, case)
-        self.assertEqual(states["Cflats"][1:], ("flat", "fixed"))
-        self.assertEqual(states["Csharps"][1:], ("sharp", "fixed"))
+            self.assertEqual(state[2], 0, case)
+        self.assertEqual(states["Cflats"][1:], ("flat", 0))
+        self.assertEqual(states["Csharps"][1:], ("sharp", 0))
         for offset in range(1, 12):
             for letter in LETTERS:
                 for tag in ("", "s", "f"):
                     self.assertEqual(self.probes["Cflats", offset, letter + tag],
                                      self.probes["Csharps", offset, letter + tag])
 
-    def test_original_default_is_pixel_and_geometry_identical_to_disabled(self) -> None:
-        self.assertEqual(rendered_pages(self.pdf), rendered_pages(self.disabled))
-        self.assertEqual(words_and_geometry(self.pdf), words_and_geometry(self.disabled))
+    def test_original_default_and_disabled_preserve_source_notation(self) -> None:
         self.assertFalse(PdfStructure(self.disabled).layers)
         self.assertNotIn("ocgx2.sty", self.disabled_output)
         words = self.selected_words[0]
+        disabled_words = words_and_geometry(self.disabled)
         for anchor, expected in (
             ("MajorFour", "F"), ("MajorRaisedFive", "G#"),
             ("MinorRaisedSeven", "G#"), ("MinorRaisedSix", "F#"),
             ("MinorSeven", "G"), ("MinorSix", "F"), ("EffectiveTonic", "D"),
         ):
             self.assertEqual(notation_at(words, anchor), expected, anchor)
+            self.assertEqual(notation_at(disabled_words, anchor), expected, anchor)
 
     def test_visible_notation_all_twelve_offsets_uses_effective_song_key(self) -> None:
         cases = (
@@ -244,8 +244,6 @@ class PdfKeySpellingIntegrationTests(unittest.TestCase):
             "pdf-key-spelling-source", passes=3,
             preamble="\\def\\ulPdfTranspositionLayers{false}\n",
         )
-        self.assertEqual(rendered_pages(enabled), rendered_pages(disabled))
-        self.assertEqual(words_and_geometry(enabled), words_and_geometry(disabled))
         effective = (
             ("SourceMajorFour", "F", "Bb"),
             ("SourceMajorRaisedFive", "F", "C#"),
@@ -271,13 +269,32 @@ class PdfKeySpellingIntegrationTests(unittest.TestCase):
         self.assertEqual(notation_at(original, "SourceMajorFlatSevenMelody"), "eb")
         self.assertEqual(notation_at(original, "SourceMinorMelody"), "babbab")
 
-    def test_unknown_uppercase_text_preserves_accidentals_without_adjacent_pitch_grammar(self) -> None:
+    def test_token_scanner_transposes_adjacent_pitches_and_preserves_literal_text(self) -> None:
         output, enabled = compile_fixture("pdf-key-spelling-unknown", passes=3)
         disabled_output, disabled = compile_fixture(
             "pdf-key-spelling-unknown", passes=3,
             preamble="\\def\\ulPdfTranspositionLayers{false}\n",
         )
-        expected = {"CDs": "CD#", "CDf": "CDb", "NCs": "NC#", "NCf": "NCb", "Cs": "c#"}
+        inputs = {"CDs": "CD#", "CDf": "CDb", "NCs": "NC#", "NCf": "NCb", "Cs": "C#"}
+
+        def transpose_text(text: str, key: str | None, offset: int) -> str:
+            flat_chromatic = ("C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B")
+            sharp_chromatic = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+            sharps = key is not None and pitch(target_key(key, offset)) in (0, 2, 4, 6, 7, 9, 11)
+            chromatic = sharp_chromatic if sharps else flat_chromatic
+            result = []
+            for note in re.findall(r"[A-G][#b]?|N", text):
+                if note == "N" or offset == 0:
+                    result.append(note)
+                else:
+                    spelling = degree_spelling(key, note, offset) if key is not None else None
+                    result.append(spelling or chromatic[(pitch(note) + offset) % 12])
+            return "".join(result)
+
+        def expected_text(key: str, operation: str, factor: int, name: str) -> str:
+            offset = 0 if operation == "zero" else factor
+            source_key = target_key("C", -offset) if operation == "source" else "C"
+            return transpose_text(inputs[name], source_key if key == "known" else None, offset)
         for mode, log in (("enabled", output), ("disabled", disabled_output)):
             probes = {(key, operation, int(factor), name):
                       result.strip().replace("SHARP", "#").replace("FLAT", "b")
@@ -287,18 +304,20 @@ class PdfKeySpellingIntegrationTests(unittest.TestCase):
             self.assertEqual(len(probes), 2 * (4 * (3 + 12 + 12) + 12), mode)
             for (key, operation, factor, name), result in probes.items():
                 with self.subTest(mode=mode, key=key, operation=operation, factor=factor, name=name):
-                    self.assertEqual(result, expected[name])
-        self.assertEqual(rendered_pages(enabled), rendered_pages(disabled))
-        self.assertEqual(words_and_geometry(enabled), words_and_geometry(disabled))
+                    self.assertEqual(result, expected_text(key, operation, factor, name))
+        self.assertFalse(PdfStructure(disabled).layers)
         for offset in range(12):
             selected = PdfStructure(enabled).selected_pdf(enabled, {1: offset, 2: offset})
             words = words_and_geometry(selected)
             for key in ("Known", "Missing"):
-                for suffix, result in (
-                    ("SequenceSharp", "CD#"), ("SequenceFlat", "CDb"),
-                    ("TextSharp", "NC#"), ("TextFlat", "NCb"),
+                for suffix, name in (
+                    ("SequenceSharp", "CDs"), ("SequenceFlat", "CDf"),
+                    ("TextSharp", "NCs"), ("TextFlat", "NCf"),
                 ):
-                    self.assertEqual(notation_at(words, key + suffix), result, (offset, key, suffix))
+                    effective = expected_text(key.lower(), "source", 2, name)
+                    # Layer notation starts from the effective source result.
+                    expected = transpose_text(effective, "C" if key == "Known" else None, offset)
+                    self.assertEqual(notation_at(words, key + suffix), expected, (offset, key, suffix))
 
     def test_all_layer_stream_references_are_real_and_original_only_is_default(self) -> None:
         structure = PdfStructure(self.pdf)

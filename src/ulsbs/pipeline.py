@@ -55,13 +55,9 @@ from .constants import (
     RESULT_IMAGE_SUBDIRNAME,
     RESULT_MIDI_SUBDIRNAME,
     RESULT_AUDIO_SUBDIRNAME,
-    SONG_IDX_SCRIPT_REL,
-    SORT_LOCALE,
     COVERIMAGE_MODIFIED_FNAME_POSTFIX,
-    SELECTION_FNAME_PREFIX,
     CONTENT_DIRNAME,
     INCLUDE_DIRNAME,
-    TAG_DEFINITION_FILENAME,
     GENAUDIO_ALBUMTITLE,
     JSON_INCLUDE_PLAIN_LOWERCASE_LYRICS,
 )
@@ -100,7 +96,7 @@ _PRINTOUT_INPUT_FILE_PLACEHOLDER = "ULSBS-PLACEHOLDER-FOR-INPUT-FILE-PDF"
 # undefined private conditional (generic classes need not define it at all).
 MULTIKEY_DISABLED_FALLBACK_TEX = r"""\AtBeginDocument{%
   \begingroup
-  \expandafter\ifx\csname ifUL@pdflayers\endcsname\iftrue
+  \expandafter\ifx\csname ifulsbs@pdflayers\endcsname\iftrue
   \else
     \AddToHook{enddocument/afterlastpage}{\directlua{
       ulsbs_multikey = ulsbs_multikey or dofile(assert(kpse.find_file("ulsbs-multikey.lua", "tex")))
@@ -263,7 +259,7 @@ def _host_text(text: str, cfg: Config) -> str:
 
 
 def _tex_error_location(text: str, job: Job) -> tuple[Path, int, str] | None:
-    """Use native file-line-error locations, without guessing original lines."""
+    """Use TeX-reported file/line locations, without guessing original lines."""
     match = re.search(r"^([^\r\n]+?\.(?:tex|sty|cls)):(\d+):[ \t]*(.+)$", text, re.M)
     if match is None:
         return None
@@ -366,7 +362,7 @@ def require_tools(*, multikey: bool = False) -> None:
     qpdf is optional for ordinary builds. When ``multikey`` is true, also check
     its minimum version; semantic qualification still happens for every range.
     """
-    for t in ("lualatex", "texlua", "lilypond-book"):
+    for t in ("lualatex", "lilypond-book"):
         if which(t) is None:
             raise SystemExit(f"'{t}' binary not found in PATH")
     if importlib.util.find_spec("pikepdf") is None:
@@ -599,8 +595,8 @@ def make_variant_tex(job: Job, cfg: Config) -> Path:
     layers_value = "true" if layers else "false"
     txt = (
         f"\\newcommand{{\\ulPdfTranspositionLayers}}{{{layers_value}}}\n"
-        f"\\newcommand{{\\ulPdfTranspositionLayerUI}}{{{cfg.multikey_layer_ui}}}\n"
-        f"\\newcommand{{\\ulPdfTranspositionRequireSongIDs}}{{{'true' if cfg.multikey_require_song_ids else 'false'}}}\n"
+        f"\\newcommand{{\\ulPdfTranspositionLayerUi}}{{{cfg.multikey_layer_ui}}}\n"
+        f"\\newcommand{{\\ulPdfTranspositionRequireSongIds}}{{{'true' if cfg.multikey_require_song_ids else 'false'}}}\n"
         f"\\newcommand{{\\ulPdfTranspositionMinimumScale}}{{{cfg.multikey_min_chordname_scale}}}\n"
         f"\\newcommand{{\\ulMultikeyLilypondScores}}{{{'true' if layers and cfg.multikey_lilypond_scores else 'false'}}}\n"
         + (r"\providecommand{\ulScoreSystem}[3]{\includegraphics{#3}}" + "\n"
@@ -852,75 +848,6 @@ def step_lualatex_pass(
         log.write(f"\nULSBS wall time: {elapsed:.3f} seconds "
                   f"(LuaLaTeX pass {pass_no}, {'draft' if draftmode else 'full'})\n")
     return log_path, step + 1
-
-
-def step_texlua_indices(
-    ui: UI, cfg: Config, job: Job, basename: str, env: dict[str, str], step: int
-) -> int:
-    """Create title and tag indices using texlua scripts."""
-    cwd = job.compile_dir
-    txt_doc = ui.fmt_doc(job)
-
-    # Find script
-    song_idx_script = cwd / SONG_IDX_SCRIPT_REL
-    if not song_idx_script.exists():
-        song_idx_script = (
-            cwd / _JOB_ULSBS_ASSETS_DIRNAME / "tex" / "ext_packages" / "songs" / "songidx.lua"
-        )
-    if not song_idx_script.exists():
-        msg = f"songidx.lua not found at {song_idx_script}"
-        logp = cwd / f"{step:02d}_indices-error.log"
-        write_text(logp, msg)
-        raise CompileError(msg, logp)
-
-    # Title index
-    log_title = cwd / f"{step:02d}_titleidx.log"
-    _track_log(ui, log_title, "Index")
-    ui.exec_line(f"{txt_doc} {ui.fmt_step(step)} texlua (create title index)")
-    try:
-        run_cmd(
-            ["texlua", str(song_idx_script), "-l", SORT_LOCALE, "idx_title.sxd", "idx_title.sbx"],
-            cwd=cwd,
-            stdout_path=log_title,
-            stderr_to_stdout=True,
-            check=True,
-            env=env,
-        )
-    except Exception:
-        raise CompileError("Error creating song title indices!", log_title) from None
-    step += 1
-
-    # Tag index
-    project_tag_file = cfg.runtime.project_paths.include_dir / TAG_DEFINITION_FILENAME
-    if project_tag_file.exists():
-        log_tag = cwd / f"{step:02d}_tagidx.log"
-        _track_log(ui, log_tag, "Index")
-        ui.exec_line(f"{txt_doc} {ui.fmt_step(step)} texlua (create tag index)")
-        try:
-            run_cmd(
-                [
-                    "texlua",
-                    str(song_idx_script),
-                    "-l",
-                    SORT_LOCALE,
-                    "-b",
-                    str(project_tag_file),
-                    "idx_tag.sxd",
-                    "idx_tag.sbx",
-                ],
-                cwd=cwd,
-                stdout_path=log_tag,
-                stderr_to_stdout=True,
-                check=True,
-                env=env,
-            )
-        except Exception:
-            raise CompileError("Error creating tag indices!", log_tag) from None
-        step += 1
-    else:
-        ui.warning_line(f"{txt_doc} Skipping tag index: tag definition file not found",
-                        source="Index", category="skipped")
-    return step
 
 
 def step_pdf_fonts(ui: UI, cfg: Config, job: Job, basename: str, step: int) -> int:
@@ -1532,7 +1459,7 @@ def analyze_warnings(
             diagnostics.append(Diagnostic("Reporting", "unreadable-log",
                                           f"Cannot inspect {source} log: {error}", path))
             continue
-        # These native messages already have structured records above.
+        # These package messages already have structured records above.
         text = re.sub(r"^Warning: Readme for (?:audio|MIDI) directories.*$", "", text, flags=re.M)
         diagnostics.extend(parse_tool_warnings(text, source, path))
     if not isinstance(ui, _JobUI):
@@ -1544,9 +1471,9 @@ def analyze_warnings(
 def step_lualatex_convergence(
     ui: UI, cfg: Config, job: Job, basename: str, env: dict[str, str], last_tex_log: Path, step: int,
 ) -> tuple[Path, int]:
-    """Settle explicit reference requests and MULTIKEY resources before publication.
+    """Settle explicit reference/index requests and MULTIKEY resources before publication.
 
-    Share the fixed ``LUALATEX_MAX_EXTRA_PASSES`` budget between both checks.
+    Share the fixed ``LUALATEX_MAX_EXTRA_PASSES`` budget between all checks.
     Ordinary jobs inspect only the latest log; MULTIKEY jobs also validate
     pdfbase's cached property references. Unreadable inputs fail immediately;
     ordinary warnings, including undefined references without a rerun request,
@@ -1554,7 +1481,7 @@ def step_lualatex_convergence(
     Each retry refreshes the manifest through ``step_lualatex_pass``.
     """
     warning_pattern = re.compile(
-        r"^(LaTeX|Package (?:rerunfilecheck|hyperref|lastpage)) Warning:"
+        r"^(LaTeX|Package (?:rerunfilecheck|hyperref|lastpage|ulsbs-index)) Warning:"
         r"[^\n]*(?:\n(?![ \t]*$|(?:LaTeX|Package \S+) Warning:)[^\n]+)*",
         re.M,
     )
@@ -1563,6 +1490,7 @@ def step_lualatex_convergence(
         "Package rerunfilecheck": r"File[`'][^`']*\.out['`]haschanged",
         "Package hyperref": r"Reruntoget/?PageLabels(?:right|entry)",
         "Package lastpage": r"Reruntoget(?:the)?referencesright",
+        "Package ulsbs-index": r"RerunLuaLaTeXtorefreshtheindex\.",
     }
 
     for extra in range(LUALATEX_MAX_EXTRA_PASSES + 1):
@@ -1819,14 +1747,7 @@ def _compile_one_job(
                     ui.warning_line(f"Cannot inspect supplemental score diagnostics: {error}",
                                     source="Reporting", category="score-logs", log_path=results_path)
 
-        # 3) indices (if not selection)
-        if not basename.startswith(SELECTION_FNAME_PREFIX):
-            try:
-                step = step_texlua_indices(ui, cfg, job, basename, env, step)
-            except CompileError as ce:
-                die_log(ui, cfg, job, cwd=cwd, message=str(ce), log_path=ce.log_path)
-
-        # 4) lualatex pass 2 (full PDF, including image object allocation)
+        # 3) lualatex pass 2 (full PDF, including image object allocation)
         try:
             last_tex_log, step = step_lualatex_pass(
                 ui, cfg, job, basename, env, step, pass_no=2, draftmode=False
@@ -1834,7 +1755,7 @@ def _compile_one_job(
         except CompileError as ce:
             die_log(ui, cfg, job, cwd=cwd, message=str(ce), log_path=ce.log_path)
 
-        # 5) Full pass 3 resolves aux resource references from the first full pass.
+        # 4) Full pass 3 resolves aux resource references from the first full pass.
         try:
             last_tex_log, step = step_lualatex_pass(
                 ui, cfg, job, basename, env, step, pass_no=3, draftmode=False

@@ -1,0 +1,533 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Music policy: token transposition, annotation ink, meters, and repeats.
+% This file is part of the 'ulsbs' package.
+%
+% Private module loaded after song/layout/verse/chords and common typography,
+% melody lexer/voice renderers, and repeat primitives. The early
+% ulsbs-pdf-layer-setup.code.tex module supplies PDF key tables and runtime seams;
+% ulsbs.sty orchestrates loading and supplies common melody/repeat helpers.
+% Chords owns source scanning and memory; this module supplies its single-box
+% annotation renderer. Multikey loads next and replaces the visual/text seams,
+% without taking ownership of semantic source execution or stanza layout.
+%
+% Source transpose/preferred accidental state is scoped by TeX groups. Song begin
+% resets the source/layer offsets, repeat bookkeeping, and pending 4/4 meter.
+% Parsing scratch is local; meter tokens and repeat counters deliberately survive
+% inner boxes. Verse paragraph hooks provide previous-line counts for repeat ink.
+% Source offsets produce the effective original first; interactive offsets apply
+% to that result, never to the raw source for a second source transposition.
+
+\ProvidesFile{ulsbs-music.code.tex}[Musical annotations]
+
+\makeatletter
+\ExplSyntaxOn
+% Scanner contract: annotation:n replaces l__ulsbs_chord_box, never appends;
+% the scanner owns adjacency, whitespace minima, memory, and lyric measurement.
+% The two annotation flags and currentwidth retain the common ULSBS meaning.
+% The visual:nn seam receives effective-original tokens and a renderer accepting
+% one braced argument; shared effects must stay outside per-offset rendering.
+\int_new:N \l__ulsbs_music_transpose_int
+\int_new:N \l__ulsbs_music_layer_int
+\bool_new:N \l__ulsbs_music_sharps_bool
+\bool_set_false:N \l__ulsbs_music_sharps_bool
+\bool_new:N \l__ulsbs_music_lowercase_bool
+\tl_new:N \l__ulsbs_music_result_tl
+\tl_new:N \l__ulsbs_music_pending_tl
+\tl_new:N \l__ulsbs_music_effective_tl
+\int_new:N \l__ulsbs_music_accidental_int
+\int_new:N \l__ulsbs_music_letter_int
+\int_new:N \l__ulsbs_music_pitch_int
+\int_new:N \l__ulsbs_music_degree_int
+\int_new:N \l__ulsbs_music_alteration_int
+\int_new:N \l__ulsbs_music_source_letter_int
+\int_new:N \l__ulsbs_music_source_pitch_int
+\int_new:N \l__ulsbs_music_target_letter_int
+\int_new:N \l__ulsbs_music_target_pitch_int
+\clist_new:N \l__ulsbs_music_scale_clist
+\bool_new:N \l__ulsbs_music_key_bool
+\quark_new:N \q__ulsbs_music_end
+
+% Song-begin hook: repeat nesting/continuations cannot leak into the next song.
+\cs_new_protected:Npn \__ulsbs_music_reset:
+  {\int_zero:N \l__ulsbs_music_transpose_int
+   \int_zero:N \l__ulsbs_music_layer_int
+   \global\ulsbs@rep@level=0\relax\global\ulsbs@prevparlines=0\relax
+   \ulBoolReset{g__ulsbs_repeat_cont_prop}\meter{4}{4}}
+\AddToHook{ulsbs/song/begin}{\__ulsbs_music_reset:}
+
+% #1 is a semitone increment, accumulated locally rather than an absolute offset.
+\DeclareDocumentCommand \transpose {m}
+  {\int_add:Nn \l__ulsbs_music_transpose_int {#1}}
+
+% #1 is glyph-producing material. Preserve the italic bearing adjustment while
+% keeping math spacing/font calculations local to this accidental.
+\cs_new_protected:Npn \__ulsbs_music_accidental:n #1
+  {\group_begin:\mode_leave_vertical:\/\mathsurround=0pt\relax#1
+   \dim_set:Nn \l_tmpa_dim {.088142pt-\fontdimen1\font}
+   \dim_compare:nNnT {\l_tmpa_dim}<{0pt}{\kern\f@size\l_tmpa_dim}
+   \group_end:}
+
+\RenewDocumentCommand \shrp {}{\__ulsbs_music_accidental:n {\ulSharpSymbol}}
+
+\RenewDocumentCommand \flt {}{\__ulsbs_music_accidental:n {\ulFlatSymbol}}
+
+% Sanitize before argument capture, then rescan the parenthesized argument once
+% in the caller's catcode regime. endlinechar=-1 avoids a synthetic trailing line
+% while active physical newline characters in the captured source remain useful.
+\cs_set_protected:Npn \echo
+  {\group_begin:\@sanitize\__ulsbs_music_echo:n}
+
+\cs_new_protected:Npn \__ulsbs_music_echo:n #1
+  {\group_end:\group_begin:\ulEchoFont\relax
+    \endlinechar=-1\relax
+    \tex_scantokens:D {(#1)}\group_end:}
+
+% Fallback spelling preferences when no supported key supplies degree spelling.
+\DeclareDocumentCommand \prefersharps {} {\bool_set_true:N \l__ulsbs_music_sharps_bool}
+
+\DeclareDocumentCommand \preferflats {} {\bool_set_false:N \l__ulsbs_music_sharps_bool}
+
+% Melody flat glyph uses the song's size mapping when available; no mapping
+% leaves the ambient size intact. The font/raise adjustment is purely visual.
+\cs_set_protected:Npn \ulsbs@mnflatsymbol
+  {\raise.4ex\hbox{\group_begin:
+    \prop_get:NVNT \g__ulsbs_song_flat_sizes_prop \f@size \l_tmpa_tl
+      {\fontsize{\l_tmpa_tl}{\f@baselineskip}\selectfont}
+    {\kern-0.05em\ulSymbolFont\char"266D}\group_end:}}
+
+% key= describes the effective destination. Reverse only the source offset;
+% interactive layers start from effective notation and add their own offset.
+% Prepare local source/target tonic and scale tables only when key-aware spelling
+% is enabled and a parsed key exists. Missing keys retain accidental preference.
+\cs_new_protected:Npn \__ulsbs_music_prepare:
+  {\bool_set_false:N \l__ulsbs_music_key_bool
+   \ifulsbs@keytranspose
+    \tl_if_empty:NF \g__ulsbs_pdf_transpose_key_tl
+     {\bool_set_true:N \l__ulsbs_music_key_bool
+      \exp_after:wN \__ulsbs_pdf_key_use:nnn \g__ulsbs_pdf_transpose_key_tl
+      \int_if_zero:nTF {\l__ulsbs_pdf_key_minor_int}
+       {\clist_set_eq:NN \l__ulsbs_music_scale_clist \c__ulsbs_pdf_natural_clist}
+       {\clist_set_eq:NN \l__ulsbs_music_scale_clist \c__ulsbs_pdf_minor_clist}
+      \int_set_eq:NN \l__ulsbs_music_source_letter_int \l__ulsbs_pdf_key_letter_int
+      \int_set_eq:NN \l__ulsbs_music_source_pitch_int \l__ulsbs_pdf_key_pitch_int
+      \int_set_eq:NN \l__ulsbs_music_target_letter_int \l__ulsbs_pdf_key_letter_int
+      \int_set_eq:NN \l__ulsbs_music_target_pitch_int \l__ulsbs_pdf_key_pitch_int
+      \int_if_zero:nTF {\l__ulsbs_music_layer_int}
+       {\int_set:Nn \l__ulsbs_music_source_pitch_int
+         {\int_mod:nn {1200+\l__ulsbs_pdf_key_pitch_int-\l__ulsbs_music_transpose_int}{12}}
+        \__ulsbs_music_tonic:nN {\l__ulsbs_music_source_pitch_int}
+          \l__ulsbs_music_source_letter_int
+        \__ulsbs_music_tonic:nN {\l__ulsbs_music_target_pitch_int}\l_tmpa_int}
+       {\int_set:Nn \l__ulsbs_music_target_pitch_int
+         {\int_mod:nn {\l__ulsbs_pdf_key_pitch_int+\l__ulsbs_music_layer_int}{12}}
+        \__ulsbs_music_tonic:nN {\l__ulsbs_music_target_pitch_int}
+          \l__ulsbs_music_target_letter_int}}
+   \fi}
+
+% #1 is pitch class 0..11; write canonical tonic letter index to integer #2 and
+% choose the major/minor conventional accidental preference as a side effect.
+\cs_new_protected:Npn \__ulsbs_music_tonic:nN #1#2
+  {\int_if_zero:nTF {\l__ulsbs_pdf_key_minor_int}
+    {\int_set:Nn #2 {\clist_item:nn {0,1,1,2,2,3,3,4,5,5,6,6}{#1+1}}
+     \bool_set:Nn \l__ulsbs_music_sharps_bool
+       {\int_compare_p:n {\clist_item:nn {0,1,0,1,0,1,0,0,1,0,1,0}{#1+1}=0}}}
+    {\int_set:Nn #2 {\clist_item:nn {0,0,1,1,2,3,3,4,4,5,6,6}{#1+1}}
+     \bool_set:Nn \l__ulsbs_music_sharps_bool
+       {\int_compare_p:n {\clist_item:nn {1,0,1,0,0,1,0,1,0,0,1,0}{#1+1}=0}}}}
+
+% #1 is token source, #2 an output tl variable. Walk actual TeX tokens, preserving
+% spaces and copying brace groups opaquely (no recursive transposition within
+% authored arguments). Unknown macros stay unexpanded: this is not another source
+% evaluation. Export only the result across the scratch group's end.
+\cs_new_protected:Npn \__ulsbs_music_transpose:nN #1#2
+  {\group_begin:
+   \tl_clear:N \l__ulsbs_music_result_tl
+   \tl_clear:N \l__ulsbs_music_pending_tl
+   \__ulsbs_music_prepare:
+   \__ulsbs_music_scan: #1\q__ulsbs_music_end
+   \exp_args:NNNV \group_end: \tl_set:Nn #2 \l__ulsbs_music_result_tl}
+
+% #1 is an interactive offset, #2 effective-original tokens, #3 output tl. Set
+% both layer and interval locally so key preparation moves the destination, not
+% the inferred source; ambient source offsets/preferences survive this operation.
+\cs_new_protected:Npn \__ulsbs_music_transpose_alternative:nnN #1#2#3
+  {\group_begin:
+   \int_set:Nn \l__ulsbs_music_layer_int {#1}
+   \int_set:Nn \l__ulsbs_music_transpose_int {#1}
+   \__ulsbs_music_transpose:nN {#2}\l__ulsbs_music_effective_tl
+   \exp_args:NNNV \group_end: \tl_set:Nn #3 \l__ulsbs_music_effective_tl}
+
+% Sentinel terminates this token stream. Spaces/groups commit a pending A--G
+% first; groups are copied whole, keeping command arguments and scope intact.
+\cs_new_protected:Npn \__ulsbs_music_scan:
+  {\peek_meaning_remove:NTF \q__ulsbs_music_end
+    {\__ulsbs_music_commit:}
+    {\peek_meaning_remove:NTF \c_space_token
+      {\__ulsbs_music_commit:\tl_put_right:Nn \l__ulsbs_music_result_tl {~}
+       \__ulsbs_music_scan:}
+      {\peek_catcode:NTF \c_group_begin_token
+        {\__ulsbs_music_group:n}{\__ulsbs_music_token:N}}}}
+
+% #1 is group content, restored with braces after committing the preceding pitch.
+\cs_new_protected:Npn \__ulsbs_music_group:n #1
+  {\__ulsbs_music_commit:
+   \tl_put_right:Nn \l__ulsbs_music_result_tl {{#1}}
+   \__ulsbs_music_scan:}
+
+% #1 is one unexpanded token. notrans owns the next argument, which must bypass
+% pitch recognition as a unit rather than leaving its content in this scan.
+\cs_new_protected:Npn \__ulsbs_music_token:N #1
+  {\token_if_eq_meaning:NNTF #1\notrans
+    {\__ulsbs_music_commit:\__ulsbs_music_literal_argument:Nn #1}
+    {\__ulsbs_music_token_regular:N #1}}
+
+% #1 is notrans, #2 its next argument; preserve both without evaluation, then
+% resume the outer stream. This also braces an originally unbraced argument.
+\cs_new_protected:Npn \__ulsbs_music_literal_argument:Nn #1#2
+  {\tl_put_right:Nn \l__ulsbs_music_result_tl {#1{#2}}\__ulsbs_music_scan:}
+
+% Recognize literal uppercase pitch letters and accidental shorthand/macros.
+% Every other token commits the pending pitch then passes through unchanged.
+\cs_new_protected:Npn \__ulsbs_music_token_regular:N #1
+  {\str_case:enF {\token_to_str:N #1}
+    {{A}{\__ulsbs_music_pending:N #1}{B}{\__ulsbs_music_pending:N #1}
+     {C}{\__ulsbs_music_pending:N #1}{D}{\__ulsbs_music_pending:N #1}
+     {E}{\__ulsbs_music_pending:N #1}{F}{\__ulsbs_music_pending:N #1}
+     {G}{\__ulsbs_music_pending:N #1}}
+    {\str_if_eq:eeTF {\token_to_str:N #1}{\c_hash_str}
+      {\__ulsbs_music_sign:n {1}}
+      {\str_if_eq:eeTF {\token_to_str:N #1}{&}
+        {\__ulsbs_music_sign:n {-1}}
+        {\token_if_eq_meaning:NNTF #1\shrp
+          {\__ulsbs_music_sign:n {1}}
+          {\token_if_eq_meaning:NNTF #1\flt
+            {\__ulsbs_music_sign:n {-1}}
+            {\__ulsbs_music_commit:\tl_put_right:Nn \l__ulsbs_music_result_tl {#1}}}}}}
+   \__ulsbs_music_scan:}
+
+% #1 begins a possible pitch; delay emission for a following accidental token.
+\cs_new_protected:Npn \__ulsbs_music_pending:N #1
+  {\__ulsbs_music_commit:\tl_set:Nn \l__ulsbs_music_pending_tl {#1}
+   \int_zero:N \l__ulsbs_music_accidental_int}
+
+% #1 is +1/-1. Attach to and commit a pending pitch, or emit a standalone glyph
+% macro when there is no pitch. Expansion protects that macro from execution.
+\cs_new_protected:Npn \__ulsbs_music_sign:n #1
+  {\tl_if_empty:NTF \l__ulsbs_music_pending_tl
+    {\tl_put_right:Nx \l__ulsbs_music_result_tl
+      {\int_compare:nNnTF {#1}={1}{\exp_not:N \shrp}{\exp_not:N \flt}}}
+    {\int_set:Nn \l__ulsbs_music_accidental_int {#1}\__ulsbs_music_commit:}}
+
+% Convert a pending letter/accidental to pitch, spell only for nonzero offsets,
+% append protected glyph tokens, then clear the pending letter. Zero-offset
+% notation is not enharmonically respelled merely because layers are enabled.
+\cs_new_protected:Npn \__ulsbs_music_commit:
+  {\tl_if_empty:NF \l__ulsbs_music_pending_tl
+    {\int_set:Nn \l__ulsbs_music_letter_int
+      {\str_case:Vn \l__ulsbs_music_pending_tl {{C}{0}{D}{1}{E}{2}{F}{3}{G}{4}{A}{5}{B}{6}}}
+     \int_set:Nn \l__ulsbs_music_pitch_int
+      {\int_mod:nn {1200+\clist_item:Nn \c__ulsbs_pdf_natural_clist
+        {\l__ulsbs_music_letter_int+1}+\l__ulsbs_music_accidental_int
+        +\l__ulsbs_music_transpose_int}{12}}
+     \int_if_zero:nF {\l__ulsbs_music_transpose_int}
+      {\bool_if:NTF \l__ulsbs_music_key_bool
+        {\__ulsbs_music_spell_key:}{\__ulsbs_music_spell_pitch:}}
+     \tl_put_right:Nx \l__ulsbs_music_result_tl
+      {\clist_item:Nn \c__ulsbs_pdf_letters_clist {\l__ulsbs_music_letter_int+1}
+       \int_case:nn {\l__ulsbs_music_accidental_int}
+        {{-1}{\exp_not:N \flt}{1}{\exp_not:N \shrp}}}
+     \tl_clear:N \l__ulsbs_music_pending_tl}}
+
+% Preserve source scale degree and signed chromatic alteration in the target
+% major/natural-minor scale. Fall back to pitch spelling rather than generating
+% double accidentals; this mutates the pending letter/accidental scratch values.
+\cs_new_protected:Npn \__ulsbs_music_spell_key:
+  {\int_set:Nn \l__ulsbs_music_degree_int
+    {\int_mod:nn {7+\l__ulsbs_music_letter_int-\l__ulsbs_music_source_letter_int}{7}}
+   \int_set:Nn \l__ulsbs_music_alteration_int
+    {\int_mod:nn {30+\clist_item:Nn \c__ulsbs_pdf_natural_clist
+      {\l__ulsbs_music_letter_int+1}+\l__ulsbs_music_accidental_int
+      -\l__ulsbs_music_source_pitch_int-\clist_item:Nn \l__ulsbs_music_scale_clist
+      {\l__ulsbs_music_degree_int+1}}{12}-6}
+   \int_set:Nn \l__ulsbs_music_letter_int
+    {\int_mod:nn {\l__ulsbs_music_target_letter_int+\l__ulsbs_music_degree_int}{7}}
+   \int_set:Nn \l__ulsbs_music_accidental_int
+    {\int_mod:nn {30+\l__ulsbs_music_target_pitch_int
+      +\clist_item:Nn \l__ulsbs_music_scale_clist {\l__ulsbs_music_degree_int+1}
+      +\l__ulsbs_music_alteration_int-\clist_item:Nn \c__ulsbs_pdf_natural_clist
+      {\l__ulsbs_music_letter_int+1}}{12}-6}
+   \int_compare:nNnT {\int_abs:n {\l__ulsbs_music_accidental_int}}>{1}
+     {\__ulsbs_music_spell_pitch:}}
+
+% Keyless/enharmonic fallback uses the current sharp/flat preference tables.
+\cs_new_protected:Npn \__ulsbs_music_spell_pitch:
+  {\bool_if:NTF \l__ulsbs_music_sharps_bool
+    {\int_set:Nn \l__ulsbs_music_letter_int
+      {\clist_item:nn {0,0,1,1,2,3,3,4,4,5,5,6}{\l__ulsbs_music_pitch_int+1}}}
+    {\int_set:Nn \l__ulsbs_music_letter_int
+      {\clist_item:nn {0,1,1,2,2,3,4,4,5,5,6,6}{\l__ulsbs_music_pitch_int+1}}}
+   \int_set:Nn \l__ulsbs_music_accidental_int
+    {\l__ulsbs_music_pitch_int-\clist_item:Nn \c__ulsbs_pdf_natural_clist
+      {\l__ulsbs_music_letter_int+1}}}
+
+% #1 is ready-to-print musical tokens; lowercase is a melody typography choice,
+% not a pitch transform and must not inherit another transposition pass.
+\cs_new_protected:Npn \__ulsbs_music_print:n #1
+  {\bool_if:NTF \l__ulsbs_music_lowercase_bool
+    {\tl_lower_case:n {#1}}
+    {#1}}
+% Default visual seam calls renderer #2 on effective tokens #1 once. Multikey
+% replaces it with overlays only for eligible musical visuals, not shared source.
+\cs_if_exist:NF \__ulsbs_music_visual:nn
+  {\cs_new_protected:Npn \__ulsbs_music_visual:nn #1#2 {#2{#1}}}
+
+% #1 receives source transposition before optional multikey token splitting.
+\cs_new_protected:Npn \__ulsbs_music_text:n #1
+  {\__ulsbs_music_transpose:nN {#1}\l__ulsbs_music_effective_tl
+   \cs_if_exist:NTF \__ulsbs_multikey_chord_text:n
+     {\exp_args:NV \__ulsbs_multikey_chord_text:n \l__ulsbs_music_effective_tl}
+     {\exp_args:NV \__ulsbs_music_print:n \l__ulsbs_music_effective_tl}}
+
+% Public source-text entry; multikey installs its formatting-aware version later.
+\DeclareDocumentCommand \transposehere {m} {\__ulsbs_music_text:n {#1}}
+
+% #1 prints with source/layer offsets zeroed locally, restoring both on exit.
+\DeclareDocumentCommand \notrans {m}
+  {\group_begin:\int_zero:N \l__ulsbs_music_transpose_int
+    \int_zero:N \l__ulsbs_music_layer_int
+    \transposehere{#1}
+    \group_end:}
+
+% #1 is one raw annotation, optionally beginning <melody>. Reset common flags,
+% replace the scanner's single box. This does not append to the run or scan lyrics;
+% the chord owner performs those operations afterward.
+\cs_new_protected:Npn \__ulsbs_music_annotation:n #1
+  {\ulsbs@annotationvisiblefalse\ulsbs@annotationminimumdisabledfalse
+   \__ulsbs_music_annotation_dispatch:w #1\q__ulsbs_music_end}
+
+% Peek without expansion: only a literal leading < selects the melody reader.
+\cs_new_protected:Npn \__ulsbs_music_annotation_dispatch:w
+  {\peek_charcode:NTF < {\__ulsbs_music_annotation_melody:w}
+    {\__ulsbs_music_annotation_chord:w}}
+
+% #1 is the chord tail. Empty ordinary tails have no ink; excluded/replay tails
+% still enter printchord. Adjacent visible labels receive a small inter-label kern.
+\cs_new_protected:Npn \__ulsbs_music_annotation_chord:w #1\q__ulsbs_music_end
+  {\hbox_set:Nn \l__ulsbs_chord_box
+    {\bool_if:nT {!\tl_if_empty_p:n {#1} || \l__ulsbs_chord_excluded_bool}
+       {\ulsbs@pdfchordtrue\ulPrintChord{
+         \bool_if:NT \l__ulsbs_chord_adjacent_bool {\kern.15em}
+         \vphantom{/}\transposehere{#1}\kern.2em}}}
+   \dim_compare:nNnT {\box_wd:N \l__ulsbs_chord_box}>{0pt}
+     {\ulsbs@annotationvisibletrue}}
+
+% #1 is the single leading melody block, #2 chord tail. Reject another block in
+% the tail; compose the chord first, then overlay the parsed melody and beats.
+\cs_new_protected:Npn \__ulsbs_music_annotation_melody:w <#1>#2\q__ulsbs_music_end
+  {\tl_if_in:nnT {#2}{<}
+     {\PackageError{ulsbs}{Malformed~melody~block:~multiple~blocks~in~one~chord~annotation}
+       {Use~adjacent~annotations;~prefix~an~earlier~block~with~!~when~it~should~share~the~next~anchor.}}
+   \__ulsbs_music_annotation_chord:w #2\q__ulsbs_music_end
+   \__ulsbs_music_parse:w #1\q__ulsbs_music_end\__ulsbs_music_melody:}
+
+% A leading ! requests zero melody advance; the common lexer owns all remaining
+% voice/beat grammar and fills its primary/secondary sequences.
+\cs_new_protected:Npn \__ulsbs_music_parse:w
+  {\ulsbs@annotationminimumdisabledfalse
+   \peek_charcode_remove:NTF !
+     {\ulsbs@melodyzeroadvancetrue\__ulsbs_music_parse_content:w}
+     {\ulsbs@melodyzeroadvancefalse\__ulsbs_music_parse_content:w}}
+
+% #1 is melody content after the optional !; remove the private stream sentinel
+% before handing the unexpanded payload to the common melody grammar.
+\cs_new_protected:Npn \__ulsbs_music_parse_content:w #1\q__ulsbs_music_end
+  {\__ulsbs_melody_parse:n {#1}}
+
+% Measure a neutral slot without PDF layers, render each voice once through its
+% visual seam, and calculate beat extent separately. Overlay retained voice/beat
+% boxes on the chord; only visible extents affect advance unless ! opts out.
+% In that case disable the scanner's whitespace minimum as well.
+\cs_new_protected:Npn \__ulsbs_music_melody:
+  {\sbox\ulsbs@melodylayerbox{{\ulsbs@pdfsongfalse\ulChordFont\ulsbs@melodystyle{primary}\ulsbs@note{C}}}
+   \ulsbs@melodyslotwidth=\wd\ulsbs@melodylayerbox\relax
+   \ifulsbs@melodyprimarylow
+     \def\ulsbs@primaryheight{\dimexpr\ulMelodyLowHeightFactor ex\relax}
+     \ifulsbs@melodysecondarybelow
+       \def\ulsbs@secondaryheight{\dimexpr\ulMelodyLowestHeightFactor ex\relax}
+     \else\ifulsbs@melodysecondarysame
+       \let\ulsbs@secondaryheight\ulsbs@primaryheight
+     \else\def\ulsbs@secondaryheight{\dimexpr\ulMelodyNormalHeightFactor ex\relax}\fi\fi
+   \else
+     \def\ulsbs@primaryheight{\dimexpr\ulMelodyNormalHeightFactor ex\relax}
+     \ifulsbs@melodysecondarybelow
+       \def\ulsbs@secondaryheight{\dimexpr\ulMelodyLowHeightFactor ex\relax}
+     \else\ifulsbs@melodysecondarysame
+       \let\ulsbs@secondaryheight\ulsbs@primaryheight
+     \else\def\ulsbs@secondaryheight{\dimexpr\ulMelodyHighHeightFactor ex\relax}\fi\fi
+   \fi
+   \sbox\ulsbs@melodyprimarybox{\ulsbs@pdfchordtrue\ulChordFont
+     \__ulsbs_melody_sequence:Nnn \l__ulsbs_melody_primary_seq {\ulsbs@melodystyle{primary}}{\ulsbs@primaryheight}}
+   \sbox\ulsbs@melodysecondarybox{\ulsbs@pdfchordtrue\ulChordFont
+     \__ulsbs_melody_sequence:Nnn \l__ulsbs_melody_secondary_seq {\ulsbs@melodystyle{secondary}}{\ulsbs@secondaryheight}}
+   \ifulShowNotes\ifdefined\ulsbs@melodynotesdisabled\else
+     \__ulsbs_melody_mark_note_visible:N \l__ulsbs_melody_primary_seq
+     \__ulsbs_melody_mark_note_visible:N \l__ulsbs_melody_secondary_seq
+   \fi\fi
+   \sbox\ulsbs@melodylayerbox{\ulsbs@bmdraw}
+   \ulsbs@melodybeatwidth=\wd\ulsbs@melodylayerbox\relax
+   \ulsbs@melodybeatextent=0pt\relax
+   \ifulShowBeats\ifdefined\ulsbs@beatsdisabled\else
+     \__ulsbs_melody_beat_extent:N \l__ulsbs_melody_primary_seq
+     \__ulsbs_melody_beat_extent:N \l__ulsbs_melody_secondary_seq
+     \ifdim\ulsbs@melodybeatextent>0pt\relax\ulsbs@annotationvisibletrue\fi
+   \fi\fi
+   \sbox\ulsbs@melodybeatbox{\rlap{\__ulsbs_melody_beats:N \l__ulsbs_melody_primary_seq}
+     \rlap{\__ulsbs_melody_beats:N \l__ulsbs_melody_secondary_seq}}
+   \dim_set:Nn \l_tmpa_dim {\box_wd:N \l__ulsbs_chord_box}
+   \ifulsbs@melodyzeroadvance\ulsbs@annotationminimumdisabledtrue
+   \else
+     \dim_set:Nn \l_tmpa_dim {\dim_max:nn {\l_tmpa_dim}
+       {\dim_max:nn {\wd\ulsbs@melodyprimarybox}
+         {\dim_max:nn {\wd\ulsbs@melodysecondarybox}{\ulsbs@melodybeatextent}}
+         +\dim_max:nn {0pt}{\ulsbs@melodyoffset}}}
+   \fi
+   \hbox_set:Nn \l__ulsbs_chord_box
+    {\rlap{\box_use:N \l__ulsbs_chord_box}
+     \rlap{\kern\ulsbs@melodyoffset\copy\ulsbs@melodyprimarybox}
+     \rlap{\kern\ulsbs@melodyoffset\copy\ulsbs@melodysecondarybox}
+     \rlap{\kern\ulsbs@melodyoffset\copy\ulsbs@melodybeatbox}\kern\l_tmpa_dim}}
+
+% Pure visual renderer for pitch tokens #1; circle/tag geometry stays shared.
+\cs_new_protected:Npn \__ulsbs_music_circle:n #1
+  {\makebox[0pt][l]{\ulsbs@mntag}\circled{\__ulsbs_music_print:n {#1}}}
+
+% [#1] is raise height, #2 pitch text or unpitched /. Honor visibility before
+% rendering; pitched tokens transpose once before entering the multikey seam.
+\RenewDocumentCommand \ulsbs@note {O{\dimexpr\ulMelodyNormalHeightFactor ex\relax} m}
+  {\ifulShowNotes\ifdefined\ulsbs@melodynotesdisabled\else
+    \group_begin:
+    \bool_set_true:N \l__ulsbs_music_lowercase_bool
+    \renewcommand{\ulSharpSymbol}{\ulsbs@mnsharpsymbol}
+    \renewcommand{\ulFlatSymbol}{\ulsbs@mnflatsymbol}
+    \raisebox{#1}{\ulsbs@mnsymbolstyle
+      \str_if_eq:nnTF {#2}{/}{\__ulsbs_music_circle:n {/}}
+       {\__ulsbs_music_transpose:nN {#2}\l__ulsbs_music_effective_tl
+        \exp_args:NV \__ulsbs_music_visual:nn \l__ulsbs_music_effective_tl
+          {\__ulsbs_music_circle:n}}}
+    \group_end:
+   \fi\fi}
+
+% These rule primitives and the shipout coalescer are already owned ULSBS ink.
+% Paragraph hooks supply previous line count and invoke this prefix.
+\cs_new_protected:Npn \__ulsbs_music_repeat_prefix: {\ulsbs@rep@drawbars}
+
+% End any current paragraph before globally pushing repeat nesting and a unique
+% serial. Paragraph hooks use these IDs for continuous bars across wrapped lines.
+\cs_set_protected:Npn \beginrep
+  {\mode_if_horizontal:T {\par}
+   \global\advance\ulsbs@rep@level 1\relax
+   \global\advance\ulsbs@rep@serial 1\relax
+   \cs_gset:cpx {ulsbs@rep@id@\the\ulsbs@rep@level}{\the\ulsbs@rep@serial}
+   \ulBoolSetFalse{g__ulsbs_repeat_cont_prop}{\the\ulsbs@rep@level}\ignorespaces}
+
+% Close a repeat after ending its paragraph; wrapped final lines need an extra
+% bar prefix before the end marker. Unmatched ends warn without underflowing.
+\cs_set_protected:Npn \endrep
+  {\mode_if_horizontal:T {\par}
+   \int_compare:nNnTF {\ulsbs@rep@level}>{0}
+    {\ifnum\ulsbs@prevparlines>1\relax
+       \advance\ulsbs@prevparlines by -1\relax\nointerlineskip
+        \hbox to 0pt{\kern\l__ulsbs_verse_indent_dim\ulsbs@rep@drawbars}
+     \fi
+     \ulsbs@rep@endmarker\ulBoolSetFalse{g__ulsbs_repeat_cont_prop}{\the\ulsbs@rep@level}
+     \global\advance\ulsbs@rep@level -1\relax}
+    {\PackageWarning{ulsbs}{Unmatched~\string\endrep:~ignored}}
+   \ignorespaces}
+
+% Inline left/right repeat signs share common bar-height metrics and add an
+% upper colon in chorded mode. They do not change repeat nesting state.
+\cs_set_protected:Npn \lrep
+  {{\color{ulRepetitionSignColor}\ulsbs@rep@setbarhtbase
+    \vrule width1.618034\ulRepeatBarWidth height\ulsbs@tmp@rep@barhtbase depth\ulRepeatBarDepth
+    \ifulChorded\rlap{\raisebox{\ulChordLineBaselineSkip}{:}}\fi :\kern.25ex}}
+
+\cs_set_protected:Npn \rrep
+  {{\color{ulRepetitionSignColor}\ulsbs@rep@setbarhtbase\kern.25ex
+    \ifulChorded\rlap{\raisebox{\ulChordLineBaselineSkip}{:}}\fi :
+    \vrule width1.618034\ulRepeatBarWidth height\ulsbs@tmp@rep@barhtbase depth\ulRepeatBarDepth}}
+
+% #1 is repeat-count text; prep raises the same mark using baseline policy.
+\cs_set_protected:Npn \rep #1 {{\color{ulRepetitionSignColor}(\texttimes#1)}}
+
+\cs_set_protected:Npn \prep #1
+  {\raisebox{\ifulsbs@baselineincreased 2ex\else 1ex\fi}
+     {{\color{ulRepetitionSignColor}\rep{#1}:}}}
+\tl_new:N \l__ulsbs_music_meter_top_tl
+\tl_new:N \l__ulsbs_music_meter_bottom_tl
+% Initial lyric-only first-token bars retain common initialization's enabled ink.
+\bool_new:N \l__ulsbs_music_measure_enabled_bool
+\bool_set_true:N \l__ulsbs_music_measure_enabled_bool
+\box_new:N \l__ulsbs_music_meter_top_box
+\box_new:N \l__ulsbs_music_meter_bottom_box
+\newattribute\__ulsbs_music_measure_attribute
+\int_const:Nn \c__ulsbs_music_measure_attribute_int {\allocationnumber}
+
+% #1/#2 are pending top/bottom meter tokens, globally retained across inner boxes
+% until the next enabled measurebar consumes and clears them.
+\cs_set_protected:Npn \meter #1#2
+  {\tl_gset:Nn \l__ulsbs_music_meter_top_tl {#1}
+   \tl_gset:Nn \l__ulsbs_music_meter_bottom_tl {#2}}
+
+% Render one enabled bar with pending meter. Adjacent bars are recognized from
+% an attribute on the last emitted vlist, not by expanding source or consulting
+% replay state. Preserve surrounding glue; consecutive bar nodes get 1em spacing.
+% Measure meter tokens once into retained boxes, then consume them in the vbox.
+\cs_set_protected:Npn \measurebar
+  {\bool_if:NT \l__ulsbs_music_measure_enabled_bool
+   {
+    \ifhmode
+      \skip_set:Nn \l_tmpa_skip {\lastskip}\unskip
+      % Inspect the last typeset node, not source tokens or replay state.
+      \ifnum\directlua{
+        local~n=tex.nest.top.tail;
+        tex.sprint(n~and~n.id==node.id('vlist')~and~node.has_attribute(n,
+          \int_use:N\c__ulsbs_music_measure_attribute_int)==1~and~1~or~0)
+      }=1\relax
+        \penalty100\hskip1em\relax
+      \else\penalty100\hskip\l_tmpa_skip\relax\fi
+    \fi
+    \mode_leave_vertical:
+    \hbox_set:Nn \l__ulsbs_music_meter_top_box
+      {{\ulMeterFont\tl_use:N \l__ulsbs_music_meter_top_tl}}
+    \hbox_set:Nn \l__ulsbs_music_meter_bottom_box
+      {{\ulMeterFont\tl_use:N \l__ulsbs_music_meter_bottom_tl}}
+    \dim_set:Nn \l_tmpa_dim {\dim_max:nn {.5pt}
+      {\dim_max:nn {\box_wd:N \l__ulsbs_music_meter_top_box}
+        {\box_wd:N \l__ulsbs_music_meter_bottom_box}}}
+    \dim_set:Nn \l_tmpb_dim {\dim_max:nn {0pt}
+      {\baselineskip-2pt-\box_ht:N \l__ulsbs_music_meter_top_box
+       -\box_dp:N \l__ulsbs_music_meter_top_box
+       -\box_ht:N \l__ulsbs_music_meter_bottom_box
+       -\box_dp:N \l__ulsbs_music_meter_bottom_box
+       -\tl_if_empty:NTF \l__ulsbs_music_meter_top_tl
+         {\tl_if_empty:NTF \l__ulsbs_music_meter_bottom_tl {0pt}{.75pt}}{.75pt}}}
+    \vbox~attr~\c__ulsbs_music_measure_attribute_int~1~{\offinterlineskip
+      \hbox to\l_tmpa_dim{\hfil\box_use_drop:N \l__ulsbs_music_meter_top_box\hfil}
+      \hbox to\l_tmpa_dim{\hfil\box_use_drop:N \l__ulsbs_music_meter_bottom_box\hfil}
+      \tl_if_empty:NTF \l__ulsbs_music_meter_top_tl
+        {\tl_if_empty:NF \l__ulsbs_music_meter_bottom_tl {\kern.75pt}}
+        {\kern.75pt}
+      \hbox to\l_tmpa_dim{\hfil\color{ulMeasureBarColor}
+        \vrule width.5pt height\l_tmpb_dim\hfil}}
+    \meter{}{}
+   }}
+
+% #1/#2 set and consume meter only when bar ink is enabled; disabled use leaves
+% the existing pending meter untouched.
+\cs_set_protected:Npn \mbar #1#2
+  {\bool_if:NT \l__ulsbs_music_measure_enabled_bool
+     {\meter{#1}{#2}\measurebar}}
+\ExplSyntaxOff
+\makeatother

@@ -3,6 +3,57 @@
 This file documents the release workflow for the repository maintainer. It is
 public intentionally and must not contain credentials, tokens, or other secrets.
 
+## Engine Maintenance
+
+Only LuaLaTeX is supported. `ulsbs.sty` loads required companion modules.
+Preserve the documented public authoring API when changing internals.
+[Architecture](ARCHITECTURE.md#song-engine) maps module owners,
+extension hooks, index snapshots and PDF contracts; the
+[writing guide](WRITING_SONGBOOKS.md) is the public syntax reference. The regression
+suite tests current engine behavior and operational contracts.
+
+Before distributing an engine change:
+
+- Run `./ulsbs-test` in the supported compiler container, including normalized
+  TeX and Python integration checks. A focused test run alone is not a release
+  gate. Inspect wheel/sdist and installed-package assets as well as source-tree
+  lookup; all required `.code.tex` and `.lua` companions must be included and the
+  old `songs.sty`/`songidx.lua` runtime must be absent.
+- Validate a standalone third-party lyrics/chords book with manual
+  draft/full/full LuaLaTeX and no upstream package installed. Validate fresh and
+  retained builds, separate output directories and convergence after index edits.
+  A corrupt/aborted snapshot must diagnose rather than silently reuse stale data.
+- For rendering changes, inspect representative affected books and variants,
+  including long songs, selections, indices or multikey scores where relevant.
+  Broaden coverage when the change warrants it, rather than requiring a complete
+  consumer-corpus matrix for every edit. Default styling is allowed to evolve;
+  there is no legacy pixel/PDF compatibility requirement.
+- Check content, pagination/navigation and ID/occurrence semantics separately
+  from pixels. Inspect remaining visual differences explicitly rather than
+  assuming historical byte identity. Check all twelve layer names/defaults and
+  print policy, effective-original geometry, shipped-page metadata, normal PDF
+  title/author/rights XMP, resource closure, font sharing and paired range hashes.
+  ULSBS multikey JSON belongs in the external index, not PDF XMP. Use existing
+  PDF.js/Poppler tests where applicable.
+- Compare wall time and peak memory with matching toolchain, hardware,
+  parallelism and cold/warm caches. Keep evidence of material regressions before
+  optimizing. A concurrent wall-clock measurement is not isolated CPU cost.
+- Preserve the finite collation policy: add reviewed weights and fixtures for a
+  newly supported character rather than falling back to the host locale. All
+  declared title/author/tag `.sbx` paths are generated job-local outputs. Keep
+  authored fragments outside generated filenames before upgrading; the engine
+  may replace or clear them, without a manual-author fallback.
+- Preserve Kevin W. Hamlen's copyright and attribution for adapted material.
+  The upstream songs v3.1 `README`, `songs.dtx` source and `songidx.lua` grant
+  GPL version 2 or later. ULSBS uses the later-version option for its GPL
+  3-or-later derivative implementation. Keep the README acknowledgement and
+  packaged `LICENSE` and adapted-source notices.
+
+Keep runtime changes and consumer-corpus changes separate in review. Release
+validation must not modify the consumer's song sources to make a test pass. The runbook below
+describes explicit maintainer actions; validation itself does not authorize a
+commit, tag, push or release.
+
 ## Source release runbook
 
 The ULSBS Python package and bundled VS Code extension normally use the same

@@ -24,33 +24,63 @@
   },
 
   "Secondary melody position (ULSBS)": {
-    "prefix": "melodySecondaryPosition",
-    "body": "\\melodySecondaryPosition{${1|above,below,same|}}",
+    "prefix": "ulMelodySecondaryPosition",
+    "body": "\\ulMelodySecondaryPosition{${1|above,below,same|}}",
     "description": "Set the secondary melody position in the current TeX scope; same overlays the primary lane."
   },
 
   "Primary melody position (ULSBS)": {
-    "prefix": "melodyPrimaryPosition",
-    "body": "\\melodyPrimaryPosition{${1|normal,low|}}",
+    "prefix": "ulMelodyPrimaryPosition",
+    "body": "\\ulMelodyPrimaryPosition{${1|normal,low|}}",
     "description": "Set the primary melody position in the current TeX scope; normal is the default."
   },
 
   "Melody style mapping (ULSBS)": {
-    "prefix": "melodyStyleMapping",
-    "body": "\\melodyStyleMapping{${1|normal,swapped|}}",
+    "prefix": "ulMelodyStyleMapping",
+    "body": "\\ulMelodyStyleMapping{${1|normal,swapped|}}",
     "description": "Set the primary/secondary visual style mapping in the current TeX scope."
   },
 
-  "begin{songs} ... end{songs} (ULSBS)": {
-    "prefix": [ "begin{songs}", "\\begin{songs}" ],
+  "begin{ulSongs} ... end{ulSongs} (ULSBS)": {
+    "prefix": [ "begin{ulSongs}", "\\begin{ulSongs}" ],
     "body": [
-      "\\begin{songs}",
+      "\\begin{ulSongs}{${1:titleidx,authidx,tagidx}}",
       "\t$0",
-      "\\end{songs}"
+      "\\end{ulSongs}"
     ],
-    "description": "Insert songs environment. Songs must be within songs environments."
+    "description": "Insert ulSongs with its required index list (empty to collect no indices). Songs must be within ulSongs environments."
   },
 
+
+  "Tag-definition file (ULSBS)": {
+    "prefix": "ulTagFile",
+    "body": "\\ulTagFile{${1:tags.txt}}",
+    "description": "Preamble-only tag filename setter. An explicit missing file fails without default fallback."
+  },
+
+  "Title index declaration (ULSBS)": {
+    "prefix": "ulNewIndex",
+    "body": "\\ulNewIndex{${1:customidx}}{${2:idx_custom}}",
+    "description": "Declare a title index with a custom identifier and filename stem in the preamble."
+  },
+
+  "Author index declaration (ULSBS)": {
+    "prefix": "ulNewAuthorIndex",
+    "body": "\\ulNewAuthorIndex{${1:customidx}}{${2:idx_custom}}",
+    "description": "Declare a generated author index with a custom identifier and filename stem in the preamble."
+  },
+
+  "Tag index declaration (ULSBS)": {
+    "prefix": "ulNewTagIndex",
+    "body": "\\ulNewTagIndex{${1:customidx}}{${2:idx_custom}}",
+    "description": "Declare a tag index with a custom identifier and filename stem in the preamble."
+  },
+
+  "Tag index font (ULSBS)": {
+    "prefix": "ulIndexTagFont",
+    "body": "\\renewcommand{\\ulIndexTagFont}{${1:\\bfseries}}",
+    "description": "Customize the tag-index heading font."
+  },
 
   "begin{translation} ... end{translation} (ULSBS)": {
     "prefix": [ "translation", "\\begin{translation}" ],
@@ -75,11 +105,11 @@
   "begin{passage} ... end{passage} (ULSBS)": {
     "prefix": [ "passage", "\\begin{passage}" ],
     "body": [
-      "\\begin{passage}[$1]",
+      "\\begin{passage}[$1]{${2:Title}}",
       "\t$0",
       "\\end{passage}"
     ],
-    "description": "Insert passage environment"
+    "description": "Insert passage with an optional language code and a required title argument (which may be empty)."
   },
 
   "begin{feeler} ... end{feeler} (ULSBS)": {

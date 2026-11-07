@@ -3,31 +3,27 @@
 %
 % Post-setup for bass clef songbook variant.
 % This file is part of the 'ulsbs' package.
+%
+% Part of the system for automatically creating bass clef variant of a book.
+% This file contains instructions for after loading the ulsbs package file.
+%
+% When compiling a bassclef variant, this file is automatically appended as an
+% input include right after the the main songbook document's \documentclass
+% invocation. The document class must be 'ulsbs-songbook' or one whose name
+% starts with 'ulsbs-songbook' (and loads ulsbs.sty); otherwise the variant
+% cannot be produced.
+%
+% Note that ULSBS-EXTRA-VARIANTS: bassclef, <...> must be defined in the
+% songbook main document also.
 
-%% ulsbs-internal-bassclefbook-postsetup.tex
-%% =========================================
-%%
-%% Part of the system for automatically creating bass clef variant of a book.
-%% This file contains instructions for after loading the ulsbs package file.
-%%
-%% When compiling a bassclef variant, this file is automatically appended as an
-%% input include right after the the main songbook document's \documentclass
-%% invocation. The document class must be 'ulsbs-songbook' or one whose name
-%% starts with 'ulsbs-songbook' (and loads ulsbs.sty); otherwise the variant
-%% cannot be produced.
-%%
-%% Note that ULSBS-EXTRA-VARIANTS: bassclef, <...> must be defined in the
-%% songbook main document also.
-%%
-
-\bassclefbooktrue
+\ulBassclefBook{true}
 
 \chordsoff
 \measureson
 
-\showlilypondtrue
-\shownotesfalse
-\showaltchordsfalse
+\ulShowLilypond{true}
+\ulShowNotes{false}
+\ulShowAltChords{false}
 
-\baselineadj=+1.5pt plus 0pt minus 0pt
+\ulBaselineAdjustment=+1.5pt plus 0pt minus 0pt
 \hypersetup{pdftitle={\ulThisBookTitle { (\ulBookBassclefVariantText)}}}

@@ -30,8 +30,6 @@ result
 
 # result documents
 *.pdf
-!misc/ext_package_songs_distribution/songs.pdf
-!misc/*.pdf
 
 # Python
 __pycache__

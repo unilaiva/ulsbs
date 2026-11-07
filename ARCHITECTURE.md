@@ -5,8 +5,15 @@ and compilation, start with the [README](README.md). For song syntax and book
 customization, use [Writing Songbooks](WRITING_SONGBOOKS.md).
 
 - [Developer Navigation](#developer-navigation)
+- [Song Engine](#song-engine)
+  - [Module loading and assets](#module-loading-and-assets)
+  - [Reading and documenting runtime code](#reading-and-documenting-runtime-code)
+  - [Song and page lifecycle](#song-and-page-lifecycle)
+  - [Annotation scanner contract](#annotation-scanner-contract)
+- [Index Lifecycle](#index-lifecycle)
 - [Fixed Policies and Version Ownership](#fixed-policies-and-version-ownership)
 - [PDF Font Sharing](#pdf-font-sharing)
+- [Build Diagnostics](#build-diagnostics)
 - [Multikey Books](#multikey-books)
   - [Build jobs and publication](#build-jobs-and-publication)
   - [PDF passes and resources](#pdf-passes-and-resources)
@@ -20,6 +27,8 @@ customization, use [Writing Songbooks](WRITING_SONGBOOKS.md).
   - [Viewer compatibility](#viewer-compatibility)
   - [Validation and performance](#validation-and-performance)
 - [Syntax Migration](#syntax-migration)
+  - [V1 melody syntax](#v1-melody-syntax)
+  - [V2 naming](#v2-naming)
 - [Testing](#testing)
 
 ## Developer Navigation
@@ -32,15 +41,390 @@ The main entry points for extending or debugging the engine are:
 | Instrument-variant post-setup files | `src/ulsbs/assets/tex/` |
 | CLI and public configuration | `src/ulsbs/cli.py`, `src/ulsbs/config.py`, `ulsbs-config-example.toml` |
 | Build orchestration and jobs | `src/ulsbs/pipeline.py`, `src/ulsbs/jobs.py` |
+| Warning parsing and reporting | `src/ulsbs/diagnostics.py`, `src/ulsbs/pipeline.py` |
 | Range extraction and validation | `src/ulsbs/multikey_ranges.py` |
 | Family installation and deployment | `src/ulsbs/multikey_publish.py`, `src/ulsbs/deploy.py` |
 | Score alternatives and persistent cache | `src/ulsbs/lilypond_scores.py`, `src/ulsbs/lilypond_score_cache.py` |
 | Shared engine policies | `src/ulsbs/constants.py` |
 
 The executable wrappers are `ulsbs-compile`, `ulsbs-bookmeta`,
-`ulsbs-midi2audio`, `ulsbs-ly2tex`, `ulsbs-migrate-syntax-v1`, and `ulsbs-test`.
+`ulsbs-midi2audio`, `ulsbs-ly2tex`, `ulsbs-migrate-syntax-v1`,
+`ulsbs-migrate-syntax-v2`, and `ulsbs-test`.
 The [README](README.md) documents their author-facing use; release procedures
 are in [MAINTAINERS.md](MAINTAINERS.md).
+
+## Song Engine
+
+`ulsbs-songbook.cls` and `ulsbs.sty` are the public entries. Both reject engines
+other than LuaLaTeX before font/backend setup. `\NeedsTeXFormat{LaTeX2e}` names
+the document format, not a competing engine: conventional LaTeX2e author syntax
+and LaTeX3 (`expl3`) implementation coexist under LuaLaTeX.
+
+ULSBS owns song rendering and in-process index generation. Required companion
+modules are part of the installation; a missing module is an installation error.
+The public compatibility contract is the documented ULSBS authoring API, not
+complete feature compatibility with the historical `songs` package.
+
+The package entry owns dependency order and stages configuration before its
+consumers. Companion modules hold phase-specific defaults, shared style policy
+and runtime implementations; they are private units, not independently loadable
+author packages:
+
+| Module under `src/ulsbs/assets/tex/` | Responsibility |
+|---|---|
+| `ulsbs-package-defaults.code.tex` | Pre-import paper, margin, header and chord-line defaults |
+| `ulsbs-init.code.tex` | Public flags, counters, lengths and initial font defaults |
+| `ulsbs-book-defaults.code.tex` | Visibility switches, early verse indentation and localized book metadata defaults |
+| `ulsbs-style.code.tex` | Final colors, font policy, page headers, boxes and stanza-break styling |
+| `ulsbs-utilities.code.tex` | General typesetting helpers, circle measurement/cache, paragraph tracking and repeat loops |
+| `ulsbs-typography.code.tex` | Font families, document font defaults, additional languages and Unicode symbols |
+| `ulsbs-frontmatter.code.tex` | Cover icons/pages, imprint, TOC and main chapter presentation |
+| `ulsbs-boolmap.code.tex`, `ulsbs-chapter-marks.code.tex` | Boolean-map utilities and chapter corner marks |
+| `ulsbs-song.code.tex` | Metadata, custom keys, titles, numbering, selection, anchors, lifecycle hooks and once-only index events |
+| `ulsbs-layout.code.tex`, `ulsbs-layout.lua` | Song boxes, page/column positioning, break penalties, bottom glue and prose/block adapters |
+| `ulsbs-verse.code.tex` | Verse modifiers, source newlines, numbering, indentation and lyric baselines |
+| `ulsbs-chords.code.tex` | Token scanning, lyric boxes, chord anchoring, memory/replay and alternate chords |
+| `ulsbs-music.code.tex` | Key-aware source transposition, melody composition, meters, bars and repeats |
+| `ulsbs-pdf-layer-setup.code.tex` | Early PDF layer registries, occurrence/key metadata, safe chord splitting and shipout hooks |
+| `ulsbs-multikey.code.tex`, `ulsbs-multikey.lua` | Effective-original/alternate visuals, key spelling, chord fitting, shipped-page tracking and multikey metadata |
+| `ulsbs-diagrams.code.tex` | Guitar diagrams and deferred chord-annotation insets |
+| `ulsbs-index.code.tex`, `ulsbs-index-records.lua` | Protected-token serialization, typed deferred page fields and record encoding |
+| `ulsbs-index-state.lua`, `ulsbs-index.lua` | Previous-pass snapshot lifecycle, deterministic sorting and generated fragments |
+| `ulsbs-index-display.code.tex` | Index display interface, headings, fonts, leaders, wrapping and columns |
+| `ulsbs-score-layers.tex`, `ulsbs-score-layers.lua` | Score requests and original/alternative system overlays; Python owns engraving and cache work |
+
+Keep semantic ownership separate from drawing: song metadata/index collection
+must not be repeated for each chord or PDF alternative. The scanner accepts TeX
+tokens and catcodes, not expanded lyric strings. It keeps groups, source spaces,
+comments and physical newlines meaningful and typesets each lyric fragment once.
+Chord fitting and syllable extension measure the retained box. The effective
+original annotation is authoritative for dimensions; alternatives contribute no
+layout geometry. Full-score transposition belongs to Python/LilyPond, not this
+scanner. The [authoring guide](WRITING_SONGBOOKS.md#chords) and
+[scanner contract below](#annotation-scanner-contract) specify source forms.
+
+LaTeX owns the page builder and one/two-column output. ULSBS positions completed
+song boxes using copied-node fit probes; probes must not execute source or
+deferred writes again. `ulsbs-layout.lua` exposes the private `ulsbs_layout` Lua
+bridge for these layout operations. `\ulSongColumns` accepts 0 (unpositioned flow),
+1 or 2; `\ulSongPosition` accepts 0 through 3. Preserve scoped settings, physical
+verse-newline paragraphs, explicit `\par` semantics and break penalties. Do not introduce a
+private output routine merely to mimic historical invisible PDF operators.
+
+Public extension points are documented class/pre-load options, fonts, lengths,
+setters, `\ulNewSongKey{key}{reset}{set}` and the argument-free LaTeX hooks
+`ulsbs/song/begin`, `ulsbs/stanza/start`, `ulsbs/stanza/finish`,
+`ulsbs/song/finish`, `ulsbs/index/record` and `ulsbs/song/anchor`.
+Metadata reset callbacks run before option parsing; set callbacks receive `#1`.
+Hooks execute in their current song/stanza scope, not once per key alternative.
+The anchor hook inserts nodes; physical positions are only known at shipout.
+Selection can discard a song box after its hooks ran. Source occurrence counts
+can therefore include discarded material, whereas index events only commit from
+retained shipped boxes. Custom fields do not automatically extend JSON schemas.
+Private `\__ulsbs_...` state and Lua tables are not public extension contracts.
+
+### Module loading and assets
+
+The entry first checks the engine and requires `expl3` directly. After
+`etoolbox`, `ulsbs-package-defaults.code.tex` supplies pre-import settings;
+`geometry` consumes the paper and margin values during import. The other imports
+precede `ulsbs-init.code.tex` and its initial public font measurements.
+PDF option defaults, validation and the optional `ocgx2` import stay in the entry; the
+second-phase registries and scanner load from `ulsbs-pdf-layer-setup.code.tex`
+immediately after `\makeatletter`. Main-language selection precedes
+`ulsbs-utilities.code.tex`, which loads boolean maps at its end.
+`ulsbs-book-defaults.code.tex` follows those helpers: localized book defaults use
+`\ulIfLanguage`, and the initial `1em` verse indent is captured before typography.
+Typography loads after the PDF color-profile setup and before
+`ulsbs-style.code.tex`; that style phase loads chapter marks after TikZ calc,
+chapter colors and dimensions. Front matter loads after shared styles and before
+song-content helpers. These common styling, notation and PDF helpers precede the
+ordered subsystem owners: index serialization/state/
+sorting, song lifecycle, layout, verses, chords, music, multikey, diagrams, then
+index display. The module table above is an ownership map, not a replacement for
+this dependency order.
+
+Do not gather all inputs at the top or turn the phases into a single early
+configuration block. Pre-import values are consumed immediately; initial
+font measurements must precede typography; final visual policy intentionally
+overrides some early hooks. Subsystem-specific settings remain beside
+their implementations when moving them would obscure evaluation timing or change
+allocation/measurement order. In particular, passage indentation captures `em`
+later than the early verse-indent default, and prelude title metrics run after
+the final title-font policy.
+
+Consumer overrides follow the declaration's contract, documented inline:
+pre-load `\providecommand` defaults accept an earlier `\newcommand`, while
+post-load macro hooks use `\renewcommand`. Use `\setlength` for lengths, integer
+assignment for penalty counts, and explicit boolean setters such as
+`\ulShowTags{false}` with real predicates such as `\ifulShowTags`. A later macro
+change does not retroactively reconfigure an already-loaded package, captured
+dimension or published PDF metadata. Private default files are not consumer
+configuration files to input directly.
+
+Companion `.code.tex` modules load without an extra TeX group. The style owns
+`\makeatletter`; modules must restore syntax, grouping and active-character state.
+Private functions use `\__ulsbs_...`, package-internal interfaces use
+`\ulsbs_...`, and typed variables follow expl3 conventions. Keep consumer source
+LaTeX2e-style and expose documented settings rather than mutable internal state.
+New annotation forms need scanner and once-only source-effect tests; new index
+letters need verified weights, diagnostics and sorting tests, not locale fallback.
+
+`prepare_compile_dir()` stages the TeX tree; `TEXINPUTS` and `LUAINPUTS` resolve
+companions. Setuptools package data and `MANIFEST.in` include `.code.tex` and
+`.lua` assets. `build.lua` installs all top-level `.tex` and `.lua` companions,
+including score layers and edition postsetup files. Installed books must resolve
+these assets without a source checkout, upstream songs or an external indexer.
+`keyval`, `etoolbox`, `environ`, `expl3` and `xparse` remain used dependencies.
+
+### Reading and documenting runtime code
+
+Start with a module's header: it describes its load site, prerequisites and state
+ownership. Comments above functions describe arguments, results and effects;
+comments inside them explain ordering, expansion or node-ownership constraints.
+Keep those comments current when changing code. In particular, distinguish source
+evaluation from measuring/copying retained boxes and from deferred shipout work.
+Private modules share the package scope; moving a definition to a companion does
+not make its state local or its dependencies independently loadable.
+
+TeX whitespace is executable input: `%` suppresses the rest of its line including
+the newline, while a blank line can produce `\par`. Tokenization also depends on
+whether `\ExplSyntaxOn` or active-character catcodes are in force when a definition
+is read. Preserve those boundaries when adding comments or moving code; keep
+module inputs at their dependency sites rather than alphabetizing them.
+
+Most engine TeX functions use expl3 names. The text before `:` names the operation;
+the suffix describes its arguments: `N` is one unexpanded token (usually a
+variable or function), `n` is an unexpanded token-list argument, `V` takes the
+contents of a variable, `c` constructs a control-sequence name, and `x`/`e` expand
+an argument. Generated variants adapt argument handling without changing the
+underlying operation. Conditional forms ending in `T`, `F` or `TF` take the
+corresponding true/false branches after their ordinary arguments. Variables use
+`l_` for local working state, `g_` for globally maintained state and `c_` for
+constants; the final component gives the type (`tl`, `seq`, `prop`, `dim`, `box`,
+and so on). Assignment commands still determine the actual scope. Older drawing
+and style helpers use LaTeX2e names with `@` instead of expl3 names; both styles
+are private unless the authoring guide documents an extension point.
+
+Private companions use `\ProvidesFile{filename}[Short description]`: retain a
+short purpose description in the log and `\listfiles` output, but omit dates and
+per-file version numbers. Git records edit history; private companions are shipped
+and loaded together, not selected by per-file date comparisons. This declaration
+does not load a file or prevent a second input. LaTeX also permits an omitted
+identification string or a conventional date/version-prefixed string, but ULSBS
+private companions consistently use description-only brackets.
+For the LaTeX identification and loading interfaces, see the
+[class/package writer's guide](https://www.latex-project.org/help/documentation/clsguide.pdf).
+
+### Song and page lifecycle
+
+`ulSongs`, `song`, `\beginsong` and `\endsong` use the same semantic lifecycle,
+including the three-braced metadata form. Each `ulSongs` block starts printed
+numbering at 1; chapter headings do not reset it. Counter overrides and
+`\theulSongNumber` formatting are independent of persistent IDs and occurrences.
+Metadata resets execute once before option parsing. Public metadata remains
+available after `\endsong` in the surrounding scope; unknown fields and malformed
+or nested lifecycles have owned diagnostics. Titles split only on top-level
+`\\`; `\ulResetTitles`, `\ulNextTitle` and `\ulForEachTitle` iterate them. Accidental
+catcodes change after title scanning, allowing raw `#`/`&` in musical key fields.
+
+Selection activation is distinct from its list: absent selects all; explicitly
+empty selects none. Retained boxes submit in requested printed-number order
+without renumbering. Index, PSV and TOC writes stay in those boxes; discarded
+boxes do not leak records. Intentional repeated selections get shipout replay
+markers without evaluating source or hooks again. ID anchors are
+`songid:<id>[-n]`; index targets separately use
+`song<block>-<printed-number>.<outline-level>`. ID and number freeze at collection;
+physical page and Y resolve at shipout. Only occurrences with transposable ink
+enter the multikey manifest.
+
+The body typesets before prelude/postlude, then assembles below the retained
+prelude. Attributions compose once in a retained horizontal box and unpack for
+paragraph layout. Badge widths measure in the title font; the save-position
+marker stays at the title box's right edge. Initial public chord-font metrics
+precede the shared document font policy. Preserve these boundaries to avoid
+font-first-use or anchor changes without replaying source.
+
+Positioning dry-splits copies of completed boxes against actual page contributions
+and finite stretch/shrink, then submits real material once. Pending owned
+continuations remain distinct from ordinary prose, even after the first page
+ships. Empty-page lookahead retains even/odd spread reservations. Song clears use
+the saved kernel clear locally, independent of an author's temporary include-clear
+override; standard kernel column output stays untouched.
+
+Column settings preserve grouping. Selection-time shaping must not change the
+physical page mode; retained boxes submit under restored settings, and environment
+exit restores the entry mode. A one-shot retained prefix places full-width
+material above a two-column start without executing headings again. Intersong
+top skip and outer stretch remain separate from internal column stretch.
+
+The verse owner handles physical newlines, comments, groups, arguments, literal
+spaces, modifiers, numbering, hanging indentation and one-shot stanza glue.
+Implicit final lines close before local paragraph settings restore. Caller depth
+survives stanza boxes; independent body boxes reset interline depth. Notes/prose
+distinguish in-stanza, between-stanza and outside-song contexts. An attached note's
+`\ulBreakPenalty=\ulVerseVersePenalty` lasts for the rest of the song scope;
+glue requested before the first stanza waits for a real boundary. Block counters, alternate
+colors and song-local settings reset at song end.
+
+### Annotation scanner contract
+
+The scanner reads TeX tokens without expanding lyric text. The first ungrouped
+`]` closes `\[...]`; balanced braces, slash basses, accidental macros,
+superscript/subscript typography, kerns and spaces remain tokens until typeset.
+`\ulChordLocals` supplies parenthesis typography. Sharp/flat shorthand is active
+only in notation scopes; escaped characters retain normal LaTeX meanings. The
+[melody grammar](WRITING_SONGBOOKS.md#melody-hints-and-beat-marks) permits one
+leading primary/secondary block per annotation. Separate blocks require adjacent
+annotations.
+
+A lyric fragment ends at a source space, another annotation, replay mark,
+paragraph/group end or non-lyric command. An explicit `\endgroup` ends a word.
+A literal closing brace first closes the authored group; the following token
+determines continuation and alignment hyphenation. Closing a local `\noteson`
+group before replay must not silently end that lyric word. Balanced groups and
+declared lyric commands remain intact. Lookahead does not expand explicit spaces,
+ties, accents or escaped punctuation. A hyphen run ends the fragment: a single
+hyphen may serve as its alignment hyphen, while multiple hyphens stay literal.
+
+The retained lyric box supplies fitting, syllable-extension and wrapping metrics;
+measurement never typesets the source again. Adjacent annotations concatenate.
+Each visible annotation immediately followed by literal whitespace independently
+gets the configured minimum advance; hidden or zero-advance melody must not gain
+that width. Disabling chords or measures uses ignored catcodes for the relevant
+replay/bar characters. Invisible active macros are not equivalent: they separate
+source spaces. Echo arguments rescan once while retaining active physical
+newlines. A leading explicit bar already tokenized by stanza lookahead retains
+the pending meter even in a true-lyrics edition; later toggles update scoped ink
+state. Explicit `\par` has ordinary paragraph costs, distinct from the source
+newline handler and its penalty.
+
+Chord registers store raw annotations rather than rendered boxes. Each stanza
+starts on the default register: the first records, later stanzas replay, and the
+default resets per song. `\newchords` declares a named register;
+`\memorize[name]` clears and records it, `\replay[name]` selects and rewinds it,
+and bare `\replay` rewinds the current register. Replay interprets tokens using
+current transposition, note visibility and melody styles. Unknown registers and
+exhausted replay are errors. A leading `^` inside an annotation excludes it
+while recording; while replaying, it consumes the next saved annotation inside
+the same box without another lyric scan. Saved melody takes precedence over a
+new prefix; extra chord-tail tokens remain unexpanded until rendering.
+
+Source transposition and interactive offsets are separate. `key=` describes the
+effective printed original; `t00` preserves that notation and alone supplies
+dimensions. Eleven alternatives add visual ink with zero advance. Authored brace
+groups remain opaque to transposition. Shared notation-side effects execute once,
+not once per layer. Full-score transposition stays in Python/LilyPond.
+
+## Index Lifecycle
+
+The renderer stages semantic title, alternate-title, author and tag events.
+The required `ulSongs` comma list is scoped routing for automatic records; `{}`
+means none, while explicit `\ulIndexEntry[identifier]{...}` and
+`\ulIndexTitleEntry[identifier]{...}` can override that routing. Repeated IDs
+accumulate across blocks; separate destinations require separate declared IDs and
+filename stems. Printed numbering restarts at 1 per block, independently of index
+accumulation; counter and `\ulIndexSongsAs` label overrides remain available.
+The package-declared IDs `titleidx`, `authidx`, and `tagidx` are not filename stems
+or reserved keywords. `\ulNewIndex{id}{stem}` declares title destinations,
+`\ulNewTagIndex{id}{stem}` tag destinations, and `\ulNewAuthorIndex{id}{stem}`
+author destinations. Default title/author/tag stems are `idx_title`, `idx_auth`
+and `idx_tag`.
+Identifiers and reference labels freeze at collection; typed page-dependent data
+resolves at shipout. Numeric handles in late-Lua nodes commit an event once,
+including when boxes are copied; discarded boxes contribute no records.
+`ulsbs-index-records.lua` serializes UTF-8 fields as byte-length-prefixed data
+under the signature `ULSBS index records 1`, not executable Lua or TeX source.
+
+At package initialization, `ulsbs-index-state.lua` loads the completed previous
+`<jobname>.ulsbs-index-state` before a new collection can overwrite it. The
+signature `ULSBS index snapshot 3 fi-compatible-v1` identifies the current schema
+and collation policy; the snapshot records job/source identity, declarations and
+events. These generated formats are current scratch build outputs, not historical
+baselines or public interchange formats. There is no historical-format reader;
+incompatible outputs must be cleared and regenerated.
+A checksum detects accidental corruption, not malicious input. The source
+fingerprint covers the file active at `\begin{document}`, not the entire input
+graph; exact end-of-pass record comparison detects other source changes affecting
+requested indices. Begin-document marks collection in progress, and finalization
+after the last page atomically installs a complete snapshot by temporary write
+and rename. Aborted, foreign, malformed or incompatible snapshots are errors with
+recovery instructions, not silently reusable caches.
+
+`\ulShowIndex` requests a title/author/tag fragment generated from that prior snapshot.
+It renders the entire destination, not only songs preceding the call; placing it
+before or between blocks does not partition the index.
+The first pass warns and collects; it cannot display a final generated index.
+Changed displayed/collected records request another LuaLaTeX run. The compiler
+recognizes this warning and refuses publication if its bounded extra-pass budget
+does not converge. There is no `songidx.lua`, `texlua`, `makeindex` or `xindy`
+stage. Generated `.sbx` display fragments are bound to exact job-local paths and
+cannot be shadowed by stale files on `TEXINPUTS`. Nonempty fragments are generated
+only for requested destinations. Empty title/author/tag declarations
+normally get empty fragments to clear stale results; the existing `ul-selection`
+jobname convention suppresses unrequested empty fragments. `\nofiles` is invalid
+when requesting generated indices. Manual parallel builds need separate output
+directories, just as for `.aux` files.
+
+Requested tag indices default to `include/tags.txt` first, then `tags.txt` through
+TeX/kpse lookup. The preamble-only `\ulTagFile{filename}` setter selects an explicit
+TeX-lookup filename; a missing configured file fails without default fallback.
+Definitions are ordered UTF-8 plain text, one `canonical|alias|alias` line per tag,
+with surrounding whitespace trimmed and blank/full-line `#` and `%` comments
+ignored. There are no count lines, numbered scripture references or runtime
+legacy `.can` parser. Automatic tag records come directly from `tags`/`\ulTagList`;
+the inherited `sr` field, `\ulSongRefs` accessor and three-braced song metadata
+adapter have been removed. Generated tag rows have empty entry text (`{}`)
+because the heading carries the tag name. `\ulIndexTagFont` styles tag headings.
+Missing definitions and unknown/malformed tags are actionable errors.
+`\ulSongIndexes{false}` disables display and collection; `\ulShowTags{false}` hides
+prelude badges only. Unrequested tag indices need no definition file.
+Author destinations, including `\ulNewAuthorIndex{writers}{idx_writers}`, use the
+same snapshot, request, empty-cleanup, output-directory and rerun lifecycle as
+titles and tags. `by={Alice Smith, Bob Jones}` supplies raw author events;
+`\ulShowIndex{Authors}{authidx}` generates `idx_auth.sbx`. No manual fragment or
+external indexer is required. Old hand-authored `idx_auth.sbx` is not a runtime
+fallback: generated stems may be replaced or cleared. Preserve valuable authored
+fragments under separate filenames outside generated stems.
+
+Author parsing splits top-level commas, semicolons and standalone
+case-insensitive `and`. Braced groups and TeX arguments protect commas and
+separator words; TeX control symbols are protected. A standalone default `by`
+marker retains text after its last occurrence in each attribution segment.
+Hyphenated and apostrophe-joined words are not standalone markers. Names stay as written, with no
+surname or role inference; formatting survives in entries and
+`\ulIndexAuthorFont` is unchanged. The first `\ulAuthorSepWord` or
+`\ulAuthorByWord` replaces its respective default word list, later calls add
+words, and an empty first call clears the default. Separator/attribution values
+must be single alphabetic words or empty. `\ulAuthorIgnoreWord` matches
+whole cleaned candidates case-insensitively, not substrings. Like title-prefix
+settings these are global stream directives affecting following record events
+only, regardless of TeX grouping. Directives enter the stream when TeX executes
+their commands, while song records commit at shipout. Lexical source order alone
+therefore does not determine their relative event order; configure parsing policy
+in the preamble rather than relying on mid-document changes or grouping.
+Empty author fields add nothing; duplicate names are removed within each raw
+author event, not across events, preserving repeated selection links. Identical
+display names group their references in event order.
+Author entries use deterministic Finnish-compatible/natural collation without
+visible letter heading panels (the author `ulIndexBlock` suppresses the heading).
+Author generation uses the same snapshot schema 3 and record codec 1.
+
+`ulsbs-index.lua` owns finite, explicit Finnish-compatible collation weights and
+natural numeric tokens, independent of host locale and Lua byte ordering. Tests
+cover A to Z followed by ring-A/umlaut-A/umlaut-O, accented Latin, tested Sanskrit
+transliteration and Persian title letters, case/punctuation, numeric prefixes
+(including Finnish decimal commas), aliases and duplicate reference order.
+This is not complete Unicode collation or normalization. An unverified character
+reports its code point and requires a reviewed table/test extension; changing
+`LC_ALL` is not a solution. Tag group order remains the definition-file order.
+Index labels and chapter context are independent of persistent IDs, occurrence
+identities and physical multikey range offsets.
+
+The pure sorter exposes `render(records, kind, definitions_bytes)` and
+`normalize_title(text, prefixes)`. Normalized records hold the already
+article-rotated title, label, target, ordinal and diagnostic line. Title rendering
+sorts records in place; duplicate references and tag groups retain input order.
 
 ## Fixed Policies and Version Ownership
 
@@ -126,6 +510,39 @@ key selections, requiring both identical baseline/candidate pixels and visible
 differences between key selections. Rendering comparisons are regression checks,
 not part of every production build's runtime validation. Savings depend on exact
 duplication; substantial distinct-subset overhead may remain.
+
+## Build Diagnostics
+
+`src/ulsbs/diagnostics.py` parses source-aware `Diagnostic` records with a message,
+category, log path, occurrence count and optional affected-item count. Multiline
+continuations form one record; whitespace-normalized identical messages are
+grouped with their occurrence counts. Job warning totals sum occurrences, not
+distinct messages, log lines or raw matches of the word "warning". Callers with
+artifact-level knowledge may attach `affected_count` (for example, eight songs
+missing IDs); that count is separate from the warning total. Compact output
+aggregates by source/category; verbose output shows messages and occurrences.
+
+`pipeline.py:analyze_warnings` collects selected tool logs, including LilyPond,
+and only the final LuaLaTeX invocation, not superseded typesetting passes.
+Convergence reruns respond to specific recognized requests in the latest TeX log,
+not arbitrary warnings. Closing TeX reference/font recaps are suppressed only
+when their corresponding specific warnings occur in the same parsed text.
+Missing glyphs and overfull boxes count as warnings; underfull boxes are
+informational. Configuration, resource and cleanup advisories remain separate
+from per-job warning totals.
+
+Recognition of warning headers is distinct from message categorization: unfamiliar
+messages matching supported TeX or generic tool-header patterns are retained
+without a message whitelist. Messages with no more specific category use `other`
+and display as unclassified warnings. A header format outside all supported
+patterns requires a parser extension; category-specific wording is not required
+merely to count an otherwise recognized warning.
+
+`tests/test_diagnostics.py` covers multiline grouping, recap suppression, header
+recognition and informational boxes. `tests/test_compiler_reporting.py` covers
+final-pass selection, affected-item metadata, unknown messages and summaries;
+`tests/test_reference_convergence.py` covers rerun recognition and unrelated
+warnings that must not trigger retries.
 
 ## Multikey Books
 
@@ -300,8 +717,8 @@ JSON, actual MIDI export, or actual audio export needs it. LilyPond processing a
 engraving remain active for all jobs, including lyrics-only output; only the
 job-local MIDI include is suppressed under the conditions above.
 
-The pipeline defines `\ulPdfTranspositionLayers`, `\ulPdfTranspositionLayerUI`,
-and `\ulPdfTranspositionRequireSongIDs` before loading the class/package.
+The pipeline defines `\ulPdfTranspositionLayers`, `\ulPdfTranspositionLayerUi`,
+and `\ulPdfTranspositionRequireSongIds` before loading the class/package.
 Layers are `true` only for multikey jobs and `false` for ordinary and lyrics
 jobs. Manual LaTeX compilation defaults to layers `false` and UI `native`.
 Manual builds may define `\newcommand{\ulPdfTranspositionLayers}{true}` before
@@ -315,7 +732,13 @@ enabled renderer whose valid songs currently hide every annotation.
 ### PDF passes and resources
 
 Jobs normally use three LuaLaTeX passes: one draft followed by two full passes.
-Song indices are generated between the first and second passes.
+Requested title/author/tag indices are generated inside LuaLaTeX from the preceding
+pass's song records, without a separate index process. The draft collects
+the first complete snapshot; the first full pass renders it and the second full
+pass settles references/resources. Index rerun requests share the existing bounded
+convergence budget and must settle before publication.
+See [Index Lifecycle](#index-lifecycle) for the snapshot contract
+and [manual builds](WRITING_SONGBOOKS.md#manual-lualatex-builds) for direct TeX use.
 
 In engine `-draftmode`, MULTIKEY builds construct only the original (`t00`)
 visual boxes. These alone determine width, height, depth, and page breaking;
@@ -323,7 +746,7 @@ eleven zero-extent alternate chord/key/score boxes would be discarded without
 producing a PDF. The draft still registers all layer groups, measures headers,
 collects all twelve target keys, and writes the original score requests and index
 data. Full PDF-producing passes always construct every alternative. This private
-renderer flag follows LuaTeX's native `\draftmode` parameter, not the document's
+renderer flag follows LuaTeX's `\draftmode` parameter, not the document's
 `draft` option or the graphics package's placeholder mode.
 
 Draft mode omits image objects. Consequently, PDF object numbers recorded in a
@@ -342,7 +765,8 @@ If a cached reference resolves to a stream or another non-dictionary, or the log
 requests another pass, rerun only LuaLaTeX. Both checks share the
 `constants.py:LUALATEX_MAX_EXTRA_PASSES` budget (two additional full passes),
 stopping as soon as they settle. This does not repeat
-LilyPond engraving or index generation. The latest log and fresh shipout manifest
+LilyPond engraving; in-process index collection/display still runs on each
+LuaLaTeX pass. The latest log and fresh shipout manifest
 remain authoritative. Persistent failure stops the job; the later complete
 layer/resource validation is never bypassed. A generic regression changes object
 allocation across three passes and verifies recovery on a fourth. A separate
@@ -395,7 +819,7 @@ assemblies are eligible, including contiguous duplicate identical headers.
 The supported assemblies retain their named lyrics, fixed octave shifts, grouped
 staves, numeric engraving settings, and original layout. Additional unknown
 includes, arbitrary score expressions, and multiple explicit score blocks remain
-fallbacks. Native `\transpose` assignments are inserted before the tail or score
+fallbacks. `\transpose` assignments are inserted before the tail or score
 assembly consumes the already-defined music variables. Structured `ly:make-pitch` operands avoid
 interpreting generated intervals under a source's custom note-name language.
 The shortest signed interval is tried first, then its opposite-octave equivalent
@@ -471,11 +895,11 @@ overrides; both standard heads explicitly set `ragged-right = ##f` and
 overlay fitting. If the alternative is taller, the uniform fit can be limited by
 the original height and shrink its horizontal extent too. Stretching only the
 horizontal PDF axis would distort notation; fitting width alone could overlap
-adjacent content. Equal visual widths would require a separate native spacing
+adjacent content. Equal visual widths would require a separate spacing
 refit with per-system validation, not another justification flag.
 If a validated graphic later disappears or no longer fits, the TeX renderer's
 last-resort per-system guard substitutes that original system; Python validation
-normally rejects the entire offset before dispatch. Native LilyPond spelling
+normally rejects the entire offset before dispatch. LilyPond spelling
 can retain double accidentals that the TeX labels simplify.
 `ulsbs-score-variants/` remains disposable job-local output, not evidence of a
 cache hit. `lilypond_score_cache.py` maintains a separate content-addressed cache
@@ -601,7 +1025,7 @@ reviewed generated variant by label; all other variants are retained. Manually
 remove obsolete named variants from the manifest after review. A variant rewrite
 also refreshes all bundled source records, so review those sources too. Do not
 approve every reported hash merely to silence a warning.
-After regenerating hashes, run the cache and relevant native score regressions,
+After regenerating hashes, run the cache and relevant score regressions,
 audit the sources again, and review the manifest diff before committing.
 
 When a score-generation job has requests, it audits the job's copied bundled
@@ -657,7 +1081,7 @@ engraving/output directory, LilyPond does not create the renamed files, leaving
 dangling TeX references. Hashed naming also avoids collisions between different
 external scores sharing a basename. Tests resolve actual graphics through TeX
 and verify independent edits of such external scores.
-Native integration tests cover page-spanning multi-system overlays, exact
+Integration tests cover page-spanning multi-system overlays, exact
 boundary replay, original callback preservation, note-name language changes,
 major/minor/chromatic material, source transposition, slash chords, both voices,
 charango tunings, bass clef, tablature retries, and fresh-directory cache reuse.
@@ -917,8 +1341,9 @@ the original-only print policy.
 
 The renderer separates musical visual alternatives from shared semantic state.
 Chord memorization, replay, payload processing, and arbitrary source side effects
-must execute once, not once per offset. Replay retains the existing `songs`
-semantics, and visibility is evaluated at replay time.
+must execute once, not once per offset. Replay follows the
+[scanner contract](#annotation-scanner-contract), and visibility is evaluated at
+replay time.
 
 Interactive content comprises verse chords, inline verse `\ac` references,
 pitched primary and secondary melody hints, and the declared prelude `key=`
@@ -1088,15 +1513,19 @@ with no visible key-switching effect in that configuration. These small raster
 differences must not be reported as strict pixel equality.
 
 The maintained toolchain supplies `ocgx2` through `texlive-latex-extra`. Layer
-creation remains native TeX/LilyPond OCG output; qpdf packages and validates
+creation remains TeX/LilyPond OCG output; qpdf packages and validates
 page ranges without re-engraving, flattening, rasterizing or print-to-PDF.
 
 ## Syntax Migration
 
-The [author-facing migration instructions](README.md#ulsbs-migrate-syntax-v1)
-cover invocation and diagnostics requiring source review. The destination-syntax
-version is part of the command name; `ulsbs-migrate-melody-syntax` remains a
-compatibility alias for `ulsbs-migrate-syntax-v1`.
+The destination-syntax version is part of each migration command's name. The
+[v1 migration instructions](README.md#ulsbs-migrate-syntax-v1) cover the legacy
+melody/beat conversion below. `ulsbs-migrate-melody-syntax` remains a compatibility
+alias for `ulsbs-migrate-syntax-v1`, not for the newest destination syntax.
+V1 deliberately retains its original destination names, including
+`\melodySecondaryPosition{same}`; run v2 afterwards to adopt current naming.
+
+### V1 melody syntax
 
 `--diff` and `--write` process only files with no diagnostics. Writes are
 file-atomic, not directory-atomic: other safe files in a directory may change
@@ -1120,6 +1549,74 @@ produces a diagnostic instead of being hoisted across the chord. Malformed
 arguments, compound pitches, incompatible offsets, and ambiguous secondary
 placement also require author review rather than speculative conversion.
 
+### V2 naming
+
+The [v2 migration instructions](README.md#ulsbs-migrate-syntax-v2) describe the
+current naming upgrade. `src/ulsbs/tools/naming_v2.py` is the authoritative
+inventory: `COMMAND_RENAMES` maps bare control words, `BOOLEAN_SETTERS` maps old
+true/false commands to explicit setter/value pairs, and `NAME_ARGUMENT_RENAMES`
+maps literal counter, color and environment names only in their argument
+contexts. Only public names are migrated; private implementation names are not
+an author API.
+Book and index assembly environments are `ulSongs` and `ulIndexBlock`; their
+generated direct begin/end control words follow the same naming inventory.
+The title constructor remains `\ulNewIndex`; the tag constructor and heading font
+are `\ulNewTagIndex` and `\ulIndexTagFont`, replacing their former scripture names
+without runtime aliases. `\ulTagFile{filename}` is a new preamble-only setter.
+
+`COMMAND_EXPANSIONS` records the removed chorus wrapper's actual behavior:
+`\beginchorus` and `\chorus` expand to `\beginverse\beginrep`, while
+`\endchorus` expands to `\endrep\endverse`. Literal `\begin{chorus}` and
+`\end{chorus}` become `verse` environment boundaries with explicit repeat
+boundaries inside the environment group. Existing comments and lyric tokens
+remain in place; no star or indent option is moved ahead of the inserted
+`\beginrep`. `REMOVED_COMMANDS` lists inert configuration in both
+old and v2 spellings. These settings diagnose, not map to live verse settings:
+renaming an unused chorus penalty or font hook to a verse setting would introduce
+effects that the source never had.
+The inventory also diagnoses removed partial-list/raw-text switches, last-column
+glue, index-book and note-name/printer hooks, prelude-good text and song-number
+default-height controls, rather than emitting destinations absent from the runtime.
+
+V2 preserves short lowercase song notation, class option and metadata keys,
+hook paths and serialized metadata. Ordinary source migration preserves filenames;
+the explicit tag-file migration described below renames its selected file.
+Configuration, assembly, fonts and accessors use `ulCamelCase`; initialisms follow
+the same casing (`ulToc`).
+Boolean setters preserve defaults and scoped assignments; readable predicates
+remain real TeX conditionals, for example `\ifulShowTags ... \else ... \fi`.
+Generated true/false helpers are private. No old runtime aliases are installed.
+
+The scanner accepts `.tex`, `.cls`, `.sty` and manual index `.sbx` files. It
+preserves comments, inline verbatim, verbatim-like environments, literal URLs
+and inline/environment LilyPond bodies. Direct one-to-one command references and
+definition targets can be renamed; safe delayed boolean and chorus bodies can be converted.
+Boolean references or targets that cannot accept an added argument, computed
+identifiers, ambiguous unknown-macro boolean arguments and unsafe tokenization
+constructs require review. A diagnostic suppresses all edits and diff output for
+that file. Safe files in a mixed batch may still be written independently, with
+file-atomic replacement preserving file mode and line endings. This is not a
+TeX interpreter or a directory-atomic transaction. V1 source and destination
+semantics remain unchanged; upgrading legacy melody sources is v1, then v2.
+Chorus expansions likewise require executable contexts: references, definition
+targets, expansion-time bodies, unknown macro arguments, environment definitions
+or environment-hook identifiers require review instead of multi-token replacement.
+
+`--tags-file FILE` explicitly selects legacy tag definitions and requires
+`--check`, `--diff`, or `--write`. It works standalone or alongside source paths;
+normal source migration emits a reminder, never automatic `.can` discovery.
+Conversion preserves canonical/alias order, removes legacy `1` count lines, and
+renames `.can` to `.txt` with the same basename. Destination collisions and symlinks
+are refused. A custom basename requires the author's corresponding
+`\ulTagFile{custom-name.txt}` preamble setting. This is migration support only;
+the runtime reads only the new plain-text tag format. V1 melody and safe chorus
+conversion contracts are unchanged.
+The removed `sr=` field, three-braced metadata form and `songrefs`/`ulSongRefs`
+accessors diagnose for review without partially rewriting the file. No automatic
+scripture-to-tag conversion is provided. Explicit tag-index reference values with
+numeric suffixes still need manual review: the migrator does not infer whether a
+suffix is an old reference or part of a legitimate tag name.
+
 ## Testing
 
 From the ULSBS source directory, run `./ulsbs-test`. The runner builds the normal
@@ -1127,11 +1624,22 @@ Docker or Podman `ulsbs-compiler` image when needed, runs LuaLaTeX regressions
 through `l3build`, and runs compilation/PDF-structure tests through Python's
 standard-library `unittest` runner.
 
+The default command runs the whole retained regression suite, not a quick subset.
+Python modules run in four separate worker processes by default; `--jobs 1`
+serializes them on memory-constrained machines. Each module's output includes its
+test/skip summary and elapsed time, followed by total suite wall time. The target
+for the supported container is under about 20 minutes, excluding image builds.
+Use `--verbose` to see individual test names and skip reasons.
+A full run has been measured at about 10.5 minutes with four workers on the
+maintainer's machine. This is not a timing guarantee for other hardware or a cold
+image build.
+
 ```sh
 ./ulsbs-test --container-rebuild
 ./ulsbs-test --container-engine podman
 ./ulsbs-test --no-container
 ./ulsbs-test --verbose
+./ulsbs-test --jobs 1
 ```
 
 Host testing is intended for development only. The containerized suite is the
@@ -1140,3 +1648,30 @@ canonical result because it uses the supported ULSBS toolchain and fonts. See
 inspection and measurement guidance, [PDF Font Sharing](#pdf-font-sharing) for
 optimizer coverage, and [Trusted Cache Assets](#trusted-cache-assets) for the
 read-only asset audit and explicit trust-record maintenance workflow.
+
+Focused Python tests live under `tests/`; normalized LuaLaTeX fixtures live under
+`tests/tex/`. Select coverage for the changed subsystem, including representative
+rendering, index or multikey builds when relevant. Runtime isolation and asset
+packaging checks live in `tests/test_modules.py`; from the engine source
+directory, `python3 tests/test_modules.py --packaging-smoke` builds wheel
+and sdist assets and checks isolated installed resource lookup. Documentation-only
+edits need link, consistency and whitespace checks, not a corpus build.
+
+Tests protect engine behavior: parser/state transitions, once-only source effects,
+selection and numbering, index ordering/convergence, PDF navigation, layer/print
+policy, and publication/asset contracts. Normalized TeX logs check state, not page
+images. When checking dimensions, set the relevant
+styling explicitly or compare engine variants within the same run (for example,
+layers on/off), rather than pinning the default typography or pagination. New
+default styling should not require updating historical reference PDFs.
+
+For focused Python work without the wrapper:
+
+```sh
+PYTHONPATH=src:tests python3 -m unittest test_song_lifecycle -v
+```
+
+External-tool tests report skips on an incomplete host toolchain; a host pass
+with skips is not equivalent to a supported-container run. Test products and font
+caches live in ignored `build/` or temporary directories and may be deleted when
+no tests or builds are running.

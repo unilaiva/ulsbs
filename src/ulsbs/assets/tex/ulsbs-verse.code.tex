@@ -1,0 +1,232 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Stanza lifecycle and source-line paragraph layout, with or without ink.
+% This file is part of the 'ulsbs' package.
+%
+% Private module loaded after song/layout and common counters, lengths, fonts,
+% and verse-number helpers. Chords/music load later and supply replay, notation,
+% and repeat-prefix callbacks used at render time. This module neither parses
+% chord payloads nor owns song/page output; it contributes unpacked stanza nodes
+% to the surrounding song box and delegates inter-stanza breaks to layout.
+%
+% Song reset clears global active/seen/glue flags and restarts verse numbering.
+% Each stanza opens an outer catcode/options group, a retained vbox, and an inner
+% paragraph-settings group. End closes these in reverse order, unpacks the vbox,
+% updates numbering/lifecycle flags, and restores the caller's notation settings.
+% Global flags survive nested source groups; metrics and paragraph settings are
+% local. First-line state controls one-shot numbering, not physical wrap count.
+%
+% Physical source newlines become a private paragraph terminator only after verse
+% modifiers are read. A source line can wrap but cannot split internally across
+% pages; its trailing penalty is a break candidate. Explicit \par keeps ordinary
+% TeX paragraph behavior. Lyric source is never replayed for stanza measurement.
+
+\ProvidesFile{ulsbs-verse.code.tex}[Stanza renderer]
+
+\makeatletter
+\ExplSyntaxOn
+\bool_new:N \g__ulsbs_stanza_active_bool
+\bool_new:N \g__ulsbs_verse_seen_bool
+\bool_new:N \g__ulsbs_verse_glued_bool
+\bool_new:N \g__ulsbs_verse_first_line_bool
+\newif\ifulsbs@vnumbered
+\box_new:N \l__ulsbs_verse_box
+\box_new:N \l__ulsbs_verse_number_box
+\box_new:N \l__ulsbs_verse_metrics_box
+\dim_new:N \l__ulsbs_verse_indent_dim
+\dim_new:N \l__ulsbs_verse_font_size_dim
+\skip_new:N \l__ulsbs_verse_line_skip
+\int_new:N \l__ulsbs_verse_line_penalty_int
+\msg_new:nnn {ulsbs-verse}{state}{Invalid~stanza~lifecycle:~#1.}
+
+% #1 describes malformed stanza use; stop before unbalanced groups corrupt state.
+\cs_new_protected:Npn \__ulsbs_verse_fail:n #1
+  {\msg_fatal:nnn {ulsbs-verse}{state}{#1}}
+
+% Song/layout setup calls reset inside the song box; song end requires closed
+% stanza state before assembling the completed song.
+\cs_new_protected:Npn \__ulsbs_verse_reset:
+  {\bool_gset_false:N \g__ulsbs_stanza_active_bool
+   \bool_gset_false:N \g__ulsbs_verse_seen_bool
+   \bool_gset_false:N \g__ulsbs_verse_glued_bool
+   \setcounter{ulVerseNumber}{1}}
+
+% Guard both new stanza entry and song completion without changing open state.
+\cs_new_protected:Npn \__ulsbs_verse_require_closed:
+  {\bool_if:NT \g__ulsbs_stanza_active_bool
+    {\__ulsbs_verse_fail:n {missing~endverse}}}
+
+% Arm one boundary's glue penalty. Before the first stanza this remains pending
+% until a real inter-stanza boundary, rather than being consumed at first start.
+\NewDocumentCommand \glueverses {}
+  {\__ulsbs_song_require:\bool_gset_true:N \g__ulsbs_verse_glued_bool}
+
+% Hanging left alignment reserves the number column only inside a live stanza.
+\DeclareDocumentCommand \justifyleft {}
+  {\leftskip=\parindent
+   \bool_if:NT \g__ulsbs_stanza_active_bool {\advance\leftskip\ulVerseNumberWidth}
+   \parindent=-\parindent}
+
+% Center lyrics while placing the number box (#1 in the local override) outside
+% the centered text. The override consumes that already-typeset number box.
+\DeclareDocumentCommand \justifycenter {}
+  {\centering\rightskip=\leftskip
+   \cs_set_protected:Npn \ulPlaceVerseNumber ##1
+     {\hskip-\leftskip\hskip-\parindent
+      \hangindent=-\box_wd:N ##1\hangafter=-1\relax\box_use_drop:N ##1\hfil}}
+
+% Install active meanings before optional-argument lookahead can read a first
+% lyric token. These bindings are local to the outer stanza group; #/& are musical
+% accidentals, ^ is replay, and | is a measure bar, not ordinary punctuation.
+\cs_new_protected:Npn \__ulsbs_verse_catcodes:
+  {\char_set_catcode_active:n {35}\char_set_active_eq:nN {35}\shrp
+   \char_set_catcode_active:n {38}\char_set_active_eq:nN {38}\flt
+    \char_set_catcode_active:n {94}\char_set_active_eq:nN {94}\__ulsbs_chord_replay:
+     \char_set_catcode_active:n {124}\char_set_active_eq:nN {124}\measurebar}
+
+% Disabled replay/bar characters must be ignored by the tokenizer, not expanded
+% to empty macros: an invisible active token would still separate source spaces.
+% Only future characters change; lookahead may already have tokenized the first.
+\cs_new_protected:Npn \__ulsbs_verse_notation_catcodes:
+  {\ifulChorded\char_set_catcode_active:n {94}
+     \else\char_set_catcode_ignore:n {94}\fi
+   \ifulMeasures\char_set_catcode_active:n {124}
+     \else\char_set_catcode_ignore:n {124}\fi}
+
+% Activate before optional-argument lookahead: no first lyric token is read
+% with a different meaning. Modifier whitespace retains ordinary TeX scanning;
+% source-line semantics start only after the optional modifiers are complete.
+\cs_set_protected:Npn \beginverse
+  {\__ulsbs_song_require:
+   \__ulsbs_verse_require_closed:
+   \group_begin:\__ulsbs_verse_catcodes:\__ulsbs_verse_options:}
+
+% #1 is * (unnumbered), #2 is + (extra melody clearance), #3 indentation units.
+% Parse modifiers before enabling source-newline semantics; + only changes the
+% baseline when pitched notes can actually be shown in chorded mode.
+\NewDocumentCommand \__ulsbs_verse_options: {s t+ O{0}}
+  {\IfBooleanTF{#1}{\ulsbs@vnumberedfalse}{\ulsbs@vnumberedtrue}
+   \dim_set:Nn \l__ulsbs_verse_indent_dim {#3\ulVerseIndentWidth}
+   \IfBooleanT{#2}{\ifulChorded\ifulShowNotes
+      \ifdefined\ulsbs@melodynotesdisabled\else
+        \ulBaselineAdjustment=.5em\relax\ulsbs@baselineincreasedtrue\fi\fi\fi}
+   \__ulsbs_verse_start:}
+
+% Recompute baseline from current lyric size, a neutral chord-font sample,
+% edition stretch policy, and baselineadj. Chord toggles also call this routine;
+% it measures generated sample ink, never authored lyric source.
+\cs_new_protected:Npn \__ulsbs_verse_baseline:
+  {\dim_set:Nn \l__ulsbs_verse_font_size_dim {\f@size pt}
+   \skip_set:Nn \l__ulsbs_verse_line_skip {\l__ulsbs_verse_font_size_dim}
+   \ifulChorded
+     \hbox_set:Nn \l__ulsbs_verse_metrics_box
+       {{\ulPrintChord{ABCDEFG\shrp\flt/j7}}}
+     \skip_add:Nn \l__ulsbs_verse_line_skip
+       {\box_ht:N \l__ulsbs_verse_metrics_box+2pt}
+   \fi
+   \ifulSlides
+     \skip_add:Nn \l__ulsbs_verse_line_skip
+       {.2\l__ulsbs_verse_font_size_dim~plus~.5\l__ulsbs_verse_font_size_dim
+        ~minus~.2\l__ulsbs_verse_font_size_dim}
+   \else
+     \skip_add:Nn \l__ulsbs_verse_line_skip {0pt~plus~.1\l__ulsbs_verse_font_size_dim}
+   \fi
+   \skip_add:Nn \l__ulsbs_verse_line_skip {\ulBaselineAdjustment}
+   \skip_set_eq:NN \baselineskip \l__ulsbs_verse_line_skip}
+
+% Commit stanza state, consume a real preceding boundary, and open the retained
+% paragraph box. Newline activation precedes reading body source; everypar places
+% number/indent/repeat prefixes. Start hooks and everyverse execute once here,
+% inside stanza scope, never once per paragraph or interactive alternative.
+\cs_new_protected:Npn \__ulsbs_verse_start:
+  {\par
+   \bool_if:NT \g__ulsbs_verse_seen_bool
+     {\bool_if:NTF \g__ulsbs_verse_glued_bool
+        {\__ulsbs_layout_break:n {\ulGluePenalty}}
+         {\__ulsbs_layout_break:n {\ulVerseVersePenalty}\vskip\ulVerseSep}
+       \bool_gset_false:N \g__ulsbs_verse_glued_bool}
+   \bool_gset_true:N \g__ulsbs_stanza_active_bool
+    \bool_gset_true:N \g__ulsbs_verse_first_line_bool
+    \global\ulsbs@rep@level=0\relax\global\ulsbs@prevparlines=0\relax
+   \ulVerseMark\nobreak
+    \char_set_catcode_active:n {13}\char_set_active_eq:nN {13}\__ulsbs_verse_line:
+    \vbox_set:Nw \l__ulsbs_verse_box
+     \group_begin:
+    \parskip=0pt\relax
+    \ulVerseFont\relax\__ulsbs_verse_baseline:\ulVerseJustify
+    \__ulsbs_verse_notation_catcodes:
+   \legacy_if:nT {ulsbs@vnumbered}
+     {\protected@edef\@currentlabel{\p@ulVerseNumber\theulVerseNumber}}
+   \everypar{\__ulsbs_verse_everypar:}
+   \cs_set_eq:NN \obeyedline \__ulsbs_verse_line:
+   \UseHook{ulsbs/stanza/start}\ulEveryVerse\relax}
+
+% First paragraph alone gets the number and chord-height strut. Every paragraph
+% receives stanza indent plus either repeat bars or ordinary content indentation.
+% A wrapped source line is still one paragraph and does not repeat this prefix.
+\cs_new_protected:Npn \__ulsbs_verse_everypar:
+  {\bool_if:NT \g__ulsbs_verse_first_line_bool
+     {\bool_gset_false:N \g__ulsbs_verse_first_line_bool
+      \ifulChorded\vrule height\baselineskip width0pt depth0pt\relax\fi
+      \legacy_if:nT {ulsbs@vnumbered}
+        {\hbox_set:Nn \l__ulsbs_verse_number_box {\ulPrintVerseNumber{\theulVerseNumber}}
+         \dim_compare:nNnT {\box_wd:N \l__ulsbs_verse_number_box}<{\ulVerseNumberWidth}
+           {\hbox_set_to_wd:Nnn \l__ulsbs_verse_number_box {\ulVerseNumberWidth}
+             {\box_use_drop:N \l__ulsbs_verse_number_box\hfil}}
+         \ulPlaceVerseNumber\l__ulsbs_verse_number_box}}
+    \kern\l__ulsbs_verse_indent_dim
+    \ifnum\ulsbs@rep@level>0\relax\__ulsbs_music_repeat_prefix:
+      \else\kern\ulContentIndentWidth\fi}
+
+% A source line may wrap, but only the boundary between source lines is a
+% page-break candidate. Blank source lines do not manufacture empty lyrics.
+\cs_new_protected:Npn \__ulsbs_verse_line:
+  {\mode_if_horizontal:T
+    {\int_set:Nn \l__ulsbs_verse_line_penalty_int {\interlinepenalty}
+      \interlinepenalty=10000\relax\tex_par:D
+      \global\ulsbs@prevparlines=\prevgraf\relax
+     \interlinepenalty=\l__ulsbs_verse_line_penalty_int\relax
+     \penalty\interlinepenalty}}
+
+% Finish hooks still run in the inner paragraph scope. Closing that group and
+% the vbox finalizes any unterminated last paragraph before unpacking real nodes.
+% Pad a shallow final depth to lyric descent, advance only numbered verses, and
+% restore the outer catcode/options group after publishing lifecycle flags.
+\cs_new_protected:Npn \__ulsbs_verse_end:
+  {\__ulsbs_song_require:
+   \bool_if:NF \g__ulsbs_stanza_active_bool
+     {\__ulsbs_verse_fail:n {endverse~without~beginverse}}
+    \unpenalty
+     \UseHook{ulsbs/stanza/finish}
+     % An unterminated final source line closes with the surrounding paragraph
+     % settings; physical newlines have already closed their own paragraphs.
+     \group_end:
+     \vbox_set_end:
+    \dim_set:Nn \l_tmpa_dim {\box_dp:N \l__ulsbs_verse_box}
+    \hbox_set:Nn \l__ulsbs_verse_metrics_box {{\ulLyricFontStyle p}}
+    \vbox_unpack_drop:N \l__ulsbs_verse_box
+    \dim_compare:nNnT {\l_tmpa_dim}<{\box_dp:N \l__ulsbs_verse_metrics_box}
+      {\vskip\dimexpr\box_dp:N \l__ulsbs_verse_metrics_box-\l_tmpa_dim\relax}
+   \legacy_if:nT {ulsbs@vnumbered} {\stepcounter{ulVerseNumber}}
+   \bool_gset_false:N \g__ulsbs_stanza_active_bool
+   \bool_gset_true:N \g__ulsbs_verse_seen_bool
+   \group_end:}
+
+% Conventional environments share the same end commands as the direct
+% command pairs; an xparse environment dispatcher would swallow direct ends.
+\renewenvironment{verse}{\beginverse}{\__ulsbs_verse_end:}
+
+\cs_set_protected:cpn {verse*}{\beginverse*}
+
+\cs_set_protected:cpn {endverse*}{\__ulsbs_verse_end:}
+
+% Inside lyrics request a mild inline break; between song paragraphs replace
+% the trailing penalty via layout. Outside a song use layout's general break.
+\cs_set_protected:Npn \brk
+  {\bool_if:NTF \g__ulsbs_song_active_bool
+    {\mode_if_horizontal:TF {\penalty-5\relax}
+       {\unpenalty\__ulsbs_layout_break:n {\ulBreakPenalty}}}
+    {\__ulsbs_layout_break:}}
+\ExplSyntaxOff
+\makeatother

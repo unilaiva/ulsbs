@@ -120,7 +120,6 @@ class PipelinePdfFontsTests(unittest.TestCase):
                             pipeline, "step_lilypond_book",
                             return_value=(self.compile_dir / f"{basename}.tex", self.doc, 2),
                         ))
-                        stack.enter_context(patch.object(pipeline, "step_texlua_indices", return_value=3))
                         stack.enter_context(patch.object(pipeline, "step_lualatex_pass", side_effect=latex))
                         # This test isolates font failure with a synthetic byte
                         # string; real PDF resource convergence is tested separately.
@@ -159,8 +158,55 @@ class PipelinePdfFontsTests(unittest.TestCase):
                 patch.object(pipeline.importlib.util, "find_spec", return_value=object()) as spec:
             pipeline.require_tools()
         self.assertEqual([call.args[0] for call in which.call_args_list],
-                         ["lualatex", "texlua", "lilypond-book"])
+                         ["lualatex", "lilypond-book"])
         spec.assert_called_once_with("pikepdf")
+
+    def test_standard_pipeline_has_no_external_index_stage_and_gates_publication(self) -> None:
+        request = ("Package ulsbs-index Warning: Index data changed. "
+                   "Rerun LuaLaTeX to refresh the index.\n")
+        for unsettled_passes in (0, 3, 5):
+            with self.subTest(unsettled_passes=unsettled_passes):
+                published = self.result / "book.pdf"
+                published.unlink(missing_ok=True)
+                commands = []
+
+                def typeset(args, commands=commands, unsettled_passes=unsettled_passes, **kwargs):
+                    commands.append(args)
+                    self.assertEqual(args[0], "lualatex")
+                    self.assertFalse(any("songidx" in arg for arg in args))
+                    kwargs["stdout_path"].write_text(
+                        request if len(commands) <= unsettled_passes else "settled\n",
+                        encoding="utf-8",
+                    )
+                    if "-draftmode" not in args:
+                        self.pdf.write_bytes(b"%PDF-test")
+
+                cfg = replace(self.cfg, create_printouts=False, coverimage=False,
+                              json=False, midifiles=False, audiofiles=False)
+                resultlist.initialize(self.result, "index-pipeline")
+                try:
+                    with patch.object(pipeline, "prepare_compile_dir"), \
+                            patch.object(pipeline, "build_include_paths", return_value=({}, [], [])), \
+                            patch.object(pipeline, "step_lilypond_book", return_value=(
+                                self.compile_dir / "book.tex", self.doc, 2)), \
+                            patch.object(pipeline, "run_cmd", side_effect=typeset), \
+                            patch.object(pipeline, "step_pdf_fonts", side_effect=lambda *args: args[-1] + 1) as fonts, \
+                            patch.object(pipeline, "analyze_warnings", return_value=0):
+                        if unsettled_passes == 5:
+                            with self.assertRaisesRegex(pipeline.CompileError, "did not settle"):
+                                pipeline.compile_one_job(self.ui, Mock(), cfg, self.job)
+                            fonts.assert_not_called()
+                            self.assertFalse(published.exists())
+                            self.assertFalse(resultlist.exists())
+                        else:
+                            pipeline.compile_one_job(self.ui, Mock(), cfg, self.job)
+                            fonts.assert_called_once()
+                            self.assertTrue(published.exists())
+                    self.assertEqual(len(commands), {0: 3, 3: 4, 5: 5}[unsettled_passes])
+                    self.assertEqual(["-draftmode" in command for command in commands],
+                                     [True] + [False] * (len(commands) - 1))
+                finally:
+                    resultlist.delete()
 
     def test_require_tools_explains_install_and_container_rebuild(self) -> None:
         with patch.object(pipeline, "which", return_value="/bin/tool"), \

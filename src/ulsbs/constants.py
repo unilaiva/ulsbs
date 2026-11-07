@@ -28,7 +28,6 @@ RESULT_DIRNAME = "result"
 DEPLOY_DIRNAME = "deploy"
 CONTENT_DIRNAME = "content"
 INCLUDE_DIRNAME = "include"
-TAG_DEFINITION_FILENAME = "tags.can" # under INCLUDE_DIRNAME
 CONFIG_FILENAME = "ulsbs-config.toml"
 
 RESULTLIST_SEPARATOR = "\t"
@@ -83,12 +82,9 @@ MULTIKEY_MIN_QPDF_VERSION = (12, 2, 0)
 LILYPOND_SCORE_MIN_SCALE = 0.60
 
 # Maximum extra full LuaLaTeX passes after the normal draft/two-full sequence.
-# Reference and optional-content checks share this budget; retries do not repeat
-# LilyPond engraving or index generation. Only unsettled builds use the budget.
+# Reference, index, and optional-content checks share this budget; retries do not
+# repeat LilyPond engraving. Only unsettled builds use the budget.
 LUALATEX_MAX_EXTRA_PASSES = 2
-
-SONG_IDX_SCRIPT_REL = "ulsbs/src/ulsbs/assets/tex/ext_packages/songs/songidx.lua"
-SORT_LOCALE = "fi_FI.utf8"
 
 GENAUDIO_ALBUMTITLE = "ULSBS (audio generated from MIDI)"
 

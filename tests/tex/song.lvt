@@ -1,0 +1,29 @@
+\input regression-test.tex
+\documentclass{ulsbs-songbook}
+\newcommand\Custom{}
+\ulNewSongKey{custom}{\def\Custom{reset}}{\def\Custom{#1}}
+\begin{document}
+\begin{ulSongs}{}
+\setcounter{ulSongNumber}{17}
+\beginsong{First\\Alternate}[id={same},by={Author},key={F\shrp},custom={set}]
+\xdef\First{\theulSongNumber/\ulSongId/\ulSongAuthors/\Custom}
+\ulNextTitle\xdef\Alternate{\ulSongTitle}
+\endsong
+\beginsong{Second}[id={same}]
+\xdef\Second{\theulSongNumber/\ulSongId/\ulSongAuthors/\Custom}
+\endsong
+\end{ulSongs}
+\START
+\TYPE{first=\First}
+\TYPE{alternate=\Alternate}
+\TYPE{second=\Second}
+\TYPE{next-number=\theulSongNumber}
+\ExplSyntaxOn
+\bool_if:NTF \g__ulsbs_song_active_bool
+  {\TYPE{song-active=yes}}{\TYPE{song-active=no}}
+\bool_if:NTF \g__ulsbs_songs_active_bool
+  {\TYPE{songs-active=yes}}{\TYPE{songs-active=no}}
+\TYPE{same-id-occurrences=\prop_item:Nn \g__ulsbs_song_occurrences_prop {same}}
+\ExplSyntaxOff
+\END
+\end{document}

@@ -22,11 +22,11 @@ const PATTERNS = [
   },
   {
     type: "beginsongsenv",
-    regex: /\\begin\{songs\}/g
+    regex: /\\begin\{ulSongs\}/g
   },
   {
     type: "endsongsenv",
-    regex: /\\end\{songs\}/g
+    regex: /\\end\{ulSongs\}/g
   },
   {
     type: "beginintersong",

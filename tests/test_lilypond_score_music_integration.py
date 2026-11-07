@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Native score-assembly compatibility and independently spelled musical pitches."""
+"""Score-assembly compatibility and independently spelled musical pitches."""
 
 from __future__ import annotations
 
@@ -490,15 +490,15 @@ theChords = \chordmode { s8 | f2 c | f c | f4 c f c | f2.~ f8 }
   \consists #(lambda (context) (make-engraver
     (listeners ((note-event engraver event)
       (let ((moment (ly:context-current-moment context)))
-        (ly:message "ULSBS-NATIVE-NOTE ~a ~a ~a" (ly:moment-main moment)
+        (ly:message "ULSBS-NOTE ~a ~a ~a" (ly:moment-main moment)
           (ly:moment-grace moment) (+ 60 (ly:pitch-semitones (ly:event-property event 'pitch)))))))
     (acknowledgers
       ((lyric-syllable-interface engraver grob source)
-        (ly:message "ULSBS-NATIVE-LYRIC ~a ~a"
+        (ly:message "ULSBS-LYRIC ~a ~a"
           (ly:context-current-moment context) (ly:grob-property grob 'text)))
       ((tab-note-head-interface engraver grob source)
         (let ((moment (ly:context-current-moment context)))
-          (ly:message "ULSBS-NATIVE-TAB ~a ~a ~a" (ly:moment-main moment)
+          (ly:message "ULSBS-TAB ~a ~a ~a" (ly:moment-main moment)
             (ly:moment-grace moment) (ly:grob-property grob 'text)))))))
 } }
 '''
@@ -531,10 +531,10 @@ theChords = \chordmode { c1 f1 g1 c1 }
                 score.source.write_text(score.source.read_text().replace(r"\break", ""))
                 score = next(item for item in lilypond_scores.prepare_scores(self.root, "music").values()
                              if item.source == score.source)
-                note_pattern = r"ULSBS-NATIVE-NOTE (\S+) (\S+) (-?\d+)"
+                note_pattern = r"ULSBS-NOTE (\S+) (\S+) (-?\d+)"
                 original_notes = re.findall(note_pattern, original_log.read_text())
-                original_lyrics = re.findall(r"ULSBS-NATIVE-LYRIC (.+)", original_log.read_text())
-                tab_pattern = r"ULSBS-NATIVE-TAB (\S+) (\S+) (.+)"
+                original_lyrics = re.findall(r"ULSBS-LYRIC (.+)", original_log.read_text())
+                tab_pattern = r"ULSBS-TAB (\S+) (\S+) (.+)"
                 original_tabs = re.findall(tab_pattern, original_log.read_text())
                 self.assertTrue(original_notes)
                 self.assertTrue(original_lyrics)
@@ -548,7 +548,7 @@ theChords = \chordmode { c1 f1 g1 c1 }
                         notes = re.findall(note_pattern, log.read_text())
                         self.assertEqual(notes, [(main, grace, str(int(pitch) + signed))
                                                  for main, grace, pitch in original_notes])
-                        self.assertEqual(re.findall(r"ULSBS-NATIVE-LYRIC (.+)", log.read_text()),
+                        self.assertEqual(re.findall(r"ULSBS-LYRIC (.+)", log.read_text()),
                                          original_lyrics)
                         tabs = re.findall(tab_pattern, log.read_text())
                         self.assertEqual([(main, grace) for main, grace, _ in tabs],

@@ -1,9 +1,15 @@
 # Changelog
 
-Changes accumulate under Unreleased and move to a dated version heading when
-the extension is released.
-
 ## Unreleased
+
+- Updated snippets, completions, structural editing and the new-songbook template
+  for current ULSBS command names and verse/repeat syntax.
+- Added title, author and tag index declarations and configuration, including
+  `\ulTagFile`; songbook templates and collection snippets include all three indices.
+- Updated outlines for `\ulSongChapter` and `\ulSongSection`, including starred
+  and optional short-title forms.
+- Fixed missing required arguments in `ulSongs` and `passage` snippets and
+  contextual completions.
 
 ## v0.2.2 - 2026-10-24
 

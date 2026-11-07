@@ -1,7 +1,19 @@
 -- SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 -- SPDX-License-Identifier: GPL-3.0-or-later
+--
+-- Alternate-chord fitting and physical-page tracking for multikey books.
+-- This file is part of the 'ulsbs' package.
+--
 -- Fit alternate chords within lyric space and track physical-page usage for
 -- the multikey manifest, written only as a finalized JSON sidecar.
+-- Loaded by ulsbs-pdf-layer-setup.code.tex as ulsbs_multikey for a LuaLaTeX pass.
+-- TeX's multikey helpers register occurrences and emit usage/anchor late-Lua nodes. The
+-- shipout/before hook calls track_page; enddocument/afterlastpage calls finish.
+-- TeX owns OCG allocation/names and original layout; this module adjusts only
+-- alternate-wrapper drawing matrices and reports actual shipped dependencies.
+-- songs preserves registration order, by_id resolves private runtime IDs, and
+-- finished seals the one-pass manifest. shipping_page is non-nil only between
+-- physical-page sentinels, not while measuring boxes or serializing PDF forms.
 
 local M = {}
 local songs, by_id = {}, {}
@@ -28,6 +40,8 @@ local late_lua_subtype = node.subtype("late_lua")
 
 -- Attributes survive the copies and nested boxes used by songs and melody
 -- annotations. Tag only the explicit alternate wrapper, not its descendants.
+-- box_number is a TeX register; original/alternative are positive widths in sp.
+-- Attach width attributes for fit_chords; do nothing for nonpositive widths.
 function M.tag_chord(box_number, original, alternative)
   if original > 0 and alternative > 0 then
     local box = tex.box[box_number]
@@ -40,13 +54,19 @@ end
 -- a trailing chord chunk may borrow the spare lyric width: growing an earlier
 -- chunk could cover a following chord, inline hint or other shared material.
 -- Ignore paragraph spaces and broken-word hyphen padding, since they are not
--- a guaranteed part of this pair. No dimensions or t00 nodes are ever changed.
+-- a guaranteed part of this pair. No box dimensions or t00 nodes are changed;
+-- only alternate-wrapper PDF matrices are updated, uniformly in both axes.
+-- box_number identifies the chord box, lyric_width is in sp, and minimum_scale
+-- is the caller's lower scale bound. Return nothing; absent boxes or pairs with
+-- no spare lyric width are no-ops. Never enlarge an alternative above unity.
 function M.fit_chords(box_number, lyric_width, minimum_scale)
   local chord = tex.box[box_number]
   if not chord or lyric_width <= chord.width then return end
   local candidates, rightmost = {}, 0
 
   -- Collect alternate wrappers and the rightmost non-chord content position.
+  -- x is the current horizontal offset in sp; do not descend into tagged wrappers
+  -- or their nested transforms could be mistaken for independently fit chords.
   local function visit(box, x)
     for n in node.traverse(box.head) do
       if n.id == hlist_id then
@@ -138,6 +158,10 @@ local function song_for(internal_id)
 end
 
 -- Registration order is document order. The internal ID never leaves Lua.
+-- Register one occurrence, copying twelve optional display key_labels (t00..t11).
+-- song_id and layer_prefix are public identities supplied by TeX; occurrence is
+-- one-based and original_key may be nil. No page or transposable-content claim
+-- is made until late Lua actually ships; duplicate runtime IDs are fatal.
 function M.begin_song(internal_id, song_id, occurrence, layer_prefix, original_key, key_labels)
   if finished then fail("manifest already finished") end
   if type(internal_id) ~= "string" or by_id[internal_id] then
@@ -175,6 +199,8 @@ function M.begin_song(internal_id, song_id, occurrence, layer_prefix, original_k
 end
 
 -- Resolve and validate a zero-based page index within physical shipout.
+-- An optional one-based absolute_shipout_counter must agree with the sentinel;
+-- printed page labels never enter this calculation. Return the physical index.
 local function physical_page_index(absolute_shipout_counter)
   if shipping_page == nil then
     fail("marked content outside physical page shipout (reusable PDF forms are unsupported)")
@@ -204,11 +230,14 @@ function M.stop_page()
 end
 
 -- Reject untrackable leader content and bracket the shipout list with sentinels.
+-- box is the actual shipout node, not a box register number. Mutate its list in
+-- place; the sentinels execute later, around all content late-Lua callbacks.
 function M.track_page(box)
   if not box then fail("missing physical shipout box") end
   -- LuaTeX suppresses late Lua in leaders. Refuse those placements rather than
   -- silently omit their dependencies; ordinary copied boxes execute normally.
   -- Recursively detect usage markers inside leaders, including nested boxes.
+  -- Descend boxes and leader lists, carrying whether late Lua would be suppressed.
   local function check_leaders(list, in_leader)
     for n in node.traverse(list) do
       if n.id == hlist_id or n.id == vlist_id then
@@ -232,6 +261,9 @@ end
 
 -- Every alternative records its actual shipout, including hidden content and
 -- copied boxes. OCG allocation and discarded measurement boxes record nothing.
+-- Resolve internal_id and add this physical page to a set shared by all twelve
+-- alternatives. Optional absolute_shipout_counter is one-based; repeated marks
+-- on a page are idempotent. Calls outside the physical-page sentinel are fatal.
 function M.mark_used(internal_id, absolute_shipout_counter)
   local song = song_for(internal_id)
   song.layer_pages[physical_page_index(absolute_shipout_counter)] = true
@@ -241,6 +273,9 @@ end
 -- Call from late Lua at the header anchor, immediately after primitive savepos.
 -- pdf.getpos() is in sp, with the PDF bottom-left origin already applied.
 -- The optional override is LaTeX's one-based absolute shipout counter.
+-- Save only the first shipped anchor for internal_id, converting scaled points
+-- to PDF bp. Header placement and layer dependencies are independent: an anchor
+-- alone does not retain an occurrence in the manifest's songs array.
 function M.anchor(internal_id, absolute_shipout_counter)
   local song = song_for(internal_id)
   if song.anchor then return end
@@ -258,6 +293,10 @@ function M.anchor(internal_id, absolute_shipout_counter)
 end
 
 -- Serialize transposable occurrences with sorted, validated dependency pages.
+-- Return the schema-2 envelope in registration order; omit unshipped occurrences
+-- even if they have OCGs or anchors. layer_prefix plus ':tNN' derives layer names;
+-- layer_page_indices is the union over alternatives, not a header-derived range.
+-- Missing anchors remain null and do not invalidate actual shipped dependencies.
 local function manifest()
   local records = {}
   for _, song in ipairs(songs) do
@@ -296,6 +335,8 @@ local function manifest()
 end
 
 -- Write the compile-status sidecar, checking both writing and closing errors.
+-- json is a complete envelope. The private jobname path is a compile artifact
+-- consumed by Python, not embedded PDF metadata or the published ranges index.
 local function write_status(json)
   local filename = tex.jobname .. ".ulsbs-multikey.json"
   local file, message = io.open(filename, "wb")
@@ -309,6 +350,7 @@ end
 
 -- A lyric-mode or non-ULSBS source explicitly reports no renderer. This is not
 -- interchangeable with a missing manifest, which could indicate a failed build.
+-- Write the false/null capability envelope once and seal the module state.
 function M.finish_disabled()
   if finished then return end
   write_status('{"has_multikey_info":false,"multikey_info":null}')
@@ -320,6 +362,8 @@ end
 -- The build consumer must discard prior-pass sidecars before compiling; this
 -- writer alone cannot establish freshness. No JSON is embedded in PDF XMP or Info,
 -- and any standard metadata supplied by the document remains untouched.
+-- Write the enabled envelope once, then seal state; repeated finish calls are
+-- no-ops. This module has no reset API: each LuaLaTeX pass loads fresh state.
 function M.finish()
   if finished then return end
   if shipping_page ~= nil then fail("physical page shipout did not finish") end

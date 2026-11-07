@@ -53,8 +53,8 @@ class LilyPondFontSharingTests(unittest.TestCase):
             doc = root / "ul-selection_fonts_A5.tex"
             doc.write_text(
                 r"\documentclass[maintitle={Font Sharing Test}]{ulsbs-songbook}" + "\n"
-                r"\begin{document}\begin{songs}{}\input{content/song.tex}"
-                r"\end{songs}\end{document}" + "\n", encoding="utf-8",
+                r"\begin{document}\begin{ulSongs}{}\input{content/song.tex}"
+                r"\end{ulSongs}\end{document}" + "\n", encoding="utf-8",
             )
             # Direct grob font selection works in both LilyPond 2.24 and 2.26;
             # the optimizer does not depend on their different global-font APIs.
@@ -76,7 +76,7 @@ class LilyPondFontSharingTests(unittest.TestCase):
                     r"\end{lilypond}\end{lilywrap}\endsong" + "\n"
                 )
             (content / "song.tex").write_text(
-                "\\end{songs}\\clearpage\\begin{songs}{}\n".join(snippets), encoding="utf-8",
+                "\\end{ulSongs}\\clearpage\\begin{ulSongs}{}\n".join(snippets), encoding="utf-8",
             )
             paths = SimpleNamespace(project_root=root, host_project_root=root, result_dir=result,
                                     content_dir=content, include_dir=root / "include")

@@ -1,0 +1,15 @@
+\begin{ulIndexBlock}{A}
+\ulIndexDisplayEntry{Author, Example}{\ulSongLink{song1-20.0}{20}\\\ulSongLink{song2-2.0}{2}}
+\end{ulIndexBlock}
+\begin{ulIndexBlock}{E}
+\ulIndexDisplayEntry{example author}{\ulSongLink{song1-3.0}{3}}
+\end{ulIndexBlock}
+\begin{ulIndexBlock}{P}
+\ulIndexDisplayEntry{Person, Another}{\ulSongLink{song1-7.0}{7}}
+\end{ulIndexBlock}
+\begin{ulIndexBlock}{W}
+\ulIndexDisplayEntry{Writer, Élan}{\ulSongLink{song1-7.0}{7}}
+\ulIndexDisplayEntry{Writer, Åland}{\ulSongLink{song1-6.0}{6}}
+\ulIndexDisplayEntry{Writer, Äiti}{\ulSongLink{song1-5.0}{5}}
+\ulIndexDisplayEntry{Writer, Öinen}{\ulSongLink{song1-4.0}{4}}
+\end{ulIndexBlock}

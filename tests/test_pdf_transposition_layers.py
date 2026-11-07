@@ -88,7 +88,7 @@ class PdfStructure:
             if not match:
                 continue
             # /OCGs preserves creation order, independently of the song ID or
-            # native layer UI order. Repeated IDs have distinct occurrence families.
+            # layer UI order. Repeated IDs have distinct occurrence families.
             family = name.rsplit(":t", 1)[0]
             ordinal = families.setdefault(family, len(families) + 1)
             if int(match[3]) == offsets.get(ordinal, 0):
@@ -178,7 +178,7 @@ class PdfTranspositionLayerIntegrationTests(unittest.TestCase):
         cls.outputs = {}
         for mode, preamble in (
             ("native", ""),
-            ("hidden", "\\def\\ulPdfTranspositionLayerUI{hidden}\n"),
+            ("hidden", "\\def\\ulPdfTranspositionLayerUi{hidden}\n"),
             ("disabled", "\\def\\ulPdfTranspositionLayers{false}\n"),
         ):
             # Match the local songbook rerun workflow, including outline/page refs.
@@ -348,14 +348,14 @@ class PdfTranspositionLayerIntegrationTests(unittest.TestCase):
 
         # Default and alternate badge drawing use different colors, including
         # the pitch text. The public color can be customized independently.
-        for color in ("transposedkeycolor", "chordcolor"):
+        for color in ("ulTransposedKeyColor", "ulChordColor"):
             _, recolored = compile_fixture(
                 "pdf-transposition-keys", passes=3,
                 preamble="\\AtBeginDocument{\\colorlet{" + color + "}{red}}\n",
             )
             recolored_structure = PdfStructure(recolored)
             alternate = recolored_structure.selected_pdf(recolored, {1: 2, 2: 2})
-            if color == "transposedkeycolor":
+            if color == "ulTransposedKeyColor":
                 self.assertEqual(rendered_pages(recolored), rendered_pages(enabled))
                 self.assertNotEqual(rendered_pages(alternate), rendered_pages(both))
             else:

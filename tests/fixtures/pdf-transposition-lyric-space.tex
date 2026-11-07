@@ -3,7 +3,7 @@
 \newdimen\ULtestfitwidth
 \newcount\ULtestlyriccalls
 \newcommand{\ULtestlyric}{\global\advance\ULtestlyriccalls by 1 happy tune}
-\ifUL@pdflayers
+\ifulsbs@pdflayers
   \directlua{
     local fit = ulsbs_multikey.fit_chords
     local attribute = luatexbase.attributes["ulsbs.multikey.chord_width"]
@@ -38,12 +38,12 @@
 \makeatother
 \begin{document}
 \makeatletter
-\sbox\UL@pdfbasebox{\ulChordFont C\shrp}
-\ULtestfitwidth=.9\wd\UL@pdfbasebox
-\sbox\UL@pdfbasebox{\ulChordFont\kern.2em}
-\advance\ULtestfitwidth by \wd\UL@pdfbasebox
+\sbox\ulsbs@pdfbasebox{\ulChordFont C\shrp}
+\ULtestfitwidth=.9\wd\ulsbs@pdfbasebox
+\sbox\ulsbs@pdfbasebox{\ulChordFont\kern.2em}
+\advance\ULtestfitwidth by \wd\ulsbs@pdfbasebox
 \makeatother
-\begin{songs}{}
+\begin{ulSongs}{}
 \beginsong{Lyric Space}[id={fixture-1},key={C}]
   \def\ULtestcase{example}
   \beginverse
@@ -88,6 +88,6 @@
     \[C]
   \endverse
 \endsong
-\end{songs}
+\end{ulSongs}
 \typeout{ULSBS-LYRIC-CALLS:\the\ULtestlyriccalls}
 \end{document}

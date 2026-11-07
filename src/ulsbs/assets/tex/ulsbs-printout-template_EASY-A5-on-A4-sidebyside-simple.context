@@ -2,10 +2,11 @@
 % SPDX-License-Identifier: GPL-3.0-or-later
 %
 % Easy side-by-side printout from existing PDF.
-
+% This file is part of the 'ulsbs' package.
+%
 % This is a ConTeXt source file to create a PDF printout from an existing
 % PDF file. If you have 'context' binary on your system,
-%'compile-songbooks.sh' will compile a PDF from this source file.
+% 'compile-songbooks.sh' will compile a PDF from this source file.
 %
 % The compile script will also use this file as a template for creating
 % similar printouts from other source PDF files. It will only replace the
@@ -32,7 +33,6 @@
 % Remember to set margins to 0 in the printing software!
 %
 % See README.md for more instructions on printing.
-%
 
 \setuppapersize [A5] [A4]
 %\setuppaper[nx=1,ny=2] % not needed here

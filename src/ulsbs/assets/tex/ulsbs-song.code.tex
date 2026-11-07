@@ -1,0 +1,518 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Song semantic lifecycle.
+% This file is part of the 'ulsbs' package.
+%
+% Loaded by ulsbs.sty after index collection and common styling/PDF helpers.
+% Layout, verse and multikey adapters load later;
+% their definitions must exist before document source invokes these commands.
+% Owns active-song/block flags, scoped metadata/title iteration and selection
+% boxes, plus global serials and source-ID occurrence counts. Metadata resets
+% and hooks run while reading source, even for songs later discarded. Completed
+% boxes retain index/TOC/position nodes: only actual shipout commits those writes.
+
+\ProvidesFile{ulsbs-song.code.tex}[Song lifecycle]
+
+\makeatletter
+\ExplSyntaxOn
+\msg_new:nnn {ulsbs-song}{state}{Invalid~song~lifecycle:~#1.}
+\msg_new:nnn {ulsbs-song}{index}{Unknown~song~index~'#1'.}
+\msg_new:nnn {ulsbs-song}{key}{Unknown~metadata~key~'#1'.}
+\bool_new:N \g__ulsbs_song_active_bool
+\bool_new:N \g__ulsbs_songs_active_bool
+\bool_new:N \g__ulsbs_song_heading_pending_bool
+\bool_new:N \l__ulsbs_song_selected_bool
+\bool_new:N \g__ulsbs_song_selection_bool
+\prop_new:N \l__ulsbs_song_metadata_prop
+\seq_new:N \g__ulsbs_song_key_resets_seq
+\seq_new:N \l__ulsbs_song_titles_seq
+\seq_new:N \l__ulsbs_song_extra_indices_seq
+\clist_new:N \g__ulsbs_song_selection_clist
+\clist_new:N \l__ulsbs_song_indices_clist
+\prop_new:N \g__ulsbs_song_selection_boxes_prop
+\prop_new:N \g__ulsbs_song_occurrences_prop
+\prop_new:N \l__ulsbs_song_index_labels_prop
+\int_new:N \g__ulsbs_songs_serial_int
+\int_new:N \g__ulsbs_song_serial_int
+\int_new:N \l__ulsbs_song_title_int
+\tl_new:N \l__ulsbs_song_label_tl
+\tl_new:N \l__ulsbs_song_target_tl
+\tl_new:N \l__ulsbs_song_id_tl
+\tl_new:N \l__ulsbs_song_box_tl
+\box_new:N \l__ulsbs_song_box
+\box_new:N \l__ulsbs_song_body_box
+\box_new:N \l__ulsbs_song_prefix_box
+\box_new:N \l__ulsbs_song_anchor_box
+\box_new:N \l__ulsbs_song_prelude_box
+\box_new:N \l__ulsbs_song_attribution_box
+\tl_new:N \l__ulsbs_song_tagline_tl
+\dim_new:N \l__ulsbs_song_badge_raise_dim
+\int_new:N \l__ulsbs_song_badge_row_int
+\dim_new:N \l__ulsbs_song_title_width_dim
+\dim_new:N \l__ulsbs_song_heading_reserve_dim
+\NewHook{ulsbs/song/begin}
+\NewHook{ulsbs/stanza/start}
+\NewHook{ulsbs/stanza/finish}
+\NewHook{ulsbs/song/finish}
+\NewHook{ulsbs/index/record}
+\NewHook{ulsbs/song/anchor}
+\keys_define:nn {ulsbs/song}
+  {unknown .code:n = {\msg_fatal:nnx {ulsbs-song}{key}{\l_keys_key_str}}}
+
+% #1: lifecycle diagnostic text. Abort with the module's fatal state error.
+\cs_new_protected:Npn \__ulsbs_song_fail:n #1
+  {\msg_fatal:nnn {ulsbs-song}{state}{#1}}
+
+% No arguments/output; reject song-only commands outside an active song.
+\cs_new_protected:Npn \__ulsbs_song_require:
+  {\bool_if:NF \g__ulsbs_song_active_bool
+    {\__ulsbs_song_fail:n {command~outside~a~song}}}
+
+% {key}{reset code}{setter code}: register a global reset callback and key.
+% Resets run once per source song before parsing; setters run per supplied key
+% and receive its value as #1. Neither callback is replayed by box selection.
+\DeclareDocumentCommand \ulNewSongKey {m +m +m}
+  {
+    \seq_gput_right:Nn \g__ulsbs_song_key_resets_seq {#2}
+    \keys_define:nn {ulsbs/song}
+      {#1 .code:n = {\prop_put:Nnn \l__ulsbs_song_metadata_prop {#1}{##1} #3}}
+  }
+
+% #1: key name; #2: public metadata control sequence to clear/set locally.
+\cs_new_protected:Npn \__ulsbs_song_key:nn #1#2
+  {\ulNewSongKey{#1}{\tl_clear:N #2}{\tl_set:Nn #2{##1}}}
+\__ulsbs_song_key:nn {by}\ulSongAuthors
+\__ulsbs_song_key:nn {cr}\ulSongCopyright
+\__ulsbs_song_key:nn {li}\ulSongLicense
+\__ulsbs_song_key:nn {id}\ulSongId
+\__ulsbs_song_key:nn {off}\ulOfferedTo
+\__ulsbs_song_key:nn {ex}\ulExtraInfo
+\__ulsbs_song_key:nn {key}\ulSongKey
+\__ulsbs_song_key:nn {gk}\ulGoodKeys
+\__ulsbs_song_key:nn {ph}\ulPhaseList
+\__ulsbs_song_key:nn {tags}\ulTagList
+\ulNewSongKey{index}{}{\seq_put_right:Nn \l__ulsbs_song_extra_indices_seq
+  {\ulIndexEntry{#1}}}
+\ulNewSongKey{ititle}{}{\seq_put_right:Nn \l__ulsbs_song_extra_indices_seq
+  {\ulIndexTitleEntry{#1}}}
+
+% {license text}: replace the current scoped public license, without output.
+\DeclareDocumentCommand \ulSetLicense {m}{\tl_set:Nn \ulSongLicense{#1}}
+
+% Declarations register events; no external-format write stream exists.
+% #1: index ID; #2: title/tag/author kind; #3: filename stem. Register in both
+% TeX lookup properties and Lua state. Public wrappers take {ID}{stem}.
+\cs_new_protected:Npn \__ulsbs_song_newindex:nnn #1#2#3
+  {\ulsbs_index_declare:nnn {#1}{#2}{#3}
+    \directlua{ulsbs_index_state.declare("\luaescapestring{#1}",
+     "\luaescapestring{#2}","\luaescapestring{#3}")}}
+
+\DeclareDocumentCommand \ulNewIndex {m m}{\__ulsbs_song_newindex:nnn {#1}{title}{#2}}
+
+\DeclareDocumentCommand \ulNewTagIndex {m m}{\__ulsbs_song_newindex:nnn {#1}{tag}{#2}}
+
+\DeclareDocumentCommand \ulNewAuthorIndex {m m}{\__ulsbs_song_newindex:nnn {#1}{author}{#2}}
+
+% No arguments; rewind the title iterator and expose the first \ulSongTitle.
+\DeclareDocumentCommand \ulResetTitles {}
+  {\int_zero:N \l__ulsbs_song_title_int \ulNextTitle}
+
+% No arguments; advance \ulSongTitle, setting it to \scan_stop: at exhaustion.
+\DeclareDocumentCommand \ulNextTitle {}
+  {
+    \int_incr:N \l__ulsbs_song_title_int
+    \int_compare:nNnTF {\l__ulsbs_song_title_int}>{\seq_count:N \l__ulsbs_song_titles_seq}
+      {\cs_set_eq:NN \ulSongTitle \scan_stop:}
+      {\seq_map_indexed_inline:Nn \l__ulsbs_song_titles_seq
+        {\int_compare:nNnT {##1}={\l__ulsbs_song_title_int}
+          {\cs_set:Npn \ulSongTitle{##2}}}}
+  }
+
+% {code}: execute at the current and each remaining title, consuming iteration.
+\DeclareDocumentCommand \ulForEachTitle {+m}
+  {\int_while_do:nn {\l__ulsbs_song_title_int <= \seq_count:N \l__ulsbs_song_titles_seq}
+    {#1\ulNextTitle}}
+
+% {printed labels/directives}: enable global selection, even for an empty list.
+% Source still executes once; commitsongs later submits retained boxes in order.
+\DeclareDocumentCommand \ulIncludeOnlySongs {m}
+  {\bool_gset_true:N \g__ulsbs_song_selection_bool
+   \clist_gset:Nn \g__ulsbs_song_selection_clist {#1}}
+
+% {index IDs}: validate collection destinations, reset numbering/selection boxes
+% and enter layout ownership. Exit commits selection and drains owned pages.
+\DeclareDocumentEnvironment{ulSongs}{m}
+  {
+    \bool_if:NT \g__ulsbs_songs_active_bool {\__ulsbs_song_fail:n {nested~songs~environments}}
+    \bool_gset_true:N \g__ulsbs_songs_active_bool
+    \bool_gset_false:N \g__ulsbs_song_heading_pending_bool
+    \int_gincr:N \g__ulsbs_songs_serial_int
+    \setcounter{ulSongNumber}{1}
+    \clist_set:Nn \l__ulsbs_song_indices_clist {#1}
+    \clist_map_inline:Nn \l__ulsbs_song_indices_clist
+      {\prop_if_in:NnF \g__ulsbs_index_kinds_prop {##1}
+        {\msg_fatal:nnn {ulsbs-song}{index}{##1}}}
+    \prop_gclear:N \g__ulsbs_song_selection_boxes_prop
+    \__ulsbs_layout_songs_begin:
+  }
+  {
+    \bool_if:NT \g__ulsbs_song_active_bool {\__ulsbs_song_fail:n {missing~endsong}}
+    \ulCommitSongs
+    \__ulsbs_layout_songs_end:
+    \bool_gset_false:N \g__ulsbs_songs_active_bool
+  }
+
+% Environment adapter: beginsong scans the following title/options itself.
+\DeclareDocumentEnvironment{song}{}{\beginsong}{\endsong}
+
+% {titles}: reset source metadata and split top-level \\ titles, then scan
+% optional [keys]. Opens body capture; removed braced metadata is an error.
+\DeclareDocumentCommand \beginsong {m}
+  {
+    \bool_if:NT \g__ulsbs_song_active_bool {\__ulsbs_song_fail:n {nested~beginsong}}
+    \bool_if:NF \g__ulsbs_songs_active_bool {\__ulsbs_song_fail:n {beginsong~outside~songs}}
+    \bool_gset_true:N \g__ulsbs_song_active_bool
+    \prop_clear:N \l__ulsbs_song_metadata_prop
+    \seq_clear:N \l__ulsbs_song_extra_indices_seq
+    \seq_map_inline:Nn \g__ulsbs_song_key_resets_seq {##1}
+    \seq_set_split:Nnn \l__ulsbs_song_titles_seq {\\}{#1}
+    \seq_clear:N \l_tmpa_seq
+    \seq_map_inline:Nn \l__ulsbs_song_titles_seq
+      {\tl_set:Nn \l_tmpa_tl {##1}\tl_trim_spaces:N \l_tmpa_tl
+       \seq_put_right:NV \l_tmpa_seq \l_tmpa_tl}
+    \seq_set_eq:NN \l__ulsbs_song_titles_seq \l_tmpa_seq
+    \ulResetTitles
+    \prop_put:Nnn \l__ulsbs_song_metadata_prop {title}{#1}
+    % Scan the optional argument only after activating accidentals, never titles.
+    \group_begin:
+    \char_set_catcode_active:n {35}\char_set_catcode_active:n {38}
+    \peek_meaning_ignore_spaces:NTF [ {\__ulsbs_song_options:w}
+      {\group_end:\peek_meaning_ignore_spaces:NTF \c_group_begin_token
+         {\__ulsbs_song_fail:n {three-braced~song~metadata~was~removed;~use~optional~tags/by/cr~keys}}
+         {\__ulsbs_song_start:}}
+  }
+
+% [#1]: options scanned with active accidentals; restore scanning group, apply
+% keys in the surrounding metadata scope, then start retained-box construction.
+\cs_new_protected:Npn \__ulsbs_song_options:w [#1]
+  {\group_end:\keys_set:nn {ulsbs/song}{#1}\__ulsbs_song_start:}
+
+% No arguments. Freeze label/target/selection and open the song-local group,
+% outer song box and body box. Hooks and index staging execute now, not during
+% later layout probes; prefix/anchor nodes are retained for final assembly.
+\cs_new_protected:Npn \__ulsbs_song_start:
+  {
+    \bool_if:NT \g__ulsbs_song_heading_pending_bool
+    {\bool_gset_false:N \g__ulsbs_song_heading_pending_bool
+     \if@nobreak\ifdim\pagetotal>0pt
+      % A standalone heading consumes capacity in the first song column even
+      % when the column itself moves to the next physical page.
+      \dim_set:Nn \l__ulsbs_song_heading_reserve_dim {\pagetotal}
+      \__ulsbs_layout_clear_page:\enlargethispage{-\l__ulsbs_song_heading_reserve_dim}
+     \fi\fi}
+    \char_set_active_eq:nN {35}\shrp
+    \char_set_active_eq:nN {38}\flt
+    \tl_set:Nx \l__ulsbs_song_label_tl {\theulSongNumber}
+    \tl_set:Nx \l__ulsbs_song_target_tl
+      {song\int_use:N \g__ulsbs_songs_serial_int-\theulSongNumber}
+    \bool_set_true:N \l__ulsbs_song_selected_bool
+    \bool_if:NT \g__ulsbs_song_selection_bool
+      {\exp_args:NNV \clist_if_in:NnF \g__ulsbs_song_selection_clist \l__ulsbs_song_label_tl
+        {\bool_set_false:N \l__ulsbs_song_selected_bool}}
+    \protected@edef\@currentlabel{\p@ulSongNumber\theulSongNumber}
+    \int_gincr:N \g__ulsbs_song_serial_int
+    \tl_set:Nx \l__ulsbs_song_box_tl {g__ulsbs_song_\int_use:N \g__ulsbs_song_serial_int _box}
+    \group_begin:
+    \vbox_set:Nw \l__ulsbs_song_box
+      \__ulsbs_layout_song_begin:
+      \UseHook{ulsbs/song/begin}
+      \ulResetTitles
+       \__ulsbs_song_multikey:
+       \__ulsbs_song_anchor:
+       \vbox_set:Nw \l__ulsbs_song_prefix_box
+       \ulSongTarget{\int_if_zero:nTF {\value{section}}{1}{2}}{\l__ulsbs_song_target_tl}
+      \seq_map_inline:Nn \l__ulsbs_song_extra_indices_seq {##1}
+      \seq_map_inline:Nn \l__ulsbs_song_titles_seq
+        {\__ulsbs_song_record:nnn {title}{}{##1}}
+       \tl_if_empty:NF \ulTagList
+         {\__ulsbs_song_record:nnn {tag}{}{\ulTagList}}
+       \__ulsbs_song_record:nnn {author}{}{\ulSongAuthors}
+       \vbox_set_end:
+       % Match legacy font first-use order without replaying body source.
+       \vbox_set:Nw \l__ulsbs_song_body_box
+        \nointerlineskip\ulLyricFontStyle\relax\__ulsbs_verse_baseline:
+      \hypersetup{bookmarksdepth=0}\phantomsection
+      \addcontentsline{toc}{subsection}{\numberline{\theulSongNumber}\ulSongTitle\relax
+        \ifulShowPhaseInToc\hspace{0.15em}\scriptsize\textsuperscript{\rmfamily\tiny\ulPhaseList}\fi}
+      \hypersetup{bookmarksdepth=2}
+  }
+
+% No arguments. Finish body source once, prepend retained anchors/prelude and
+% append postlude. Submit selected output now or save a global box for commit;
+% discard unselected nodes, close the song group and advance printed numbering.
+\DeclareDocumentCommand \endsong {}
+  {
+    \__ulsbs_song_require:
+       \UseHook{ulsbs/song/finish}
+       \__ulsbs_layout_song_end:
+       \vbox_set_end:
+       \ulSongMark
+       \vbox_unpack_drop:N \l__ulsbs_song_anchor_box
+       \__ulsbs_layout_prelude_start:
+       \vbox_unpack_drop:N \l__ulsbs_song_prefix_box
+       \vbox{\ulMakePrelude}\nobreak\vskip\ulVerseSep\vskip\ulAfterPreludeSkip
+       \nointerlineskip
+       \vbox_unpack_drop:N \l__ulsbs_song_body_box
+       \__ulsbs_layout_song_postlude:
+     \vbox_set_end:
+    \bool_if:NT \l__ulsbs_song_selected_bool
+      {
+        \bool_if:NTF \g__ulsbs_song_selection_bool
+          {
+            \box_new:c {\l__ulsbs_song_box_tl}
+            \box_gset_eq:cN {\l__ulsbs_song_box_tl}\l__ulsbs_song_box
+            \prop_gput:NVx \g__ulsbs_song_selection_boxes_prop \l__ulsbs_song_label_tl
+              {\exp_not:N \__ulsbs_layout_submit_copy:c {\l__ulsbs_song_box_tl}}
+          }
+          {\__ulsbs_layout_submit:N \l__ulsbs_song_box}
+      }
+    \group_end:
+    \bool_gset_false:N \g__ulsbs_song_active_bool
+    \stepcounter{ulSongNumber}
+  }
+
+% Freeze identifiers/numbers here; page and position are expanded at shipout.
+% No arguments. Count source ID occurrences globally (including discarded songs),
+% retain anchor/write nodes in anchor_box and run the anchor hook in song scope.
+\cs_new_protected:Npn \__ulsbs_song_anchor:
+  {
+    \tl_set:Nx \l__ulsbs_song_id_tl {\ulSongId}
+    \tl_if_empty:NF \l__ulsbs_song_id_tl
+      {
+        \prop_get:NVNTF \g__ulsbs_song_occurrences_prop \l__ulsbs_song_id_tl \l_tmpa_tl
+          {\int_set:Nn \l_tmpa_int {\l_tmpa_tl+1}}{\int_set:Nn \l_tmpa_int {1}}
+        \prop_gput:NVx \g__ulsbs_song_occurrences_prop \l__ulsbs_song_id_tl {\int_use:N \l_tmpa_int}
+        \int_compare:nNnT {\l_tmpa_int}>{1}
+          {\tl_put_right:Nx \l__ulsbs_song_id_tl {-\int_use:N \l_tmpa_int}}
+      }
+    % Only the retained nodes need a subgroup; hook assignments stay song-local.
+    \vbox_set:Nn \l__ulsbs_song_anchor_box
+      {\tl_if_empty:NF \l__ulsbs_song_id_tl
+        {\savepos\hypertarget{songid:\l__ulsbs_song_id_tl}{}
+         \protected@write\ulsbs@idtopagefile{}
+           {ID-NR-PAGE-Y|\l__ulsbs_song_id_tl|\theulSongNumber|\thepage|\noexpand\the\noexpand\lastypos}}}
+    \UseHook{ulsbs/song/anchor}
+  }
+
+% {outline level}{target}: emit a bookmark using current song number/title.
+\DeclareDocumentCommand \ulSongTarget {m m}
+  {\pdfbookmark[#1]{\theulSongNumber.\space\ulSongTitle}{#2}}
+
+% {target}{visible text}: typeset a hyperlink; does not create a destination.
+\DeclareDocumentCommand \ulSongLink {m m}{\hyperlink{#1}{#2}}
+
+% Shared ULSBS metadata formatting has no dependency on the annotation scanner
+% when supplied these semantic key adapters. No layers are allocated yet.
+% No arguments/output here; initialize multikey state for the current song.
+\cs_new_protected:Npn \__ulsbs_song_multikey:
+  {\__ulsbs_multikey_song_begin:}
+
+% Stage semantic records once; only the retained box resolves page labels.
+% #1: kind; #2: optional overriding index-ID list; #3: entry tokens. Filter by
+% declared kind, run record hooks and stage nonempty entries when files/indices
+% are enabled. Overrides and expansion scratch are confined to a local group.
+\cs_new_protected:Npn \__ulsbs_song_record:nnn #1#2#3
+  {
+    \__ulsbs_song_require:
+    \group_begin:
+    \clist_if_empty:nF {#2}{\clist_set:Nn \l__ulsbs_song_indices_clist {#2}}
+    \protected@edef\l_tmpa_tl{#3}
+    \tl_if_empty:NF \l_tmpa_tl
+      {
+        \clist_map_inline:Nn \l__ulsbs_song_indices_clist
+          {
+            \prop_get:NnNTF \g__ulsbs_index_kinds_prop {##1}\l_tmpb_tl
+              {
+                \str_if_eq:VnT \l_tmpb_tl {#1}
+                  {
+                    \UseHook{ulsbs/index/record}
+                    \prop_get:NnNTF \l__ulsbs_song_index_labels_prop {##1}\l_tmpb_tl
+                      {}
+                      {\tl_set_eq:NN \l_tmpb_tl \l__ulsbs_song_label_tl}
+                    \if@filesw\ifulSongIndexes
+                      \ulsbs_index_record:nnnnn {##1}{#3}{\l_tmpb_tl}
+                        {\l__ulsbs_song_target_tl.\int_if_zero:nTF {\value{section}}{1}{2}}
+                        {\thechapter}
+                    \fi\fi
+                  }
+              }
+              {\msg_fatal:nnn {ulsbs-song}{index}{##1}}
+          }
+      }
+    \group_end:
+  }
+
+% [index IDs]{text}: stage an alternate title (* marker); an explicit ID list
+% also routes the unmarked text to matching tag/author destinations.
+\DeclareDocumentCommand \ulIndexEntry {o m}
+  {\IfNoValueTF{#1}{\__ulsbs_song_record:nnn {title}{}{*#2}}
+    {\__ulsbs_song_record:nnn {title}{#1}{*#2}
+     \__ulsbs_song_record:nnn {tag}{#1}{#2}
+     \__ulsbs_song_record:nnn {author}{#1}{#2}}}
+
+% [index IDs]{text}: same routing as indexentry, but a normal title entry.
+\DeclareDocumentCommand \ulIndexTitleEntry {o m}
+  {\IfNoValueTF{#1}{\__ulsbs_song_record:nnn {title}{}{#2}}
+    {\__ulsbs_song_record:nnn {title}{#1}{#2}
+     \__ulsbs_song_record:nnn {tag}{#1}{#2}
+     \__ulsbs_song_record:nnn {author}{#1}{#2}}}
+
+% {index ID}{label tokens}: set a scoped reference-label override for that index.
+\DeclareDocumentCommand \ulIndexSongsAs {m m}
+  {\prop_if_in:NnF \g__ulsbs_index_kinds_prop {#1}
+    {\msg_fatal:nnn {ulsbs-song}{index}{#1}}
+   \prop_put:Nnn \l__ulsbs_song_index_labels_prop {#1}{#2}}
+
+% #1: kind; #2: directive; #3: value. Append immediately to matching Lua event
+% streams when enabled; unlike record nodes, directives are source-time policy.
+\cs_new_protected:Npn \__ulsbs_song_directive:nnn #1#2#3
+  {\if@filesw\ifulSongIndexes
+   \prop_map_inline:Nn \g__ulsbs_index_kinds_prop
+     {\str_if_eq:nnT {##2}{#1}
+       {\directlua{ulsbs_index_state.directive("\luaescapestring{##1}",
+         "\luaescapestring{#2}","\luaescapestring{#3}")}}}
+   \fi\fi}
+
+% Each public wrapper takes {word}: title prefix rotation or author token policy.
+\DeclareDocumentCommand \ulTitlePrefixWord {m}{\__ulsbs_song_directive:nnn {title}{prefix}{#1}}
+
+\DeclareDocumentCommand \ulAuthorSepWord {m}{\__ulsbs_song_directive:nnn {author}{sep}{#1}}
+
+\DeclareDocumentCommand \ulAuthorByWord {m}{\__ulsbs_song_directive:nnn {author}{after}{#1}}
+
+\DeclareDocumentCommand \ulAuthorIgnoreWord {m}{\__ulsbs_song_directive:nnn {author}{ignore}{#1}}
+
+% No arguments. Typeset visible attribution/extra info using shared toggles.
+% Authors/dedication are composed once in an hbox, then unpacked for paragraph
+% layout rather than evaluating their source again.
+\DeclareDocumentCommand \ulExtendPrelude {}
+  {
+    % Retain the leading dedication space even when no author starts the line.
+    \hbox_set:Nn \l__ulsbs_song_attribution_box
+      {
+        \ifulShowAuthors\tl_if_empty:NF \ulSongAuthors{{\bfseries\sfcode`\.=1000\relax\ulSongAuthors}~}\fi
+        \ifulShowOfferedTo\tl_if_empty:NF \ulOfferedTo
+          {~(\textit{\ulIfLanguage{portuguese}{ofert.~para:}{offered~to:}}~\ulOfferedTo)}\fi
+      }
+    \dim_compare:nNnT {\box_wd:N \l__ulsbs_song_attribution_box}>{0pt}
+      {\hbox_unpack_drop:N \l__ulsbs_song_attribution_box\par}
+    \ifulShowExtraInfo\ulExtraInfo\par\fi
+  }
+
+% No arguments. Build title variants, badges and optional number panel after
+% body capture; emit the prelude box and restore iteration to the first title.
+\DeclareDocumentCommand \ulMakePrelude {}
+  {
+    \ulResetTitles
+    \ifulSlides
+      \hbox to\hsize{\hfil\ulSongTitleFont\ulSongTitle\hfil\ulsbs@pdfheaderanchor}
+      \vskip5pt\relax
+      \hbox to\hsize{\hfil\vbox{\hsize=.5\hsize\centering\small\ulExtendPrelude}\hfil}
+    \else
+    \dim_set:Nn \l__ulsbs_song_title_width_dim {\hsize}
+    \dim_compare:nNnT {\ulSongNumberWidth}>{0pt}
+      {\dim_sub:Nn \l__ulsbs_song_title_width_dim {\ulSongNumberWidth+2\fboxsep+3pt}}
+    \vbox_set:Nn \l__ulsbs_song_prelude_box
+      {
+        \hsize=\l__ulsbs_song_title_width_dim\relax
+        \ifulPagePreludesEnabled\centering\else\raggedright\fi
+         \offinterlineskip\lineskip=1pt\relax
+         {\ulSongTitleFont\raisebox{0pt}[\ulSongTitleDefaultHeight]
+           {% Keep the marker at the header edge, inside the existing title box.
+            \ifulsbs@pdflayers\makebox[0pt][l]{\kern\hsize\ulsbs@pdfheaderanchor}\fi
+            \ulSongTitle}
+         \hfill\__ulsbs_song_badges:\par
+          \ulNextTitle\ulForEachTitle{(\ulSongTitle)\par}}
+        \ifdim\prevdepth=0pt\kern1pt\fi
+        \tiny\parskip=1pt\relax\ulExtendPrelude
+        \kern0pt
+      }
+    \dim_compare:nNnTF {\ulSongNumberWidth}>{0pt}
+      {\hbox{\colorbox{\ulSongNumberBackgroundColor}
+        {\vbox to\box_ht:N \l__ulsbs_song_prelude_box
+          {\hbox to\ulSongNumberWidth{\ulPrintSongNumber{\theulSongNumber}\hfil}\vfil}}
+        \kern3pt\box_use_drop:N \l__ulsbs_song_prelude_box}}
+      {\box_use_drop:N \l__ulsbs_song_prelude_box}
+    \fi
+    \ulResetTitles
+  }
+
+% #1: formatted badge content. Emit a zero-width raised row and advance row state.
+\cs_new_protected:Npn \__ulsbs_song_badge:n #1
+  {
+    \dim_set:Nn \l__ulsbs_song_badge_raise_dim
+      {\int_case:nnF {\l__ulsbs_song_badge_row_int}
+        {{0}{\ulsbs@preludeRTfirstraise}{1}{\ulsbs@preludeRTsecondraise}
+         {2}{\ulsbs@preludeRTthirdraise}}{\ulsbs@preludeRTfourthraise}}
+    \makebox[0pt][r]{\raisebox{\l__ulsbs_song_badge_raise_dim}[0pt][0pt]
+      {\ifulLyricOnly\tiny\else\scriptsize\fi\normalfont#1}}
+    \int_incr:N \l__ulsbs_song_badge_row_int
+  }
+
+% No arguments. Reset rows, measure enabled tags/phases, then emit visible
+% tag/phase/key/good-key badges in the current title context.
+\cs_new_protected:Npn \__ulsbs_song_badges:
+  {
+    \int_zero:N \l__ulsbs_song_badge_row_int
+    \tl_clear:N \l__ulsbs_song_tagline_tl
+    % Visibility follows natural width in the title context, not token-list
+    % emptiness. These public measurements also initialize the badge fonts.
+    \ifulShowTags\ulsbs@ifnowidth{\ulTagList}{}
+      {\tl_put_right:Nn \l__ulsbs_song_tagline_tl
+        {\itshape\ulPreludeTagStyle\ulsbs@tagsbox{\ulTagList\ulsbs@vphantommaxtext}}}\fi
+    \ifulShowPhase\ulsbs@ifnowidth{\ulPhaseList}{}
+      {\ulsbs@ifnowidth{\l__ulsbs_song_tagline_tl}{}
+         {\tl_put_right:Nn \l__ulsbs_song_tagline_tl {~}}
+       \tl_put_right:Nn \l__ulsbs_song_tagline_tl
+         {\normalfont\rmfamily\ulPreludePhaseStyle\ulsbs@tagsbox{\ulPhaseList\ulsbs@vphantommaxtext}}}\fi
+    \ulsbs@ifnowidth{\l__ulsbs_song_tagline_tl}{}
+      {\__ulsbs_song_badge:n {\l__ulsbs_song_tagline_tl}}
+    \ifulChorded
+      \ifulShowKey\tl_if_empty:NF \ulSongKey
+        {\__ulsbs_song_badge:n
+           {\ulPreludeKeyLineStyle\__ulsbs_multikey_key_badge:}}\fi
+      \ifulShowGoodKeys\tl_if_empty:NF \ulGoodKeys
+        {\__ulsbs_song_badge:n
+          {\ulPreludeKeyLineStyle\ulsbs@goodkeysbox
+            {\textit{\ulPreludeTextGoodKeysAlone}~\textbf{\ulGoodKeys\ulsbs@vphantommaxtext}}}}\fi
+    \fi
+  }
+
+% No arguments; typeset the public postlude extension in small ragged text.
+\DeclareDocumentCommand \ulMakePostlude {}
+  {\raggedright\tiny\ulExtendPostlude}
+
+% #1: chapter/section. Start an unnumbered styled heading via kernel argument
+% scanning; flag its occupied height for the next song when inside songs.
+\cs_new_protected:Npn \__ulsbs_song_heading:n #1
+  {\bool_if:NT \g__ulsbs_songs_active_bool
+      {\bool_gset_true:N \g__ulsbs_song_heading_pending_bool}
+   \cs_set_eq:NN \__ulsbs_song_seccntformat:n \@seccntformat
+   \cs_set:Npn \@seccntformat ##1{}
+   \@startsection{#1}{\str_if_eq:nnTF {#1}{chapter}{0}{1}}{0pt}
+    {3.5ex~plus~1ex~minus~.2ex}
+    {.4ex\cs_set_eq:NN \@seccntformat \__ulsbs_song_seccntformat:n}
+    {\sffamily\bfseries\LARGE\centering}}
+
+% No declared arguments: the kernel section command consumes title/star/options.
+\DeclareDocumentCommand \ulSongChapter {}{\__ulsbs_song_heading:n {chapter}}
+
+\DeclareDocumentCommand \ulSongSection {}{\__ulsbs_song_heading:n {section}}
+
+% Diagnose unclosed source lifecycles before document finalization/last shipout.
+\AddToHook{enddocument/before}
+  {\bool_if:NT \g__ulsbs_song_active_bool {\__ulsbs_song_fail:n {unclosed~song}}
+   \bool_if:NT \g__ulsbs_songs_active_bool {\__ulsbs_song_fail:n {unclosed~songs~environment}}}
+\ExplSyntaxOff
+\makeatother

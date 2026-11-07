@@ -1,0 +1,44 @@
+\begin{ulIndexBlock}{\#}
+\ulIndexDisplayEntry{}{\ulSongLink{song1-27.0}{27}}
+\end{ulIndexBlock}
+\begin{ulIndexBlock}{1}
+\ulIndexDisplayEntry{2 Steps}{\ulSongLink{song1-11.0}{11}}
+\ulIndexDisplayEntry{10 Steps}{\ulSongLink{song1-10.0}{10}}
+\end{ulIndexBlock}
+\begin{ulIndexBlock}{A}
+\ulIndexDisplayEntry{Alpha}{\ulSongLink{song1-20.0}{20}\\\ulSongLink{song2-2.0}{2}}
+\ulIndexDisplayEntry{alpha}{\ulSongLink{song1-3.0}{3}}
+\ulIndexDisplayEntry{Alpha!}{\ulSongLink{song1-22.0}{22}}
+\ulIndexDisplayAltEntry{Alpha}{\ulSongLink{song1-21.0}{21}}
+\ulIndexDisplayEntry{Alpha-beta}{\ulSongLink{song1-23.0}{23}}
+\ulIndexDisplayEntry{Alpha beta}{\ulSongLink{song1-24.0}{24}}
+\end{ulIndexBlock}
+\begin{ulIndexBlock}{E}
+\ulIndexDisplayEntry{Eclair}{\ulSongLink{song1-25.0}{25}}
+\end{ulIndexBlock}
+\begin{ulIndexBlock}{É}
+\ulIndexDisplayEntry{Éclair}{\ulSongLink{song1-26.0}{26}}
+\ulIndexDisplayEntry{Élan}{\ulSongLink{song1-5.0}{5}}
+\end{ulIndexBlock}
+\begin{ulIndexBlock}{F}
+\ulIndexDisplayEntry{Final}{\ulSongLink{song1-30.0}{30}}
+\end{ulIndexBlock}
+\begin{ulIndexBlock}{N}
+\ulIndexDisplayEntry{No Reference}{\ulSongLink{song1-28.0}{}}
+\ulIndexDisplayEntry{No Target}{\ulSongLink{}{29}}
+\end{ulIndexBlock}
+\begin{ulIndexBlock}{R}
+\ulIndexDisplayEntry{River,~The}{\ulSongLink{song1-4.0}{4}}
+\end{ulIndexBlock}
+\begin{ulIndexBlock}{Z}
+\ulIndexDisplayEntry{Zulu}{\ulSongLink{song1-6.0}{6}}
+\end{ulIndexBlock}
+\begin{ulIndexBlock}{Å}
+\ulIndexDisplayEntry{Åland}{\ulSongLink{song1-7.0}{7}}
+\end{ulIndexBlock}
+\begin{ulIndexBlock}{Ä}
+\ulIndexDisplayEntry{Äiti}{\ulSongLink{song1-8.0}{8}}
+\end{ulIndexBlock}
+\begin{ulIndexBlock}{Ö}
+\ulIndexDisplayEntry{Öinen}{\ulSongLink{song1-9.0}{9}}
+\end{ulIndexBlock}

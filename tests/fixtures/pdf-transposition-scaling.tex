@@ -2,25 +2,25 @@
 \makeatletter
 \newcount\ULtestsideeffects
 \newcommand{\ULtestsideeffect}{\global\advance\ULtestsideeffects by 1 C}
-\let\ULtestoriginalscalechord\UL@pdfscalechord
+\let\ULtestoriginalscalechord\ulsbs@pdfscalechord
 \newcommand{\ULtestrecordscale}{%
-  \typeout{ULSBS-SCALE:\ULtestcase:\UL@pdfscale:\strip@pt\wd\UL@pdfbasebox:\strip@pt\wd\UL@pdfaltbox}%
+  \typeout{ULSBS-SCALE:\ULtestcase:\ulsbs@pdfscale:\strip@pt\wd\ulsbs@pdfbasebox:\strip@pt\wd\ulsbs@pdfaltbox}%
   \ULtestoriginalscalechord}
 \makeatother
 \begin{document}
-\begin{songs}{}
+\begin{ulSongs}{}
 \beginsong{Scaling Cases}[id={fixture-1}]
   \beginverse
     \[{\ULtestsideeffect}]Command-bearing source group.
   \endverse
   \typeout{ULSBS-GROUP-SIDEEFFECT:\the\ULtestsideeffects}
   \makeatletter
-  {\let\UL@pdfscalechord\ULtestrecordscale\ulChordFont
-    \def\ULtestcase{wide}\UL@pdfvisual{C\shrp m}{\@firstofone}{1}
-    \def\ULtestcase{short}\UL@pdfvisual{C}{\@firstofone}{1}
-    \def\ULtestcase{equal}\UL@pdfvisual{X}{\@firstofone}{1}
-    \def\ULtestcase{empty}\UL@pdfvisual{}{\@firstofone}{1}}
+  {\let\ulsbs@pdfscalechord\ULtestrecordscale\ulChordFont
+    \def\ULtestcase{wide}\ulsbs@pdfvisual{C\shrp m}{\@firstofone}{1}
+    \def\ULtestcase{short}\ulsbs@pdfvisual{C}{\@firstofone}{1}
+    \def\ULtestcase{equal}\ulsbs@pdfvisual{X}{\@firstofone}{1}
+    \def\ULtestcase{empty}\ulsbs@pdfvisual{}{\@firstofone}{1}}
   \makeatother
 \endsong
-\end{songs}
+\end{ulSongs}
 \end{document}

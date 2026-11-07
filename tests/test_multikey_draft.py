@@ -18,6 +18,7 @@ from unittest.mock import Mock
 
 import pikepdf
 
+from index_records import index_events
 from test_lilypond_scores_integration import score_layer_drawings
 from test_multikey_metadata import layer_page_dependencies
 from test_pdf_transposition_layers import PdfStructure, rendered_pages, words_and_geometry
@@ -30,34 +31,35 @@ from ulsbs.lilypond_scores import _minimum_scale_tex
 
 INSTRUMENTATION = r"""
 \makeatletter
-\typeout{DRAFT-AUTO:\ifUL@pdfdraftpass true\else false\fi}
+\typeout{DRAFT-AUTO:\ifulsbs@pdfdraftpass true\else false\fi}
 % The overrides are test-only: never publish the forced skeleton full PDF.
 OVERRIDE
 \ExplSyntaxOn
-\int_new:N \g_draft_native_int
+\int_new:N \g_draft_visual_int
 \int_new:N \g_draft_spell_int
 \int_new:N \g_draft_score_int
 \int_new:N \g_draft_scorealt_int
 \int_new:N \g_draft_original_int
+\bool_new:N \l_draft_visual_bool
 \box_new:N \l_draft_probe_box
-\cs_new_eq:NN \draft_native:nnn \UL@pdfvisual
-\cs_set_protected:Npn \UL@pdfvisual #1#2#3
+\cs_new_eq:NN \draft_visual:nnn \__ulsbs_pdf_visual:nnn
+\cs_set_protected:Npn \__ulsbs_pdf_visual:nnn #1#2#3
   {
-    \int_gincr:N \g_draft_native_int
+    \int_gincr:N \g_draft_visual_int
     \group_begin:
-    \hbox_set:Nn \l_draft_probe_box {\draft_native:nnn {#1}{#2}{#3}}
-    \iow_term:x {DRAFT-BOX:N\int_use:N\g_draft_native_int \c_colon_str
+    \bool_set_true:N \l_draft_visual_bool
+    \hbox_set:Nn \l_draft_probe_box {\draft_visual:nnn {#1}{#2}{#3}}
+    \iow_term:x {DRAFT-BOX:V\int_use:N\g_draft_visual_int \c_colon_str
       \dim_to_decimal_in_sp:n {\box_wd:N\l_draft_probe_box},
       \dim_to_decimal_in_sp:n {\box_ht:N\l_draft_probe_box},
       \dim_to_decimal_in_sp:n {\box_dp:N\l_draft_probe_box}}
     \box_use:N \l_draft_probe_box
     \group_end:
   }
-\cs_new_eq:NN \draft_spell:n \UL@pdfspellprepare
-\cs_set_protected:Npn \UL@pdfspellprepare #1
-  {\int_gincr:N \g_draft_spell_int \draft_spell:n {#1}}
-\cs_new_eq:NN \draft_score:nnn \UL_score_system:nnn
-\cs_set_protected:Npn \UL_score_system:nnn #1#2#3
+% Exercise both package-internal entry points.
+\cs_set_eq:NN \ulsbs@pdfvisual \__ulsbs_pdf_visual:nnn
+\cs_new_eq:NN \draft_score:nnn \__ulsbs_score_system:nnn
+\cs_set_protected:Npn \__ulsbs_score_system:nnn #1#2#3
   {
     \int_gincr:N \g_draft_score_int
     \group_begin:
@@ -69,20 +71,21 @@ OVERRIDE
     \leavevmode\box_use:N \l_draft_probe_box
     \group_end:
   }
-\cs_new_eq:NN \draft_scorealt:nnn \UL_score_alternative:nnn
-\cs_set_protected:Npn \UL_score_alternative:nnn #1#2#3
+\cs_new_eq:NN \draft_scorealt:nnn \__ulsbs_score_alternative:nnn
+\cs_set_protected:Npn \__ulsbs_score_alternative:nnn #1#2#3
   {\int_gincr:N \g_draft_scorealt_int \draft_scorealt:nnn {#1}{#2}{#3}}
-\cs_new_eq:NN \draft_mark:nn \UL_pdf_mark:nn
-\cs_set_protected:Npn \UL_pdf_mark:nn #1#2
-  {\int_compare:nNnT {#1}={0}{\int_gincr:N \g_draft_original_int}
+\cs_new_eq:NN \draft_mark:nn \__ulsbs_pdf_mark:nn
+\cs_set_protected:Npn \__ulsbs_pdf_mark:nn #1#2
+  {\int_compare:nNnTF {#1}={0}{\int_gincr:N \g_draft_original_int}
+     {\bool_if:NT \l_draft_visual_bool {\int_gincr:N \g_draft_spell_int}}
    \draft_mark:nn {#1}{#2}}
 \AddToHook{enddocument/afterlastpage}{
-  \iow_term:x {DRAFT-COUNT:native=\int_use:N\g_draft_native_int}
+  \iow_term:x {DRAFT-COUNT:visual=\int_use:N\g_draft_visual_int}
   \iow_term:x {DRAFT-COUNT:spell=\int_use:N\g_draft_spell_int}
   \iow_term:x {DRAFT-COUNT:score=\int_use:N\g_draft_score_int}
   \iow_term:x {DRAFT-COUNT:scorealt=\int_use:N\g_draft_scorealt_int}
   \iow_term:x {DRAFT-COUNT:original=\int_use:N\g_draft_original_int}
-  \iow_term:x {DRAFT-COUNT:families=\prop_count:N\g_UL_pdf_allocated_layers_prop}
+  \iow_term:x {DRAFT-COUNT:families=\prop_count:N\g__ulsbs_pdf_allocated_layers_prop}
   \iow_term:x {DRAFT-COUNT:pages=\int_eval:n{\ReadonlyShipoutCounter}}
 }
 \ExplSyntaxOff
@@ -101,10 +104,10 @@ BOOK = r"""
 \def\ulMultikeyLilypondScores{true}
 \documentclass[paper={a5paper},maintitle={Synthetic Draft Regression}]{ulsbs-songbook}
 INSTRUMENTATION
-\newindex{drafttitle}{draft-title}
+\ulNewIndex{drafttitle}{draft-title}
 \begin{document}
-\songcolumns{1}
-\begin{songs}{drafttitle}
+\ulSongColumns{1}
+\begin{ulSongs}{drafttitle}
 \beginsong{A Deliberately Long Synthetic Header With Enough Words To Wrap Across Lines}
   [id={draft-repeat},key={C},by={Synthetic Author}]
 \beginverse
@@ -120,9 +123,9 @@ SCORES
 \[Am]Neighbor anchor \[E7]shares the physical page.
 \endverse
 \endsong
-\end{songs}
+\end{ulSongs}
 \clearpage
-\begin{songs}{drafttitle}
+\begin{ulSongs}{drafttitle}
 \beginsong{Repeated Source In A Different Key}[id={draft-repeat},key={G}]
 \beginverse
 \hypertarget{draft-repeat}{}\label{draft:repeat}
@@ -130,7 +133,7 @@ SCORES
 SCORES
 \endverse
 \endsong
-\end{songs}
+\end{ulSongs}
 \hyperlink{draft-first}{Return to opening}; page \pageref{draft:first}.
 \end{document}
 """
@@ -196,9 +199,9 @@ class MultikeyDraftIntegrationTests(unittest.TestCase):
             raise unittest.SkipTest('PDF integration tools unavailable: ' + ', '.join(missing))
         cls.results = {}
         for mode, override in (
-            ('reference', r'\UL@pdfdraftpassfalse'),
+            ('reference', r'\ulsbs@pdfdraftpassfalse'),
             ('automatic', ''),
-            ('skeleton', r'\UL@pdfdraftpasstrue'),
+            ('skeleton', r'\ulsbs@pdfdraftpasstrue'),
         ):
             # Give every comparison the production one-draft/two-full history;
             # otherwise fresh auxiliary references can obscure layout evidence.
@@ -257,10 +260,10 @@ class MultikeyDraftIntegrationTests(unittest.TestCase):
                 artifacts = {
                     'counts': {key: int(value) for key, value in
                                re.findall(r'DRAFT-COUNT:(\w+)=(\d+)', output)},
-                    'boxes': re.findall(r'DRAFT-BOX:([NS]\d+):\s*(-?\d+),(-?\d+),(-?\d+)', output),
+                    'boxes': re.findall(r'DRAFT-BOX:([VS]\d+):\s*(-?\d+),(-?\d+),(-?\d+)', output),
                     'auto': re.findall(r'DRAFT-AUTO:(true|false)', output),
                     'aux': re.findall(r'\\newlabel[^\n]+', (root / 'draft.aux').read_text()),
-                    'index': (root / 'draft-title.sxd').read_text(),
+                    'index': index_events(root, 'draft-title', job='draft'),
                     'requests': json.loads((root / 'draft.ulsbs-scores.json').read_text()),
                     'manifest': json.loads((root / 'draft.ulsbs-multikey.json').read_text()),
                 }
@@ -279,8 +282,9 @@ class MultikeyDraftIntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(automatic['counts']['pages'], 2)
         for label in ('draft:first', 'draft:neighbor', 'draft:repeat'):
             self.assertTrue(any(label in entry for entry in automatic['aux']), label)
-        self.assertIn('Shared Page Neighbor', automatic['index'])
-        self.assertIn('Repeated Source In A Different Key', automatic['index'])
+        titles = [event['title'] for event in automatic['index'] if event['type'] == 'record']
+        self.assertIn('Shared Page Neighbor', titles)
+        self.assertIn('Repeated Source In A Different Key', titles)
         self.assertEqual(len(automatic['requests']['requests']), 4)
         self.assertEqual(
             {(request['layer_prefix'], request['snippet_id'])
@@ -299,16 +303,16 @@ class MultikeyDraftIntegrationTests(unittest.TestCase):
     def test_only_alternate_rendering_is_skipped_in_actual_draft(self):
         reference = self.results['reference']['draft']['counts']
         automatic = self.results['automatic']['draft']['counts']
-        self.assertGreater(reference['native'], 10)
+        self.assertGreater(reference['visual'], 10)
         self.assertEqual(reference['score'], 8)
-        self.assertEqual(reference['spell'], 11 * reference['native'])
+        self.assertEqual(reference['spell'], 11 * reference['visual'])
         self.assertEqual(reference['scorealt'], 11 * reference['score'])
         self.assertEqual(automatic['spell'], 0)
         self.assertEqual(automatic['scorealt'], 0)
         for counts in (reference, automatic):
-            self.assertEqual(counts['original'], counts['native'] + counts['score'])
+            self.assertEqual(counts['original'], counts['visual'] + counts['score'])
             self.assertEqual(counts['families'], 3)
-        for key in ('native', 'score', 'original', 'families'):
+        for key in ('visual', 'score', 'original', 'families'):
             self.assertEqual(reference[key], automatic[key], key)
 
     def test_actual_draft_without_layers_does_not_enable_fast_path(self):
@@ -318,7 +322,7 @@ class MultikeyDraftIntegrationTests(unittest.TestCase):
             source.write_text(
                 r'\def\ulPdfTranspositionLayers{false}' '\n'
                 r'\documentclass{ulsbs-songbook}' '\n'
-                r'\makeatletter\typeout{DRAFT-AUTO:\ifUL@pdfdraftpass true\else false\fi}'
+                r'\makeatletter\typeout{DRAFT-AUTO:\ifulsbs@pdfdraftpass true\else false\fi}'
                 r'\makeatother\begin{document}Synthetic text.\end{document}' '\n'
             )
             env = os.environ.copy()
@@ -342,7 +346,7 @@ class MultikeyDraftIntegrationTests(unittest.TestCase):
         for field in ('counts', 'boxes', 'requests', 'aux', 'index', 'manifest'):
             self.assertEqual(reference['full'][field], automatic['full'][field], field)
         counts = automatic['full']['counts']
-        self.assertEqual(counts['spell'], 11 * counts['native'])
+        self.assertEqual(counts['spell'], 11 * counts['visual'])
         self.assertEqual(counts['scorealt'], 11 * counts['score'])
         info = automatic['full']['manifest']['multikey_info']
         songs = info['songs']

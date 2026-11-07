@@ -31,14 +31,15 @@
 % Optional: imprint page
 \ulImprintPage
 % Optional: table of contents
-\ulTOC
+\ulToc
 
 
 % Main chapter (you may have multiple of these)
 \ulMainChapter{Main Chapter}{blue}
 
-% All songs must be within "songs" environment.
-\begin{songs}{titleidx,authidx,tagidx}
+% All songs must be within "ulSongs"; the required list routes index records.
+% Title, author and tag indices are generated; use {} for no automatic records.
+\begin{ulSongs}{titleidx,authidx,tagidx}
 
 % Example song
 \beginsong{Example Song}[id={example-song},by={Example Author},key={C}]
@@ -48,7 +49,7 @@
   \endverse
 \endsong
 
-\end{songs}
+\end{ulSongs}
 
 
 \end{document}

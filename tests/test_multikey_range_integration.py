@@ -40,7 +40,7 @@ class TypesetRangeIntegrationTests(unittest.TestCase):
 
         fixture = "multikey-resource-convergence"
         artifacts = {f"{fixture}.{suffix}": None for suffix in
-                     ("tex", "aux", "out", "sxc", "pdf", "log", "ulsbs-multikey.json")}
+                     ("tex", "aux", "out", "sxc", "ulsbs-index-state", "pdf", "log", "ulsbs-multikey.json")}
         output, stale_bytes = compile_fixture(fixture, passes=3, artifacts=artifacts)
         self.assertIn("ULSBS-RESOURCE-RUN:3", output)
         aux = artifacts[f"{fixture}.aux"].decode()
@@ -61,7 +61,12 @@ class TypesetRangeIntegrationTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            # Resume the active backend's real index state, not a synthetic .sxc.
+            self.assertTrue(any(artifacts[f"{fixture}.{suffix}"] is not None
+                                for suffix in ("sxc", "ulsbs-index-state")))
             for name, contents in artifacts.items():
+                if contents is None and name.endswith((".sxc", ".ulsbs-index-state")):
+                    continue
                 self.assertIsNotNone(contents, name)
                 (root / name).write_bytes(contents)
             # Only the last pass is relevant; the helper's combined stdout also

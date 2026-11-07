@@ -1,16 +1,16 @@
 \documentclass[paper={a5paper},maintitle={Melody Replay Test}]{ulsbs-songbook}
 \makeatletter
 \newcount\ULtestbeatdraws
-\let\ULtestoriginalbeatdraw\UL@melodybeatdraw
-\def\UL@melodybeatdraw{%
-  \ifshowbeats\ifdefined\@beatsdisabled\else
+\let\ULtestoriginalbeatdraw\ulsbs@melodybeatdraw
+\def\ulsbs@melodybeatdraw{%
+  \ifulShowBeats\ifdefined\ulsbs@beatsdisabled\else
     \global\advance\ULtestbeatdraws by 1\relax
   \fi\fi
   \ULtestoriginalbeatdraw
 }
 \makeatother
 \begin{document}
-\begin{songs}{}
+\begin{ulSongs}{}
 \beginsong{Melody Replay}
   \newchords{melodyreplay}
   \memorize[melodyreplay]
@@ -26,7 +26,7 @@
     \[<!C*>G]stored one \[^<D*>Am]excluded \[<E*>C]stored two
   \endverse
   \ExplSyntaxOn
-  \tl_set:No \l_tmpa_tl {\the\cs:w SB@cr@melodyexclude\cs_end:}
+  \prop_get:NnN \g__ulsbs_chord_memory_prop {melodyexclude}\l_tmpa_tl
   \typeout{ULSBS-REGISTER-BEGIN:\tl_to_str:V \l_tmpa_tl :ULSBS-REGISTER-END}
   \ExplSyntaxOff
   \global\ULtestbeatdraws=0
@@ -44,5 +44,5 @@
   \beatson
   \noteson
 \endsong
-\end{songs}
+\end{ulSongs}
 \end{document}

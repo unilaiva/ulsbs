@@ -1,0 +1,211 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Book display and text defaults.
+% This file is part of the 'ulsbs' package.
+%
+% Loaded after preliminary language selection and ulsbs-utilities.code.tex.
+% Requires the boolean factory and ulIfLanguage; owns display switches,
+% the initial verse-indent dimension and book/metadata strings.
+% The 1em indent is captured before typography selects the document fonts.
+
+\ProvidesFile{ulsbs-book-defaults.code.tex}[Book display and text defaults]
+
+% === Display switches ===
+
+% Introduce toggles for some global features and set their defaults. If you
+% want a specific feature enabled or disabled, set its public setter to
+% true or false in the main document preamble (after including this package).
+% Example: \ulShowTags{false} would disable showing tags in song preludes, and
+%          \ulShowTags{true} would enable showing them.
+% Query with the real predicate \ifulShowTags ...\else ...\fi. Setters obey
+% ordinary grouping; do not predefine or renew these commands/conditionals.
+
+% Toggle for showing extra info in song preludes. Set the song metadata with
+% \beginsong{Title}[ex={this song is good}].
+\ulsbs@newbool\ifulShowExtraInfo\ulsbs@showextrue\ulsbs@showexfalse\ulShowExtraInfo\ulsbs@showextrue
+
+% Toggle for showing the dedication in song preludes. Set the song metadata with
+% \beginsong{Title}[off={My Muse}].
+\ulsbs@newbool\ifulShowOfferedTo\ulsbs@showofftrue\ulsbs@showofffalse\ulShowOfferedTo\ulsbs@showofftrue
+
+% Toggle for showing key info in song preludes. To set it for a song,
+% use \beginsong{Title}[key={Am}]. Make sure that
+% it is correct, that the key set here corresponds to the actual key displayed
+% in the final document (after possible transpose).
+\ulsbs@newbool\ifulShowKey\ulsbs@showkeytrue\ulsbs@showkeyfalse\ulShowKey\ulsbs@showkeytrue
+
+% Toggle for showing good keys in song preludes. To set it/them for a song,
+% use \beginsong{Title}[gk={Am, Gm--Bm}]. The first
+% is the preferred one, and then comes the range of keys suitable for singing
+% in such a way that the melody falls within (including) a G note in the low
+% end, and a B note of the next octave in the high end. If such a range is
+% impossible, put the keys in the range in parenthesis.
+\ulsbs@newbool\ifulShowGoodKeys\ulsbs@showgoodkeystrue\ulsbs@showgoodkeysfalse\ulShowGoodKeys\ulsbs@showgoodkeystrue
+
+% Toggle for showing phase info in song preludes. To set it for a song,
+% use \beginsong{Title}[ph={I, II}].
+\ulsbs@newbool\ifulShowPhase\ulsbs@showphtrue\ulsbs@showphfalse\ulShowPhase\ulsbs@showphtrue
+
+% Toggle for showing phase info in the TOC:
+\ulsbs@newbool\ifulShowPhaseInToc\ulsbs@showphintoctrue\ulsbs@showphintocfalse\ulShowPhaseInToc\ulsbs@showphintoctrue
+
+% Toggle for showing tags in song preludes. To set them for a song,
+% use \beginsong{Title}[tags={love, light}].
+% Consumer books may define their tag vocabulary in include/tags.txt.
+\ulsbs@newbool\ifulShowTags\ulsbs@showtagstrue\ulsbs@showtagsfalse\ulShowTags\ulsbs@showtagstrue
+
+% Toggle for showing melody notes in songs. Write pitches inside a melody
+% block in a chord definition, e.g. \[<C D>Am]. To set them temporarily on or
+% off within a (part of a) song, use macros \notesoff and \noteson.
+\ulsbs@newbool\ifulShowNotes\ulsbs@shownotestrue\ulsbs@shownotesfalse\ulShowNotes\ulsbs@shownotestrue
+
+% Toggle for showing beat marks in songs. Write * inside a melody block in
+% a chord definition, e.g. \[<* C>Am]. To set them temporarily on or
+% off within a (part of a) song, use macros \beatsoff and \beatson.
+\ulsbs@newbool\ifulShowBeats\ulsbs@showbeatstrue\ulsbs@showbeatsfalse\ulShowBeats\ulsbs@showbeatstrue
+
+% Toggle for showing authors in the song preludes. Personal opinion: the
+% authors should definitely be shown in all cases. This option is here for
+% the sake of completeness. :)
+\ulsbs@newbool\ifulShowAuthors\ulsbs@showauthtrue\ulsbs@showauthfalse\ulShowAuthors\ulsbs@showauthtrue
+
+% Toggle for showing Lilypond music scores
+\ulsbs@newbool\ifulShowLilypond\ulsbs@showlilypondtrue\ulsbs@showlilypondfalse\ulShowLilypond\ulsbs@showlilypondtrue
+
+% Toggle for showing passages
+\ulsbs@newbool\ifulShowPassage\ulsbs@showpassagetrue\ulsbs@showpassagefalse\ulShowPassage\ulsbs@showpassagetrue
+
+% Toggle for showing explanations
+\ulsbs@newbool\ifulShowExplanation\ulsbs@showexplanationtrue\ulsbs@showexplanationfalse\ulShowExplanation\ulsbs@showexplanationtrue
+
+% Toggle for showing translations
+\ulsbs@newbool\ifulShowTranslation\ulsbs@showtranslationtrue\ulsbs@showtranslationfalse\ulShowTranslation\ulsbs@showtranslationtrue
+
+% Toggle for showing feelers
+\ulsbs@newbool\ifulShowFeeler\ulsbs@showfeelertrue\ulsbs@showfeelerfalse\ulShowFeeler\ulsbs@showfeelertrue
+
+% Toggle showing of alternate chord sets
+\ulsbs@newbool\ifulShowAltChords\ulsbs@showaltchordstrue\ulsbs@showaltchordsfalse\ulShowAltChords\ulsbs@showaltchordstrue
+
+% Toggle transposing alternate chord sets with the current \transpose factor.
+% This is disabled by default because alternate sets usually represent chords
+% in a different key and should remain unchanged when the main chords move.
+\ulsbs@newbool\ifulTransposeAltChords\ulsbs@transposealtchordstrue\ulsbs@transposealtchordsfalse\ulTransposeAltChords\ulsbs@transposealtchordsfalse
+
+% Toggle appending the (optional) chapter image or symbol appended to the
+% chapter name wherever it shows up, e.g. in TOC and page headers. The image is
+% never shown in PDF index though, as only characters are supported there.
+\ulsbs@newbool\ifulShowImageInChapterName\ulsbs@showimageinchapternametrue\ulsbs@showimageinchapternamefalse\ulShowImageInChapterName\ulsbs@showimageinchapternametrue
+
+% Toggle showing the (optional) chapter image or symbol on the front page of
+% a chapter.
+\ulsbs@newbool\ifulShowImageOnChapterFrontPage\ulsbs@showimageonchapterfrontpagetrue\ulsbs@showimageonchapterfrontpagefalse\ulShowImageOnChapterFrontPage\ulsbs@showimageonchapterfrontpagetrue
+
+% Toggle uppercasing the long chapter title shown on chapter front pages
+\ulsbs@newbool\ifulUppercaseLongChapterTitle\ulsbs@upcaselongchaptertitletrue\ulsbs@upcaselongchaptertitlefalse\ulUppercaseLongChapterTitle\ulsbs@upcaselongchaptertitlefalse
+
+% Toggle uppercasing the short chapter title shown in TOC and page headers
+\ulsbs@newbool\ifulUppercaseShortChapterTitle\ulsbs@upcaseshortchaptertitletrue\ulsbs@upcaseshortchaptertitlefalse\ulUppercaseShortChapterTitle\ulsbs@upcaseshortchaptertitletrue
+
+% Toggle uppercasing the section title in page headers
+\ulsbs@newbool\ifulUppercaseSectionTitleInHeader\ulsbs@upcasesectiontitleinheadertrue\ulsbs@upcasesectiontitleinheaderfalse\ulUppercaseSectionTitleInHeader\ulsbs@upcasesectiontitleinheaderfalse
+
+% Toggle uppercasing the book name in page headers
+\ulsbs@newbool\ifulUppercaseBookTitleInHeader\ulsbs@upcasebooktitleinheadertrue\ulsbs@upcasebooktitleinheaderfalse\ulUppercaseBookTitleInHeader\ulsbs@upcasebooktitleinheadertrue
+
+% Toggle use of chapter colors in page corners
+\ulsbs@newbool\ifulUseChapterColors\ulsbs@usechaptercolorstrue\ulsbs@usechaptercolorsfalse\ulUseChapterColors\ulsbs@usechaptercolorstrue
+
+% Internal current-style switch.  \ulMelodyStyleMapping resolves semantic roles
+% to these two existing configurable visual styles.
+\newif\ifulsbs@altmnstyle\ulsbs@altmnstylefalse
+
+% If true, some characters on chord line are adjusted: currently parenthesis
+% are scaled down and moved slightly upwards to avoid collision with lyrics.
+% This does not affect chords displayed within \altchords{} macro.
+\ulsbs@newbool\ifulAdjustChordChars\ulsbs@adjustchordcharstrue\ulsbs@adjustchordcharsfalse\ulAdjustChordChars\ulsbs@adjustchordcharstrue
+
+% === Verse indentation and song-end mark ===
+
+% Indentation that is optionally added to verses, if started with
+% \beginverse[n], where n is a plain factor number that is multiplied with
+% the \ulVerseIndentWidth to determine the optional extra indent depth of the
+% verse in question.
+% This 1em is captured now, before document typography. Override the allocated
+% dimension after loading with \setlength{\ulVerseIndentWidth}{<dimension>}.
+\newdimen\ulVerseIndentWidth\ulVerseIndentWidth=1em\relax
+
+\providecommand{\ulSongEndMark}{}
+
+% === Book strings and PDF metadata defaults ===
+
+% Set defaults for book titles if they're not yet defined. One should define
+% them with \providecommand before loading or \renewcommand afterward for
+% front matter and headers. PDF metadata is consumed by the shared style's
+% load-time \hypersetup, so define metadata/title/version before loading (or
+% explicitly update \hypersetup later). The supported macros are:
+%   \ulMainBookTitle
+%   \ulSubBookTitle
+%   \ulSubSubBookTitle
+%   \ulThisBookTitle
+%   \ulBookMotto
+%   \ulBookByText
+%   \ulBookVersionPreText
+%   \ulBookVariantPreText
+%   \ulBookDefaultVariantText
+%   \ulBookLyricVariantText
+%   \ulBookCharangoVariantText
+%   \ulBookBassclefVariantText
+%   \ulBookWebsiteLink
+%   \ulBookWebsiteLinkQrImage (this is image filename in content/img without path)
+%   \ulBookCompiledByText
+%   \ulImprintPageFootnote
+% All are optional; the main title also has a fallback below.
+
+% Set defaults for PDF metadata, if they are not defined. One should define
+% them in the main file before including this package.
+\providecommand*{\ulBookAuthor}{}
+\providecommand*{\ulBookSubject}{Songbook}
+\providecommand*{\ulBookKeywords}{songbook, songs, ulsbs}
+
+\providecommand{\ulBookMotto}{}
+\providecommand{\ulSubBookTitle}{}
+\providecommand{\ulSubSubBookTitle}{}
+\providecommand{\ulBookWebsiteLink}{}
+\providecommand{\ulBookWebsiteLinkQrImage}{}
+\providecommand{\ulBookCompiledByText}{\ifdefempty{\ulBookAuthor}{}{Compiled by: \ulBookAuthor}}
+\providecommand{\ulImprintPageFootnote}{}
+
+% To have the portuguese version of these default strings, one must define
+% \newcommand{\ulPreliminaryLanguage}{portuguese} before including this file.
+\ulIfLanguage{portuguese}{%
+  \providecommand{\ulMainBookTitle}{Songbook Sem Nome}
+  \providecommand{\ulBookByText}{Por:\par\vspace{0.618034ex}\textbf{\Large humanidade}}
+  \providecommand{\ulBookVersionPreText}{Versão:}
+  \providecommand{\ulBookVariantPreText}{Variante:}
+  \providecommand{\ulBookDefaultVariantText}{padrão}
+  \providecommand{\ulBookLyricVariantText}{somente letras}
+  \providecommand{\ulBookCharangoVariantText}{por charango}
+  \providecommand{\ulBookBassclefVariantText}{com clave de fá}
+}{%
+  \providecommand{\ulMainBookTitle}{Songbook Without Name}
+  \providecommand{\ulBookByText}{By:\par\vspace{0.618034ex}\textbf{\Large humankind}}
+  \providecommand{\ulBookVersionPreText}{Version:}
+  \providecommand{\ulBookVariantPreText}{Variant:}
+  \providecommand{\ulBookDefaultVariantText}{default}
+  \providecommand{\ulBookLyricVariantText}{lyrics only}
+  \providecommand{\ulBookCharangoVariantText}{for charango}
+  \providecommand{\ulBookBassclefVariantText}{with bass clef}
+}
+
+% The book title to display on top of each verso page (if doesn't exist, it is
+% constructed here from \ulMainBookTitle and optional \ulSubBookTitle):
+\providecommand{\ulThisBookTitle}{% main title (+ subtitle, if defined)
+  \ulMainBookTitle\ifdefempty{\ulSubBookTitle}{}{{: \ulSubBookTitle}}%
+}
+% The default is the current date
+\providecommand{\ulBookVersion}{%
+  %2024-08-12% for release: change and uncomment this line, and comment the next
+  \the\year-\ifnum\month<10 0\fi\the\month-\ifnum\day<10 0\fi\the\day%
+}

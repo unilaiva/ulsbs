@@ -1,0 +1,23 @@
+This is a generated file for the l3build validation system.
+Don't change this file in any respect.
+backend-variable=absent
+symbol ulsbs_boolmap_set_true:Nn=present
+symbol ulsbs_boolmap_set_false:Nn=present
+symbol ulsbs_boolmap_gset_true:Nn=present
+symbol ulsbs_boolmap_gset_false:Nn=present
+symbol ulsbs_boolmap_reset:N=present
+symbol ulsbs_boolmap_greset:N=present
+symbol ulsbs_boolmap_if_true:NnTF=present
+symbol ulBoolSetTrue=present
+symbol ulBoolSetFalse=present
+symbol ulBoolReset=present
+symbol ulIfBool=present
+symbol ulChapterCornerMark=present
+symbol ulChapterCornerMarksOuter=present
+missing-key=false
+set-key=true
+reset-key=false
+kpse ulsbs-init.code.tex=found
+kpse ulsbs-boolmap.code.tex=found
+kpse ulsbs-chapter-marks.code.tex=found
+kpse ulsbs-multikey.lua=found

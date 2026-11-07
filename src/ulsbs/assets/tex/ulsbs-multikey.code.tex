@@ -1,0 +1,232 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Adapter from musical visuals to interactive PDF transposition layers.
+% This file is part of the 'ulsbs' package.
+%
+% Private module loaded after song/layout/verse/chords/music. Earlier,
+% ulsbs-pdf-layer-setup.code.tex supplies key parsing/tables, OCG marking, safe
+% token splitting, scaling, layer metadata, and the Lua multikey bridge. This
+% module replaces its renderer-facing seams; it does not implement another protocol
+% or evaluate song source per key. ulsbs.sty orchestrates both loading phases.
+% The score-layer module is optional and may load later, hence its file hook.
+%
+% Song setup saves the effective declared key and enables layers only for a valid
+% song ID. Local scratch tls and offset are isolated by visual groups; offset 0
+% is the effective printed original, offsets 1..11 are interactive alternatives.
+% Only original metrics participate in layout. Draft passes construct original
+% boxes only; full passes overlay marked alternatives with zero width/height/depth.
+%
+% Source-once boundary: callers split shared commands from safe musical tokens
+% before entering a repeated visual renderer. Do not move memory, writes, hooks,
+% arbitrary macros, or beat-side effects into the per-offset loop.
+
+\ProvidesFile{ulsbs-multikey.code.tex}[Multikey notation]
+
+\makeatletter
+\ExplSyntaxOn
+\tl_new:N \l__ulsbs_multikey_text_tl
+\tl_new:N \l__ulsbs_multikey_original_tl
+\int_new:N \l__ulsbs_multikey_offset_int
+
+% Load parsed key state only for an active song with a saved supported
+% key. Clearing availability first prevents a previous call's key from leaking.
+\cs_set_protected:Npn \__ulsbs_pdf_key_load:
+  {
+    \bool_set_false:N \l__ulsbs_pdf_key_available_bool
+    \bool_if:NT \g__ulsbs_song_active_bool
+      {\tl_if_empty:NF \g__ulsbs_pdf_transpose_key_tl
+        {\bool_set_true:N \l__ulsbs_pdf_key_available_bool
+         \exp_after:wN \__ulsbs_pdf_key_use:nnn \g__ulsbs_pdf_transpose_key_tl}}
+  }
+
+% #1 is target pitch class 0..11. Select major/natural-minor scale and canonical
+% target letter in common PDF scratch; accidental calculation follows separately.
+\cs_set_protected:Npn \__ulsbs_pdf_canonical_tonic:n #1
+  {
+    \int_if_zero:nTF {\l__ulsbs_pdf_key_minor_int}
+      {\clist_set_eq:NN \l__ulsbs_pdf_scale_clist \c__ulsbs_pdf_natural_clist
+       \int_set:Nn \l__ulsbs_pdf_target_letter_int
+         {\clist_item:nn {0,1,1,2,2,3,3,4,5,5,6,6}{#1+1}}}
+      {\clist_set_eq:NN \l__ulsbs_pdf_scale_clist \c__ulsbs_pdf_minor_clist
+       \int_set:Nn \l__ulsbs_pdf_target_letter_int
+         {\clist_item:nn {0,0,1,1,2,3,3,4,4,5,6,6}{#1+1}}}
+  }
+
+% key= is already the effective original, independently of source \transpose.
+% Called by song setup, not each visual: save key metadata even without layers,
+% then validate the normalized stable ID before allocating the song's OCG family.
+% Invalid IDs error or warn/skip according to the common strictness setting.
+\cs_new_protected:Npn \__ulsbs_multikey_song_begin:
+  {
+    \ulsbs@pdfsongfalse
+    \global\let\ulsbs@pdfpreludesongid\@empty
+    \__ulsbs_pdf_key_save:
+    \ifulsbs@pdflayers
+      \tl_set:Nx \l__ulsbs_pdf_source_id_tl {\ulSongId}
+      \tl_set:Nx \l__ulsbs_pdf_source_id_tl {\tl_to_str:V \l__ulsbs_pdf_source_id_tl}
+      \tl_trim_spaces:N \l__ulsbs_pdf_source_id_tl
+      \regex_match:nVTF {\A[a-z0-9-]+\Z} \l__ulsbs_pdf_source_id_tl
+        {\__ulsbs_pdf_song_layers:}
+        {\ifdefstring{\ulPdfTranspositionRequireSongIds}{true}
+           {\PackageError{ulsbs}{Missing~or~invalid~song~id:~\tl_to_str:V\ulSongTitle}
+             {Set~id=~to~a~nonempty~lowercase~letter/digit/dash~identifier.}}
+           {\PackageWarning{ulsbs}{Song~\tl_to_str:V\ulSongTitle :~missing~or~invalid~id;
+             ~skipping~multikey~layers~and~controls~for~this~song}}}
+    \fi
+  }
+
+% Write badge key tokens to output tl #1 using declared effective key plus current
+% interactive offset. Preserve minor suffix and protect accidental glyph macros.
+\cs_new_protected:Npn \__ulsbs_multikey_target_key:N #1
+  {
+    \int_set:Nn \l__ulsbs_pdf_target_pitch_int
+      {\int_mod:nn {\l__ulsbs_pdf_key_pitch_int+\l__ulsbs_multikey_offset_int}{12}}
+    \__ulsbs_pdf_canonical_tonic:n {\l__ulsbs_pdf_target_pitch_int}
+    \int_set:Nn \l__ulsbs_pdf_accidental_int
+      {\int_mod:nn {18+\l__ulsbs_pdf_target_pitch_int-
+        \clist_item:Nn \c__ulsbs_pdf_natural_clist {\l__ulsbs_pdf_target_letter_int+1}}{12}-6}
+    \tl_set:Nx #1
+      {\clist_item:Nn \c__ulsbs_pdf_letters_clist {\l__ulsbs_pdf_target_letter_int+1}
+       \int_case:nn {\l__ulsbs_pdf_accidental_int}
+         {{-1}{\exp_not:N \flt}{1}{\exp_not:N \shrp}}
+       \int_if_zero:nF {\l__ulsbs_pdf_key_minor_int}{m}}
+  }
+
+% #1 contains effective, safe musical tokens; #2 is a pure one-argument renderer;
+% #3 is 1 for chord-text shrinking/tagging, 0 for fixed-geometry visuals. Shared
+% commands must be split out before this boundary.
+% Render t00 once as the sole metric authority. Each full-pass alternative uses
+% the same renderer with transformed tokens; right-aligned badges prefer a key
+% derived from metadata. Chord scaling is bounded and skips zero-width originals.
+% Lua tags retain natural/base widths for later fitting to retained lyric boxes.
+% The global altbox assignment exports only finished nodes from the iteration's
+% scratch group; the enclosing result owns the zero-extent overlay afterward.
+\cs_set_protected:Npn \__ulsbs_pdf_visual:nnn #1#2#3
+  {
+    \group_begin:
+    \int_zero:N \l__ulsbs_multikey_offset_int
+    \sbox\ulsbs@pdfbasebox{#2{#1}}
+    \setbox\ulsbs@pdfresultbox\hbox{\__ulsbs_pdf_mark:nn {0}{\copy\ulsbs@pdfbasebox}}
+    \ifulsbs@pdfdraftpass\else
+      \int_step_inline:nn {11}
+        {
+          \group_begin:
+          \int_set:Nn \l__ulsbs_multikey_offset_int {##1}
+          \__ulsbs_pdf_key_load:
+          \ifulsbs@pdfrightalign
+            \bool_if:NTF \l__ulsbs_pdf_key_available_bool
+              {\__ulsbs_multikey_target_key:N \l__ulsbs_multikey_text_tl}
+              {\__ulsbs_music_transpose_alternative:nnN {##1}{#1}\l__ulsbs_multikey_text_tl}
+          \else
+            \__ulsbs_music_transpose_alternative:nnN {##1}{#1}\l__ulsbs_multikey_text_tl
+          \fi
+          \sbox\ulsbs@pdfaltbox{\exp_args:NV #2\l__ulsbs_multikey_text_tl}
+          \fp_set:Nn \l_tmpa_fp {1}
+          \int_compare:nNnT {#3}={1}
+            {\dim_compare:nNnT {\wd\ulsbs@pdfbasebox}>{0pt}
+              {\dim_compare:nNnT {\wd\ulsbs@pdfaltbox}>{\wd\ulsbs@pdfbasebox}
+                {\fp_set:Nn \l_tmpa_fp
+                  {max(\ulPdfTranspositionMinimumScale,
+                    \dim_to_fp:n {\wd\ulsbs@pdfbasebox}/\dim_to_fp:n {\wd\ulsbs@pdfaltbox})}}}}
+          \edef\ulsbs@pdfscale{\fp_to_decimal:N \l_tmpa_fp}
+          \dim_set:Nn \l_tmpa_dim {\wd\ulsbs@pdfaltbox}
+          \setbox\ulsbs@pdfaltbox\hbox{\__ulsbs_pdf_mark:nn {##1}
+            {\int_compare:nNnTF {#3}={1}{\ulsbs@pdfscalechord}
+              {\scalebox{\ulsbs@pdfscale}{\copy\ulsbs@pdfaltbox}}}}
+          \int_compare:nNnT {#3}={1}
+            {\directlua{ulsbs_multikey.tag_chord(\number\ulsbs@pdfaltbox,
+              \number\wd\ulsbs@pdfbasebox,\number\l_tmpa_dim)}}
+          % Alternatives have no advance, height or depth; retain t00 metrics.
+          \global\setbox\ulsbs@pdfaltbox\hbox{\smash{\rlap{
+            \ifulsbs@pdfrightalign
+              \kern\dimexpr\wd\ulsbs@pdfbasebox-\wd\ulsbs@pdfaltbox\relax
+            \fi
+            \copy\ulsbs@pdfaltbox}}}
+          \group_end:
+          \setbox\ulsbs@pdfresultbox\hbox{\box\ulsbs@pdfaltbox\unhbox\ulsbs@pdfresultbox}
+        }
+    \fi
+    \box\ulsbs@pdfresultbox
+    \group_end:
+  }
+
+\cs_set_eq:NN \ulsbs@pdfvisual \__ulsbs_pdf_visual:nnn
+
+% Reuse the ULSBS token splitter, not a second evaluation of shared commands.
+% #1 has already received source transposition. Outside an eligible PDF song it
+% prints directly. The visual seam likewise calls renderer #2 once when disabled.
+\cs_new_protected:Npn \__ulsbs_multikey_chord_text:n #1
+  {\ifulsbs@pdfsong\ulsbs@pdfchordtext{#1}\else#1\fi}
+
+% #1 is effective pitch text, #2 its pure renderer. Melody visuals use mode 0:
+% change glyphs inside their existing geometry, without chord-text fitting tags.
+\cs_set_protected:Npn \__ulsbs_music_visual:nn #1#2
+  {\ifulsbs@pdfsong\__ulsbs_pdf_visual:nnn {#1}{#2}{0}\else#2{#1}\fi}
+
+% #1 is source musical text. Suppress layering outside a PDF chord context,
+% compute effective tokens once, and retain zero-source-offset tokens only for
+% trchordformat's original/effective formatting API. Both transformations copy
+% tokens without executing source; the splitter owns eventual shared execution.
+\RenewDocumentCommand \transposehere {m}
+  {
+    \group_begin:
+    \ifulsbs@pdfchord\else\ulsbs@pdfsongfalse\fi
+    \__ulsbs_music_transpose:nN {#1}\l__ulsbs_multikey_text_tl
+    \int_if_zero:nTF {\l__ulsbs_music_transpose_int}
+      {\exp_args:NV \__ulsbs_multikey_chord_text:n \l__ulsbs_multikey_text_tl}
+      {\group_begin:
+         \int_zero:N \l__ulsbs_music_transpose_int
+         \__ulsbs_music_transpose:nN {#1}\l__ulsbs_multikey_original_tl
+         \exp_args:NNNV \group_end: \tl_set:Nn
+           \l__ulsbs_multikey_original_tl \l__ulsbs_multikey_original_tl
+       \exp_args:NV \ulTransposedChordFormat \l__ulsbs_multikey_original_tl
+         {\exp_args:NV \__ulsbs_multikey_chord_text:n \l__ulsbs_multikey_text_tl}}
+    \group_end:
+  }
+
+% Pure badge renderer for already-transformed key #1. Nonzero interactive offset
+% chooses alternate color/arrow; no source offset is applied to badge metadata.
+\cs_new_protected:Npn \__ulsbs_multikey_badge:n #1
+  {
+    \int_if_zero:nTF {\l__ulsbs_multikey_offset_int}
+      {\def\ulsbs@preludekeycolor{ulChordColor}}
+      {\def\ulsbs@preludekeycolor{ulTransposedKeyColor}}
+    \ulsbs@mainkeybox[\ulsbs@preludekeycolor]
+      {\int_if_zero:nF {\l__ulsbs_multikey_offset_int}
+         {{\color{\ulsbs@preludekeycolor}\symudarrow}\space}
+       \textit{\ulPreludeTextKey}~
+       \textbf{\color{\ulsbs@preludekeycolor}#1\ulsbs@vphantommaxtext}}
+  }
+
+% Invoke inside the key-badge row, after its prelude key-line style.
+% Right alignment anchors every zero-extent alternative to the original edge;
+% this path disables chord-text shrinking and restores alignment policy on exit.
+\cs_new_protected:Npn \__ulsbs_multikey_key_badge:
+  {
+    \group_begin:
+    \int_zero:N \l__ulsbs_multikey_offset_int
+    \ifulsbs@pdfsong
+      \ulsbs@pdfrightaligntrue
+      \exp_args:NV \__ulsbs_pdf_visual:nnn \ulSongKey {\__ulsbs_multikey_badge:n}{0}
+    \else
+      \__ulsbs_multikey_badge:n {\ulSongKey}
+    \fi
+    \group_end:
+  }
+
+% Install the optional score API: arguments are snippet identity, system suffix,
+% and original image path. Delegate only in an active layered song; all
+% other contexts include the original image once without layered score handling.
+\cs_new_protected:Npn \__ulsbs_multikey_score_adapter:
+  {\cs_set_protected:Npn \ulScoreSystem ##1##2##3
+    {\legacy_if:nTF {ulsbs@pdfsong}
+      {\bool_if:NTF \g__ulsbs_song_active_bool
+        {\__ulsbs_score_system:nnn {##1}{##2}{##3}}
+        {\includegraphics{##3}}}
+      {\includegraphics{##3}}}}
+% Variant setup can load the score layer module after the private renderer.
+\AddToHook{file/ulsbs-score-layers.tex/after}{\__ulsbs_multikey_score_adapter:}
+\cs_if_exist:NT \__ulsbs_score_system:nnn {\__ulsbs_multikey_score_adapter:}
+\ExplSyntaxOff
+\makeatother

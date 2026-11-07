@@ -195,7 +195,7 @@ function analyzeText(text) {
         analysis.issues.push(
           issueFromToken(
             "warning",
-            "\\begin{songs} inside a song; songs environments should not be nested inside songs",
+            "\\begin{ulSongs} inside a song; ulSongs environments should not be nested inside songs",
             token
           )
         );
@@ -205,13 +205,13 @@ function analyzeText(text) {
         analysis.issues.push(
           issueFromToken(
             "warning",
-            "Nested \\begin{songs}; close the previous songs environment before opening a new one",
+            "Nested \\begin{ulSongs}; close the previous ulSongs environment before opening a new one",
             token
           )
         );
       }
 
-      const node = makeNode("songsenv", "songs", "\\begin{songs}", token);
+      const node = makeNode("songsenv", "ulSongs", "\\begin{ulSongs}", token);
       stack.push({ type: "songsenv", node });
       continue;
     }
@@ -221,7 +221,7 @@ function analyzeText(text) {
         analysis.issues.push(
           issueFromToken(
             "warning",
-            "\\end{songs} without matching \\begin{songs}",
+            "\\end{ulSongs} without matching \\begin{ulSongs}",
             token
           )
         );
@@ -360,7 +360,7 @@ function analyzeText(text) {
         analysis.issues.push(
           issueFromToken(
             "warning",
-            "\\beginsong is not inside a \\begin{songs} ... \\end{songs} environment in this main document",
+            "\\beginsong is not inside a \\begin{ulSongs} ... \\end{ulSongs} environment in this main document",
             token
           )
         );
@@ -621,7 +621,7 @@ function analyzeText(text) {
       analysis.issues.push(
         issueAt(
           "warning",
-          "Unclosed \\begin{songs} at end of file",
+          "Unclosed \\begin{ulSongs} at end of file",
           entry.node.startLine,
           entry.node.startChar,
           entry.node.startChar + Math.max(13, entry.node.openTextLength ?? 13)

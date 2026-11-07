@@ -1,0 +1,31 @@
+\input regression-test.tex
+\documentclass{ulsbs-songbook}
+\newcount\Stanzas
+\newcount\Effects
+\newcommand\Effect{\global\advance\Effects1 Text}
+\AddToHook{ulsbs/stanza/start}{\global\advance\Stanzas1}
+\begin{document}
+\begin{ulSongs}{}
+\beginsong{Stanza state}
+\beginverse+[1]
+First physical line \Effect
+Second physical line.
+\endverse
+\glueverses
+\beginverse*
+Unnumbered line \Effect
+\endverse
+\endsong
+\end{ulSongs}
+\START
+\TYPE{stanzas=\the\Stanzas}
+\TYPE{effects=\the\Effects}
+\TYPE{next-verse-number=\theulVerseNumber}
+\ExplSyntaxOn
+\bool_if:NTF \g__ulsbs_stanza_active_bool
+  {\TYPE{stanza-active=yes}}{\TYPE{stanza-active=no}}
+\bool_if:NTF \g__ulsbs_verse_glued_bool
+  {\TYPE{pending-glue=yes}}{\TYPE{pending-glue=no}}
+\ExplSyntaxOff
+\END
+\end{document}

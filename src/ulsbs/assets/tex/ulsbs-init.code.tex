@@ -1,0 +1,233 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Public author controls and early initialization.
+% This file is part of the 'ulsbs' package.
+%
+% Loaded by ulsbs.sty after package imports, with @ a letter and ulSongbookType set.
+% Requires etoolbox plus expl3/xparse; later styling supplies colors/fonts and
+% modules supply deferred dependencies (ulSongPosition, textnote, etc.).
+% Owns initial public flags, counters, font/hooks, lengths and break penalties.
+% Initialization executes at package load, including chord/flat font metrics;
+% definitions here are defaults for later overrides, not song/shipout handlers.
+%
+% Layered setup: bootstrap definitions here are followed by the shared visual
+% policy in ulsbs-style.code.tex and subsystem-local defaults in ulsbs.sty.
+% These newcommand hooks are not pre-load providecommand extension points:
+% consumers renew them after loading the package. In particular, common style
+% replaces ulLyricFontStyle, ulPrintChord and several note/index font hooks.
+% Prefer ulLyricFont/ulChordFont for shared font policy; ulLyricFontStyle remains
+% the distinct lyric hook. Later changes affect rendering, not the early
+% font allocation or metrics measured below.
+% Set allocated lengths/skips after loading with \setlength, and assign penalty
+% counts directly (e.g. \ulVerseVersePenalty=200\relax). For LaTeX counters use
+% \setcounter{ulSongNumber}{1}. Public boolean setters take true or false and
+% obey grouping; query their real \iful... predicates rather than redefining them.
+
+\ProvidesFile{ulsbs-init.code.tex}[Public initialization]
+
+% === Boolean controls and initial book mode ===
+
+% Keep predicates as real conditionals, including in TeX's skipped branches.
+% Assignment helpers stay private; the public setter follows ordinary grouping.
+\newcommand*\ulsbs@newbool[4]{%
+  \let#1\iffalse%
+  \def#2{\let#1\iftrue}%
+  \def#3{\let#1\iffalse}%
+  \newcommand#4[1]{%
+    \ifstrequal{##1}{true}{#2}{%
+      \ifstrequal{##1}{false}{#3}{%
+        \PackageError{ulsbs}{Invalid boolean value: ##1}{Use true or false.}}}}%
+}
+
+\ulsbs@newbool\ifulChorded\ulsbs@chordedtrue\ulsbs@chordedfalse\ulChorded
+\ulsbs@newbool\ifulLyric\ulsbs@lyrictrue\ulsbs@lyricfalse\ulLyric
+\ulsbs@newbool\ifulSlides\ulsbs@slidestrue\ulsbs@slidesfalse\ulSlides
+\ulsbs@newbool\ifulMeasures\ulsbs@measurestrue\ulsbs@measuresfalse\ulMeasures
+\ulsbs@newbool\ifulTransposeCapos\ulsbs@transcapostrue\ulsbs@transcaposfalse\ulTransposeCapos
+\ulsbs@newbool\ifulNoLyrics\ulsbs@nolyricstrue\ulsbs@nolyricsfalse\ulNoLyrics
+\ulsbs@newbool\ifulSongIndexes\ulsbs@songindexestrue\ulsbs@songindexesfalse\ulSongIndexes\ulsbs@songindexestrue
+\ulsbs@newbool\ifulSeparateIndexes\ulsbs@sepindexestrue\ulsbs@sepindexesfalse\ulSeparateIndexes\ulsbs@sepindexestrue
+\ulsbs@newbool\ifulPagePreludesEnabled\ulsbs@pagepreludestrue\ulsbs@pagepreludesfalse\ulPagePreludesEnabled
+\ifdefstring{\ulSongbookType}{chorded}
+  {\ulsbs@chordedtrue\ulsbs@measurestrue}
+  {\ifdefstring{\ulSongbookType}{lyric}{\ulsbs@lyrictrue}
+    {\PackageError{ulsbs}{Unknown songbook type: \ulSongbookType}
+      {Use chorded or lyric for ulSongbookType.}}}
+
+% === Numbering counters and printers ===
+
+\newcounter{ulSongNumber}
+\newcounter{ulVerseNumber}
+\let\ulSongNumberStyle\arabic
+\let\ulVerseNumberStyle\arabic
+
+% No arguments; expand counters through replaceable public numbering styles.
+\renewcommand\theulSongNumber{\ulSongNumberStyle{ulSongNumber}}
+
+\renewcommand\theulVerseNumber{\ulVerseNumberStyle{ulVerseNumber}}
+
+% {label}: render song/verse labels in current layout; no counter changes.
+\newcommand\ulPrintSongNumber[1]{\sffamily\bfseries\LARGE#1}
+
+\newcommand\ulPrintVerseNumber[1]{\ulLyricFontStyle#1.\ }
+
+% {box register}: offset and consume the already-rendered verse-number box.
+\newcommand\ulPlaceVerseNumber[1]{\kern\dimexpr-\leftskip-\parindent\relax\box#1}
+
+% === Font and rendering hooks ===
+
+% Argument-free font declarations/hooks below affect the caller's current group.
+% Empty hooks are extension points; verse justification uses shared style.
+\newcommand\ulLyricFontStyle{\normalfont\normalsize}
+
+\newcommand\ulSongTitleFont{\sffamily\ifulSlides\Huge\else\slshape\Large\fi}
+
+\newcommand\ulVerseFont{}
+
+\newcommand\ulEveryVerse{}
+
+\newcommand\ulVerseJustify{\justifyleft}
+
+\newcommand\ulSongMark{}
+
+\newcommand\ulVerseMark{}
+
+\newcommand\ulNoteFont{}
+
+\newcommand\ulMeterFont{\tiny\sffamily\upshape}
+
+\newcommand\ulEchoFont{\ifdim\fontdimen1\font>0pt\upshape\else\slshape\fi}
+
+% {chord text}: emit styled chord ink. Empty ulChordLocals/ulChordLineParams are
+% notation-local setup hooks; ulSharpSymbol emits an inline accidental glyph.
+\newcommand\ulPrintChord[1]{\sffamily\slshape\large#1}
+
+\newcommand\ulChordLocals{}
+
+\newcommand\ulChordLineParams{}
+
+\newcommand\ulSharpSymbol{\ensuremath{^\#}}
+
+% No arguments; expand to color names resolved by later shared styling.
+\newcommand\ulSongNumberBackgroundColor{ulSongNumberBackgroundColor}
+
+\newcommand\ulNoteBackgroundColor{ulNoteBackgroundColor}
+
+\newcommand\ulIndexBackgroundColor{ulIndexBackgroundColor}
+
+% {text}: emit a chord-colored note unless the shared lyric-only flag hides it.
+\newcommand\musicnote[1]{\ifulLyricOnly\else\textnote{\color{ulChordColor}#1}\fi}
+
+% Argument-free index font declarations, applied within display-owned groups.
+\newcommand\ulIndexHeadingFont{\sffamily\bfseries\LARGE}
+
+\newcommand\ulIndexTitleFont{\sffamily\slshape}
+
+\newcommand\ulIndexLyricFont{\rmfamily}
+
+\newcommand\ulIndexTagFont{\sffamily\small\slshape}
+
+\newcommand\ulIndexAuthorFont{\small\bfseries}
+
+\newcommand\ulIndexRefsFont{\normalfont\normalsize}
+
+% {heading}: emit index continuation text; no collection-state effects.
+\newcommand\ulIndexContinuation[1]{\small\textbf{#1} (continued)}
+
+% === Scoped layout controls ===
+
+% No-argument switches: suppress lyrics, request page preludes (also disable fit
+% positioning), or hide numbering widths/verse printer. Dependencies resolve later.
+\newcommand\nolyrics{\ulsbs@nolyricstrue}
+
+\newcommand\ulPagePreludes{\ulsbs@pagepreludestrue\ulSongPosition{0}}
+
+\newcommand\ulNoSongNumbers{\ulSongNumberWidth=0pt\relax}
+
+\newcommand\ulNoVerseNumbers{\def\ulPrintVerseNumber##1{}\ulVerseNumberWidth=0pt\relax}
+
+% No arguments; set stanza break penalties and bottom glue in the current scope.
+\newcommand\ulSeparateVerses{\ulVerseVersePenalty=-10000\relax\let\ulColumnBottomGlue\@flushglue}
+
+% No arguments; adjust paragraph metrics for note prose in its formatting group.
+\newcommand\ulNoteJustify{\advance\baselineskip by 1pt\relax
+  \leftskip=0pt\rightskip=0pt\parfillskip=\@flushglue\parindent=0pt}
+
+% {original}{transposed}: default chord formatter emits only the second value.
+\newcommand\ulTransposedChordFormat[2]{#2}
+
+% No arguments; emit rights metadata at postlude construction, not at shipout.
+\newcommand\ulExtendPostlude{\ulSongCopyright\ \ulSongLicense\unskip}
+
+% === Layout registers and pre-typography numbering metrics ===
+
+% No arguments; expand to flexible bottom glue used by layout break candidates.
+\newcommand\ulColumnBottomGlue{0pt plus .5\textheight}
+\newlength\ulVerseSep
+\newlength\ulAfterPreludeSkip
+\newlength\ulBeforePostludeSkip
+\newlength\ulBaselineAdjustment
+\newlength\ulSongNumberWidth
+\newlength\ulVerseNumberWidth
+\newlength\ulIndexHeadingWidth
+\newlength\ulRepeatBarWidth
+\newlength\ulSongBarHeight
+% Load-time numbering metrics: preserve this pre-typography font context and
+% execution order, even if later styles hide verse numbers or replace printers.
+\settowidth\ulSongNumberWidth{\ulPrintSongNumber{999.}}
+\settowidth\ulVerseNumberWidth{\ulPrintVerseNumber{9\kern1em}}
+\ulIndexHeadingWidth=1.5cm\relax
+\ulRepeatBarWidth=1pt\relax\ulSongBarHeight=1pt\relax
+\newcount\ulVerseVersePenalty
+\newcount\ulBreakPenalty
+\newcount\ulSongPenalty
+% These are document defaults, before the shared ULSBS spacing policy is applied.
+\parindent=.25in\relax
+\ifulChorded\else\let\ulColumnBottomGlue\z@skip\fi
+
+% === Flat-size defaults, accidental glyphs and early chord metrics ===
+
+\ExplSyntaxOn
+\prop_new:N \g__ulsbs_song_flat_sizes_prop
+
+% {current font size}{flat font size}: globally store expanded size strings.
+% The following grouped table initialization populates defaults without leaking
+% sequence scratch; entries persist for flat rendering throughout the document.
+\DeclareDocumentCommand \ulDeclareFlatSize {m m}
+  {\prop_gput:Nxx \g__ulsbs_song_flat_sizes_prop {#1}{#2}}
+\group_begin:
+\clist_map_inline:nn
+  {5/5,6/6,7/6,8/7,9/8,10/9,10.95/10,12/10.95,
+   14.4/12,17.28/14.4,20.74/17.28,24.88/20.74}
+  {\seq_set_split:Nnn \l_tmpa_seq {/}{#1}
+   \exp_args:Nxx \ulDeclareFlatSize
+     {\seq_item:Nn \l_tmpa_seq {1}}{\seq_item:Nn \l_tmpa_seq {2}}}
+\group_end:
+
+% No arguments; public sharp alias, resolved through the replaceable glyph hook.
+\DeclareDocumentCommand \shrp {}{\ulSharpSymbol}
+
+% No arguments; emit a raised flat, locally selecting the size-table override
+% and symbol font when available (otherwise a math flat). No font state leaks.
+\DeclareDocumentCommand \ulFlatSymbol {}
+  {\leavevmode\raise.5ex\hbox{\group_begin:
+    \prop_get:NVNT \g__ulsbs_song_flat_sizes_prop \f@size \l_tmpa_tl
+      {\fontsize{\l_tmpa_tl}{\f@baselineskip}\selectfont}
+    \cs_if_exist:NTF \ulSymbolFont
+      {{\ulSymbolFont\char"266D}}{\ensuremath{\flat}}\group_end:}}
+
+% No arguments; public flat alias used by active accidentals and chord metrics.
+\DeclareDocumentCommand \flt {}{\ulFlatSymbol}
+% Initialize real public chord metrics before the document font policy. Font
+% allocation at this boundary also belongs to published PDF range identities.
+\setbox\@tempboxa\hbox{{\ulPrintChord{ABCDEFG\shrp\flt/j7}}}
+\baselineskip=\f@size pt\relax
+\ifulChorded
+  \advance\baselineskip\ht\@tempboxa
+  \advance\baselineskip 2pt\relax
+\fi
+% Scale a dimension, not font-size text: 11pt classes use the decimal 10.95.
+\advance\baselineskip 0pt~plus~\dim_eval:n {\f@size pt / 10}\relax
+\advance\baselineskip\ulBaselineAdjustment
+\ExplSyntaxOff

@@ -72,7 +72,7 @@ class MultikeyMetadataTests(unittest.TestCase):
             "multikey-metadata", passes=3, multikey=False, artifacts=cls.ordinary_artifacts,
         )
         _, cls.hidden, cls.hidden_envelope = compile_with_manifest(
-            "multikey-metadata", passes=3, preamble="\\def\\ulPdfTranspositionLayerUI{hidden}\n",
+            "multikey-metadata", passes=3, preamble="\\def\\ulPdfTranspositionLayerUi{hidden}\n",
         )
         cls.envelope = json.loads(cls.artifacts["multikey-metadata.ulsbs-multikey.json"])
         cls.info = cls.envelope["multikey_info"]
@@ -250,7 +250,7 @@ class MultikeyMetadataTests(unittest.TestCase):
 
     def test_entirely_hidden_notation_has_no_ocgs_or_song_records(self) -> None:
         _, data, envelope = compile_with_manifest('multikey-metadata', passes=2, preamble=(
-            r'\AtBeginDocument{\chordsoff\shownotesfalse}'))
+            r'\AtBeginDocument{\chordsoff\ulShowNotes{false}}'))
         self.assertEqual(envelope['multikey_info']['songs'], [])
         self.assert_no_embedded_json(data)
         self.assertEqual(PdfStructure(data).layers, {})
@@ -273,13 +273,13 @@ class MultikeyMetadataTests(unittest.TestCase):
             with self.subTest(identifier=identifier):
                 output, _ = compile_fixture(
                     "multikey-metadata", expect_success=False,
-                    preamble="\\def\\ulPdfTranspositionRequireSongIDs{true}\n"
+                    preamble="\\def\\ulPdfTranspositionRequireSongIds{true}\n"
                              + "\\def\\MetadataSongID{" + identifier + "}\n",
                 )
                 self.assertIn("Missing or invalid song id", output)
         output, pdf = compile_fixture(
             "multikey-metadata", passes=2, multikey=False,
-            preamble="\\def\\ulPdfTranspositionRequireSongIDs{true}\n",
+            preamble="\\def\\ulPdfTranspositionRequireSongIds{true}\n",
         )
         self.assertNotIn("Missing or invalid song id", output)
         self.assert_no_embedded_json(pdf)

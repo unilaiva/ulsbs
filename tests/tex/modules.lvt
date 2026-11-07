@@ -1,0 +1,33 @@
+\input regression-test.tex
+\documentclass{ulsbs-songbook}
+\begin{document}
+\START
+\ExplSyntaxOn
+\cs_if_exist:NTF \g__ulsbs_backend_tl
+  {\TYPE{backend-variable=PRESENT}}{\TYPE{backend-variable=absent}}
+\clist_map_inline:nn
+  {ulsbs_boolmap_set_true:Nn,ulsbs_boolmap_set_false:Nn,ulsbs_boolmap_gset_true:Nn,
+   ulsbs_boolmap_gset_false:Nn,ulsbs_boolmap_reset:N,ulsbs_boolmap_greset:N,
+   ulsbs_boolmap_if_true:NnTF,ulBoolSetTrue,ulBoolSetFalse,ulBoolReset,ulIfBool,
+   ulChapterCornerMark,ulChapterCornerMarksOuter}
+  {\cs_if_exist:cTF {#1}
+    {\TYPE{symbol~#1=present}}{\TYPE{symbol~#1=MISSING}}}
+\prop_new:N \g__ulsbs_module_test_prop
+\ulsbs_boolmap_if_true:NnTF \g__ulsbs_module_test_prop {missing}
+  {\TYPE{missing-key=true}}{\TYPE{missing-key=false}}
+\ulsbs_boolmap_gset_true:Nn \g__ulsbs_module_test_prop {key}
+\ulsbs_boolmap_if_true:NnTF \g__ulsbs_module_test_prop {key}
+  {\TYPE{set-key=true}}{\TYPE{set-key=false}}
+\ulsbs_boolmap_greset:N \g__ulsbs_module_test_prop
+\ulsbs_boolmap_if_true:NnTF \g__ulsbs_module_test_prop {key}
+  {\TYPE{reset-key=true}}{\TYPE{reset-key=false}}
+\ExplSyntaxOff
+\directlua{
+  for _, name in ipairs({"ulsbs-init.code.tex", "ulsbs-boolmap.code.tex",
+      "ulsbs-chapter-marks.code.tex", "ulsbs-multikey.lua"}) do
+    local path = kpse.find_file(name, "tex")
+    texio.write_nl("term and log", "kpse " .. name .. "=" .. (path and "found" or "MISSING"))
+  end
+}
+\END
+\end{document}

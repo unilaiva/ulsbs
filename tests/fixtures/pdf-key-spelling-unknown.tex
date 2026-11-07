@@ -1,17 +1,28 @@
 \documentclass[paper={a5paper},maintitle={Unknown Uppercase Accidentals}]{ulsbs-songbook}
 \makeatletter
 \newcount\ULtestunknownfactor
+\ExplSyntaxOn
+\cs_new_protected:Npn \ULtestunknownsource #1
+  {\int_set:Nn \l__ulsbs_music_transpose_int {\ULtestunknownfactor}
+   \__ulsbs_music_transpose:nN {#1}\l_tmpa_tl
+   \cs_set:Npx \ULtestunknownresult {\exp_not:V \l_tmpa_tl}}
+\cs_new_protected:Npn \ULtestunknownalternate #1
+  {\__ulsbs_music_transpose_alternative:nnN {\ULtestunknownfactor}{#1}\l_tmpa_tl
+   \cs_set:Npx \ULtestunknownresult {\exp_not:V \l_tmpa_tl}}
+\cs_new_protected:Npn \ULtestunknownzero #1
+  {\int_zero:N \l__ulsbs_music_transpose_int
+   \int_set:Nn \l__ulsbs_music_layer_int {\ULtestunknownfactor}
+   \__ulsbs_music_transpose:nN {#1}\l_tmpa_tl
+   \cs_set:Npx \ULtestunknownresult {\exp_not:V \l_tmpa_tl}}
+\ExplSyntaxOff
 \newcommand\ULtestunknownlog[3]{%
   \def\shrp{SHARP}\def\flt{FLAT}%
-  \edef\ULtestunknownresult{\the\SB@toks}%
   \typeout{ULUNKNOWN:\ULtestunknownkey:#1:#2:#3:\ULtestunknownresult}}
 \newcommand\ULtestunknowncase[2]{%
   \ULtestunknownfactor=-2
   \loop
     \begingroup
-    \UL@pdfalternatefalse
-    \SB@transposefactor=\ULtestunknownfactor
-    \SB@dotranspose{#2}%
+    \ULtestunknownsource{#2}%
     \ULtestunknownlog{source}{\the\ULtestunknownfactor}{#1}%
     \endgroup
     \advance\ULtestunknownfactor by 2
@@ -19,18 +30,11 @@
   \ULtestunknownfactor=0
   \loop
     \begingroup
-    \UL@pdfalternatetrue
-    \UL@pdfspellprepare{\the\ULtestunknownfactor}%
-    \SB@dotranspose{#2}%
+    \ULtestunknownalternate{#2}%
     \ULtestunknownlog{alternate}{\the\ULtestunknownfactor}{#1}%
     \endgroup
     \begingroup
-    \UL@pdfalternatetrue
-    \UL@pdfspellprepare{\the\ULtestunknownfactor}%
-    % Typography converts canonical input at zero, even after a key hook.
-    \SB@transposefactor=0\SB@convertnotestrue
-    \notenamesout abcdefg%
-    \SB@dotranspose{#2}%
+    \ULtestunknownzero{#2}%
     \ULtestunknownlog{zero}{\the\ULtestunknownfactor}{#1}%
     \endgroup
     \advance\ULtestunknownfactor by 1
@@ -44,18 +48,14 @@
   \ULtestunknownfactor=0
   \loop
     \begingroup
-    \UL@pdfalternatetrue
-    \UL@pdfspellprepare{\the\ULtestunknownfactor}%
-    \SB@transposefactor=0\SB@convertnotestrue
-    \notenamesout abcdefg%
-    \SB@dotranspose{C\shrp}%
+    \ULtestunknownzero{C\shrp}%
     \ULtestunknownlog{zero}{\the\ULtestunknownfactor}{Cs}%
     \endgroup
     \advance\ULtestunknownfactor by 1
   \ifnum\ULtestunknownfactor<12\repeat}
 \makeatother
 \begin{document}
-\begin{songs}{}
+\begin{ulSongs}{}
 \beginsong{Known Key Unknown Text}[id={fixture-1},key={C}]
 \ULtestunknownprobes{known}
 \transpose{2}
@@ -76,5 +76,5 @@
 \[NC&]MissingTextFlat
 \endverse
 \endsong
-\end{songs}
+\end{ulSongs}
 \end{document}

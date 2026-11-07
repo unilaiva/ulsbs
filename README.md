@@ -8,7 +8,7 @@ same sources.
 - Place **chords above lyrics**, with **measure bars** and repeat markings.
 - Add compact melody-note hints and beat marks, or full LilyPond music notation.
 - Transpose chords and melody hints with key-aware accidental spelling.
-- Organize books with chapters, tables of contents, and title and tag indices.
+- Organize books with chapters, tables of contents, and title, author and tag indices.
 - Generate lyrics-only and supported instrument variants, plus A5 home-printing layouts.
 - Optionally create multikey editions with independently selectable keys for each
   song in compatible PDF viewers or websites.
@@ -42,6 +42,7 @@ use [Writing Songbooks](WRITING_SONGBOOKS.md) for song syntax and customization.
 - [Compiling songbooks](#compiling-songbooks)
   - [Main document filename conventions](#main-document-filename-conventions)
   - [Output locations](#output-locations)
+  - [Warnings and partial builds](#warnings-and-partial-builds)
 - [Variants and editions](#variants-and-editions)
   - [Default variant](#default-variant)
   - [Lyrics-only variant](#lyrics-only-variant)
@@ -59,6 +60,7 @@ use [Writing Songbooks](WRITING_SONGBOOKS.md) for song syntax and customization.
   - [`ulsbs-midi2audio`](#ulsbs-midi2audio)
   - [`ulsbs-ly2tex`](#ulsbs-ly2tex)
   - [`ulsbs-migrate-syntax-v1`](#ulsbs-migrate-syntax-v1)
+  - [`ulsbs-migrate-syntax-v2`](#ulsbs-migrate-syntax-v2)
 - [Editor support](#editor-support)
 - [Troubleshooting](#troubleshooting)
 - [Contact](#contact)
@@ -193,13 +195,13 @@ Put this in `my-songbook_A5.tex`:
 
 \ulCoverPage{}
 \ulImprintPage
-\ulTOC
+\ulToc
 
 \ulMainChapter{Main Chapter}{blue}
 
-\begin{songs}{titleidx,authidx,tagidx}
-\input{content/songs_main.tex}
-\end{songs}
+\begin{ulSongs}{titleidx,authidx,tagidx}
+  \input{content/songs_main.tex}
+\end{ulSongs}
 
 \end{document}
 ```
@@ -216,8 +218,13 @@ Put the song in `content/songs_main.tex`:
 ```
 
 Here `\[C]` places a chord above the following lyrics, and `|` marks the
-beginning of a measure. Songs must be inside a `songs` environment. The cover,
+beginning of a measure. Songs must be inside a `ulSongs` environment. The cover,
 imprint, and table of contents are optional.
+
+The index identifiers select title, author and tag collection. Use
+`\ulShowIndex{Heading}{identifier}` to display an index; the compiler handles
+generation automatically. See
+[Tags and indices](WRITING_SONGBOOKS.md#tags-and-indices) for examples and settings.
 
 ### Minimal `ulsbs-config.toml`
 
@@ -294,8 +301,8 @@ to `deploy/` by default, not an upload to a web server. Disable it with
 `deploy = false` or `--no-deploy`. An explicitly configured `deploy-dir` or
 `--deploy-dir` must already exist on the host.
 
-ULSBS automatically reduces PDF size by sharing identical embedded font data,
-including in quick builds, while preserving appearance and multikey controls.
+ULSBS automatically optimizes PDF size, including in quick builds, without
+changing appearance or multikey controls.
 
 ### Warnings and partial builds
 
@@ -305,25 +312,20 @@ warning breakdown and `SEE` paths before `SUCCESS ... with N warnings` and the
 output path. Related lines print together, without interleaving other jobs.
 Use `--verbose` for individual diagnostics and detailed score-fallback information.
 
-Warning counts represent diagnostic records, not lines, logs, or occurrences of
-the word "warning". Multiline warnings count once; repeated records display
-together with their occurrence count, and closing TeX recaps are not counted
-again when their specific warnings are available. Native aggregate warnings
-retain an affected-item count, such as eight songs missing IDs. Only the **last
-LuaLaTeX invocation** contributes displayed or counted warnings, including after
-convergence reruns; intermediate rerun requests are progress, not final warnings.
+The summary groups repeated warnings and shows occurrence or affected-item counts
+where available, such as eight songs missing IDs. A warning spanning multiple log
+lines counts once. Typesetting warnings reflect the final LuaLaTeX run;
+intermediate rerun requests are progress messages.
 Missing glyphs and overfull boxes are warnings; underfull boxes are informational.
 Configuration, resource, and cleanup advisories are separate from job counts.
-Unfamiliar messages with recognized warning headers are still counted, without
-requiring a message whitelist. Those without a specialized category appear as
-`unclassified warnings`; `--verbose` shows their messages, and `SEE` links their
-logs. Entirely unfamiliar warning header formats may require parser support.
+Some messages appear as `unclassified warnings`; use `--verbose` to read them
+or follow the `SEE` links to their logs.
 
 The final summary identifies warned jobs, failures, blocked companions, and
 intentionally skipped outputs. Per-job `<book-basename>_DIAGNOSTICS.json` reports
 remain under `result/diagnostics/`, even when temporary files are cleaned. Paths
 in these reports use host locations, including during container builds.
-Failed jobs also retain native TeX error locations when available, and display
+Failed jobs also retain TeX error locations when available, and display
 a clickable file-and-line link independently of the log-tail limit. These lines
 refer to the file TeX actually read, which can be staged or generated TeX; they
 are not guessed mappings back to the original document. Full raw tool logs
@@ -487,6 +489,10 @@ documents viewer integration, package contracts, and cache maintenance.
 
 ## Requirements
 
+ULSBS uses LuaLaTeX for typesetting. The recommended compiler container includes
+it; no separate TeX installation is needed on the host. pdfLaTeX and XeLaTeX are
+not supported.
+
 ### Recommended: container build
 
 By default ULSBS compiles inside Docker or Podman. You need:
@@ -510,13 +516,12 @@ container's persistent home-cache volume, including cached score alternatives.
 
 Host mode requires a compatible toolchain, including:
 
-- A recent LaTeX distribution with `lualatex` and `texlua`.
+- A recent LaTeX distribution with `lualatex` (LuaLaTeX).
 - LilyPond with `lilypond-book`.
 - `bash` and Python 3.11+.
-- Python package `pikepdf` 8+ (mandatory for automatic PDF font sharing).
+- Python package `pikepdf` 8+ (mandatory for PDF optimization).
 - `qpdf` 12.2.0+ when multikey generation is enabled.
 - Noto fonts (`Noto Sans`, `Noto Serif`, with needed weights).
-- Locale `fi_FI.utf8`.
 
 Additional tools depend on the outputs you want:
 
@@ -528,8 +533,11 @@ Additional tools depend on the outputs you want:
 
 These outputs are enabled by default, but depend on suitable input and available
 tools. Disabling them does not remove the core LaTeX/LilyPond requirements.
-ULSBS vendors a compatible copy of the `songs` LaTeX package; the other LaTeX
-packages must be provided by your TeX installation.
+Your TeX installation must also provide the LaTeX packages used by ULSBS.
+
+For a standalone lyrics-and-chords document, you can run LuaLaTeX directly
+without the Python compiler or LilyPond. See the
+[manual-build instructions](WRITING_SONGBOOKS.md#manual-lualatex-builds).
 
 ### Platform-specific setup examples
 
@@ -573,8 +581,7 @@ Ubuntu 24.04 is a reference host setup. Install the toolchain:
 
 ```sh
 sudo apt update
-sudo apt install bash locales git python3 python3-pikepdf qpdf context context-modules ffmpeg fluidsynth fluid-soundfont-gm fonts-noto-core fonts-noto-extra fonts-noto-mono imagemagick lilypond poppler-utils texlive texlive-font-utils texlive-lang-arabic texlive-lang-english texlive-lang-european texlive-lang-portuguese texlive-lang-spanish texlive-latex-base texlive-latex-extra texlive-luatex texlive-music texlive-plain-generic
-sudo locale-gen fi_FI.utf8
+sudo apt install bash git python3 python3-pikepdf qpdf context context-modules ffmpeg fluidsynth fluid-soundfont-gm fonts-noto-core fonts-noto-extra fonts-noto-mono imagemagick lilypond poppler-utils texlive texlive-font-utils texlive-lang-arabic texlive-lang-english texlive-lang-european texlive-lang-portuguese texlive-lang-spanish texlive-latex-base texlive-latex-extra texlive-luatex texlive-music texlive-plain-generic
 sudo mtxrun --generate
 ```
 
@@ -675,7 +682,9 @@ For existing projects with legacy syntax, migrate `\mn*`, `\ma*`, beat-mark,
 and `\ac<n>{Chord}` forms to melody blocks and `\ac{n}{Chord}`. It also replaces
 `\shrp` and `\flt` with `#` and `&` inside `\altchords`, `\beginsong`'s
 `key`/`gk` values, and `\audio`'s `key` value; accidental macros elsewhere stay
-unchanged. New projects should use the writing guide's current syntax.
+unchanged. This command retains its v1 destination contract, including the old
+melody-setting command names. New projects should use the writing guide's current
+syntax; existing projects should run v2 after v1.
 
 ```sh
 ./ulsbs/ulsbs-migrate-syntax-v1 --check content/
@@ -694,6 +703,84 @@ only after review; it normalizes those slots but never changes verse environment
 The migrator does not infer missing secondary-note slots. Review diagnostics
 and converted notation before committing. See
 [migration details](ARCHITECTURE.md#syntax-migration) for preservation rules.
+
+### `ulsbs-migrate-syntax-v2`
+
+Upgrade configuration, book-assembly, font and metadata-accessor names to the
+current `ulCamelCase` API. Short lowercase song-content commands remain short.
+For example, `\ulTOC` becomes `\ulToc`, `\ultextnote{...}` becomes
+`\attachednote{...}`, and `\showtagsfalse` becomes `\ulShowTags{false}`.
+Boolean setters take an explicit `true` or `false` argument, respect TeX scope,
+and preserve the previous defaults. No old runtime command aliases are provided.
+Class option keys, remaining song metadata keys and public hook paths do not change.
+The inherited `sr=` field and three-braced song metadata form have been removed;
+v2 diagnoses them for review rather than converting scripture references into tags.
+Use optional `tags=`, `by=` and `cr=` metadata as appropriate. The old `\songrefs`
+and intermediate `\ulSongRefs` accessors likewise diagnose as removed.
+Book/index assembly environments also change: `songs` becomes `ulSongs`, and
+`idxblock` becomes `ulIndexBlock`. Use the new names in both `\begin` and `\end`.
+The title-index constructor stays `\ulNewIndex`; `\ulNewScriptureIndex` becomes
+`\ulNewTagIndex`, and `\ulIndexScriptureFont` becomes `\ulIndexTagFont`.
+
+Obsolete `\beginchorus` (also `\chorus`) and `\endchorus` become
+`\beginverse\beginrep` and `\endrep\endverse`: a numbered verse with an explicit
+repeat region, not an unnumbered verse. The `chorus` environment similarly becomes
+a `verse` environment with explicit repeat boundaries. Removed chorus-only fonts,
+hooks, justification, marks, penalties and repeat switches require review in both
+their old and `ul...` spellings; they are not converted to verse settings.
+Remove obsolete configuration after reviewing any custom definitions or uses.
+Other removed controls (partial-list/raw-text switches, last-column glue,
+index-book and note-name/printer hooks, `\ulPreludeTextGood` and
+`\ulSongNumberDefaultHeight`) likewise diagnose in either spelling instead of
+being renamed to removed APIs.
+
+```sh
+./ulsbs/ulsbs-migrate-syntax-v2 --check content/ include/ my-songbook_A5.tex
+./ulsbs/ulsbs-migrate-syntax-v2 --diff content/ include/ my-songbook_A5.tex
+./ulsbs/ulsbs-migrate-syntax-v2 --write content/ include/ my-songbook_A5.tex
+```
+
+Convert a legacy tag-definition file explicitly, either alone or alongside
+source migration. `--tags-file FILE` requires one of `--check`, `--diff`, or
+`--write`:
+
+```sh
+./ulsbs/ulsbs-migrate-syntax-v2 --check --tags-file include/tags.can
+./ulsbs/ulsbs-migrate-syntax-v2 --diff --tags-file include/tags.can
+./ulsbs/ulsbs-migrate-syntax-v2 --write --tags-file include/tags.can content/ include/ my-songbook_A5.tex
+```
+
+The conversion removes legacy `1` count lines and renames the file to `.txt`,
+preserving its basename (`tags.can` becomes `tags.txt`). It refuses destination
+collisions and symlinks. Ordinary source migration reminds you about tag-file
+migration but never auto-discovers `.can` files. Review the diff before writing.
+The runtime reads only the new ordered UTF-8 plain-text format, one
+`canonical|alias|alias` definition per line, not legacy `.can` syntax. The default
+lookup checks `include/tags.txt` first, then `tags.txt` through TeX lookup. For a
+custom basename, add `\ulTagFile{my-tags.txt}` in the preamble; an explicitly
+configured missing file is an error, not a fallback to the default. See
+[tag definitions](WRITING_SONGBOOKS.md#defining-your-own-tags).
+Review explicit tag-index entries containing numbered references manually: the
+runtime matches raw tag names, and migration does not strip numeric suffixes that
+could be part of a legitimate tag name.
+
+For sources older than v1, first review and apply `ulsbs-migrate-syntax-v1`,
+then run v2, review the source diff and compile the book. V2 does not replace
+the v1 melody conversion or silently change its destination. Include custom
+classes and shared configuration sources in the naming review, not only songs.
+The tool accepts `.tex`, `.cls` and `.sty` sources or directories.
+`--check` never writes and exits nonzero for pending changes or
+review diagnostics. `--diff`
+previews safe conversions; `--write` applies them. Both exit nonzero for review
+diagnostics or I/O errors. A file with any diagnostic is neither changed nor
+shown as a partial diff; safe files in the same batch may still be updated.
+Writes are file-atomic, not a directory transaction. Comments, verbatim-like
+regions, literal URLs and embedded LilyPond bodies are preserved. Computed names,
+unsafe boolean or chorus-boundary references and ambiguous tokenization need
+manual review, not blind search-and-replace.
+
+The [writing guide](WRITING_SONGBOOKS.md) documents the resulting API;
+[architecture](ARCHITECTURE.md#syntax-migration) describes migration boundaries.
 
 ## Editor support
 
@@ -726,7 +813,13 @@ You do not need to open a GitHub issue to ask for help; email is welcome too.
 ## Developer documentation
 
 [Architecture](ARCHITECTURE.md) covers engine internals, PDF/viewer contracts,
-cache maintenance, and testing. From the engine source directory, `./ulsbs-test`
+cache maintenance, and testing. Its [song engine reference](ARCHITECTURE.md#song-engine)
+maps module ownership, load order and lifecycle boundaries; the
+[annotation scanner contract](ARCHITECTURE.md#annotation-scanner-contract) describes
+token handling and once-only source effects. Public syntax and extension points
+remain in [Writing Songbooks](WRITING_SONGBOOKS.md).
+
+From the engine source directory, `./ulsbs-test`
 runs the supported containerized regression suite. Authors do not need to run
 that suite to compile their books.
 
@@ -734,11 +827,22 @@ that suite to compile their books.
 
 ## Acknowledgements
 
-ULSBS uses a bundled copy of the [`songs` LaTeX package](https://songs.sourceforge.net/)
-by **Kevin W. Hamlen**. Its song-layout and indexing facilities form an important
-foundation of ULSBS, which extensively customizes and extends their behavior.
-The [writing guide](WRITING_SONGBOOKS.md) links to the original package's
-documentation as well as explaining ULSBS-specific syntax.
+ULSBS owes a substantial debt to the
+[`songs` LaTeX package](https://songs.sourceforge.net/) and its author,
+**Kevin W. Hamlen**. We used it for years, first building compiler and publication
+infrastructure around its song-layout and indexing facilities, then incrementally
+patching and extending it for our songbooks and new features. That work eventually
+led to a ULSBS renderer and in-process index generator, allowing us to let
+go of the upstream runtime without replacing authors' song notation.
+
+The original `songs` package is copyright (C) 2018 Kevin W. Hamlen and is licensed
+under **GNU GPL version 2 or later**, as stated in its
+[upstream README](https://mirrors.ctan.org/macros/latex/contrib/songs/README),
+`songs.dtx` implementation source and `songidx.lua`. We consider ULSBS a derivative
+work of `songs` and distribute it under **GNU GPL version 3 or later**, using the
+upstream grant's later-version option. See [LICENSE](LICENSE) for the full terms.
+Removing the upstream runtime does not erase its authorship or our debt to it;
+retain applicable copyright and license notices when redistributing derived code.
 
 ## License
 

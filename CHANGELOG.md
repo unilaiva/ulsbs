@@ -1,9 +1,52 @@
 # Changelog
 
-Changes accumulate under Unreleased and move to a dated version heading when
-the extension is released.
-
 ## Unreleased
+
+> [!IMPORTANT]
+> **Source migration required before rebuilding existing books.** Public macro
+> and book-assembly environment names have changed; old names are not runtime
+> aliases. Run `ulsbs-migrate-syntax-v2` on your songbook sources, custom classes
+> and includes. Review changes in version control:
+>
+> ```sh
+> ulsbs-migrate-syntax-v2 --diff PATH
+> ulsbs-migrate-syntax-v2 --write PATH
+> ```
+>
+> Resolve any review diagnostics before compiling. Migrate separate legacy tag
+> definitions explicitly with `--tags-file FILE`; source-directory scans do not
+> convert them. See [v2 migration instructions](README.md#ulsbs-migrate-syntax-v2).
+
+- Replaced the vendored `songs` runtime with native ULSBS TeX/Lua modules for
+  song metadata/lifecycle, verses, chords, key-aware transposition, page layout,
+  diagrams, multikey annotations and index display. LuaLaTeX is now the sole
+  supported engine; no backend selection or upstream runtime install is needed.
+  The short song notation remains supported; use v2 migration for the API and
+  metadata cleanup described below.
+- Renamed configuration, book-assembly, font and accessor macros to consistent
+  `\ulCamelCase` names; assembly environments are now `ulSongs` and `ulIndexBlock`.
+  Boolean settings use explicit setters such as `\ulShowTags{false}` and readable
+  predicates such as `\ifulShowTags`. V2 migration updates supported old spellings.
+- Title, author and tag indices are generated automatically inside LuaLaTeX with
+  deterministic Finnish-compatible sorting and actionable input diagnostics.
+  No separate indexing command is needed. Normal builds handle the required passes
+  and convergence checks; manual LuaLaTeX builds must repeat until rerun warnings
+  disappear.
+- Tag definitions now use ordered UTF-8 `tags.txt` files without numeric count
+  lines. Added `\ulTagFile`, renamed tag-index APIs, and extended v2 migration with
+  explicit `--tags-file` conversion and safe file renaming.
+- Removed chorus commands and settings; use verses with explicit repeat regions.
+  V2 migration converts safe chorus notation and flags unsupported cases for review.
+- Removed inherited `sr` metadata, song-reference accessors and three-braced
+  metadata input. V2 migration diagnoses these for review instead of creating
+  runtime aliases or converting scripture references into tags.
+- Documented native module ownership, lifecycle hooks, custom metadata keys,
+  verse/chord token boundaries and manual LuaLaTeX builds. Multikey layer names,
+  effective-original layout, occurrence identity, external range manifests and
+  page-range publication contracts remain unchanged.
+- Updated the `songs` acknowledgement and derivative-work GPL-3.0-or-later
+  account, citing the upstream package and implementation source's
+  GPL-2.0-or-later grant and retaining Kevin W. Hamlen's attribution.
 
 ## v0.2.2 - 2026-10-24
 

@@ -78,6 +78,12 @@ def _parser() -> argparse.ArgumentParser:
         help="show individual integration test names",
     )
     parser.add_argument(
+        "--jobs",
+        type=int,
+        default=4,
+        help="parallel Python test modules (default: 4; 1 for serial)",
+    )
+    parser.add_argument(
         "--root",
         type=Path,
         help=argparse.SUPPRESS,
@@ -100,7 +106,7 @@ def _find_repository_root(explicit: Path | None) -> Path:
 
 
 def _runner_arguments(args: argparse.Namespace, executable: str = "python3") -> list[str]:
-    result = [executable, "tests/run_tests.py"]
+    result = [executable, "tests/run_tests.py", "--jobs", str(args.jobs)]
     if args.skip_l3build:
         result.append("--skip-l3build")
     if args.skip_integration:
@@ -156,7 +162,7 @@ def _run_in_container(root: Path, args: argparse.Namespace) -> int:
         "--mount",
         f"type=volume,src={_HOMECACHE_VOLUME_NAME},dst=/home/ulsbs",
         "--mount",
-        "type=tmpfs,tmpfs-size=128m,dst=/tmp",
+        f"type=tmpfs,tmpfs-size={128 * args.jobs}m,dst=/tmp",
         "--mount",
         "type=tmpfs,tmpfs-size=16m,dst=/run",
     ]
@@ -174,6 +180,9 @@ def _run_in_container(root: Path, args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.jobs < 1:
+        print("ulsbs-test: --jobs must be at least 1", file=sys.stderr)
+        return 2
     if args.skip_l3build and args.skip_integration:
         print("ulsbs-test: all test suites were skipped", file=sys.stderr)
         return 2

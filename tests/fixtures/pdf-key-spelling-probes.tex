@@ -1,21 +1,25 @@
 \documentclass[paper={a5paper},maintitle={Key Spelling Probes}]{ulsbs-songbook}
 \makeatletter
 \newcount\ULtestoffset
+\ExplSyntaxOn
+\cs_new_protected:Npn \ULtesttranspose #1
+  {\__ulsbs_music_transpose_alternative:nnN {\ULtestoffset}{#1}\l_tmpa_tl
+   \cs_set:Npx \ULtestresult {\exp_not:V \l_tmpa_tl}}
+\cs_new:Npn \ULteststate
+  {\int_use:N \l__ulsbs_music_transpose_int,
+   \bool_if:NTF \l__ulsbs_music_sharps_bool {sharp}{flat},
+   \int_use:N \l__ulsbs_music_layer_int}
+\ExplSyntaxOff
 \newcommand\ULtestprobe[2]{%
   \begingroup
   % Match the visual pipeline: this input is already source-transposed.
-  \UL@pdfalternatetrue
-  \UL@pdfspellprepare{\the\ULtestoffset}%
-  \SB@dotranspose{#2}%
+  \ULtesttranspose{#2}%
   \def\shrp{SHARP}\def\flt{FLAT}%
-  \edef\ULtestresult{\the\SB@toks}%
   \typeout{ULSPELL:\ULtestcase:\the\ULtestoffset:#1:\ULtestresult}%
   \endgroup}
 \newcommand\ULtestprobes[1]{%
   \def\ULtestcase{#1}%
-  \edef\ULtestbefore{\the\SB@transposefactor,%
-    \ifSB@prefshrps sharp\else flat\fi,%
-    \ifSB@needkey auto\else fixed\fi}%
+  \edef\ULtestbefore{\ULteststate}%
   \ULtestoffset=1
   \loop
     \ULtestprobe{C}{C}\ULtestprobe{Cs}{C\shrp}\ULtestprobe{Cf}{C\flt}%
@@ -29,16 +33,14 @@
     \ULtestprobe{suffix}{G\shrp m7(add9)/F\shrp}%
     \advance\ULtestoffset by 1
   \ifnum\ULtestoffset<12\repeat
-  \edef\ULtestafter{\the\SB@transposefactor,%
-    \ifSB@prefshrps sharp\else flat\fi,%
-    \ifSB@needkey auto\else fixed\fi}%
+  \edef\ULtestafter{\ULteststate}%
   \ifx\ULtestbefore\ULtestafter\else
     \PackageError{key-spelling-probes}{Alternative spelling leaked source state}{}%
   \fi
   \typeout{ULSTATE:#1:\ULtestafter}}
 \makeatother
 \begin{document}
-\begin{songs}{}
+\begin{ulSongs}{}
 \beginsong{C Major Probes}[id={fixture-1},key={C}]
 \ULtestprobes{C}
 {\preferflats\ULtestprobes{Cflats}}
@@ -67,5 +69,5 @@
 \transpose{2}
 \ULtestprobes{effectiveD}\beginverse \[C]Probe \endverse
 \endsong
-\end{songs}
+\end{ulSongs}
 \end{document}

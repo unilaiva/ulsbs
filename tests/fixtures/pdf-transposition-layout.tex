@@ -1,6 +1,6 @@
 \documentclass[paper={a5paper},maintitle={Layer Layout Test}]{ulsbs-songbook}
 \begin{document}
-\begin{songs}{}
+\begin{ulSongs}{}
 \beginsong{First Layer Song}[id={fixture-1},key={C}]
   \beginverse
     \[Am]Opening words \[E7]with longer lyric phrases \[F#m/C#]and slash chords.
@@ -8,7 +8,7 @@
     \[<!C>]Zero advance \[</>Am]unpitched \[<* @ 1em>]shared beat.
     \[<C D @ -.4em>]Negative offset \[G]\[<*>]adjacent annotations.
   \endverse
-  {\melodyStyleMapping{swapped}\melodySecondaryPosition{below}
+  {\ulMelodyStyleMapping{swapped}\ulMelodySecondaryPosition{below}
     \beginverse
       \[<C# D&;A C>Am7]Swapped secondary notes and accidental hints.
     \endverse}
@@ -35,5 +35,5 @@
     \[G]Independent song \[<G B;D F#>D7]with independent melody.
   \endverse
 \endsong
-\end{songs}
+\end{ulSongs}
 \end{document}

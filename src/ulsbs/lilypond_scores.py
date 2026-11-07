@@ -448,7 +448,7 @@ def _engrave(score: Score, key: dict, target: dict, signed: int, offset: int,
             """Build a language-independent Scheme pitch operand for transposition."""
             accidental = (key["pitch"] - _NATURAL[key["letter"]] + 6) % 12 - 6
             return f'#(ly:make-pitch {octave} {key["letter"]} {accidental}/2)'
-        # Native pitch operands must not be parsed in the source's language:
+        # Scheme pitch operands must not be parsed in the source's language:
         # e.g. German `b` means B-flat, unlike the engine's Dutch spelling.
         source_pitch = pitch(key, 0)
         target_pitch = pitch(target, end.count("'") - end.count(","))

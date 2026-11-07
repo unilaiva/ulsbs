@@ -3,9 +3,20 @@
 %
 % Songbook document class for ULSBS.
 % This file is part of the 'ulsbs' package.
+%
+% Requires LuaLaTeX and configures the book class, package options and PDF metadata
+% before loading ulsbs.sty. Inherit from this class for custom songbook classes.
 
 \NeedsTeXFormat{LaTeX2e}
-\ProvidesClass{ulsbs-songbook}[2026/03/04 v1.0]
+\ProvidesClass{ulsbs-songbook}[ULSBS songbook class]
+
+\RequirePackage{iftex}
+\ifLuaTeX\else
+  \ClassError{ulsbs-songbook}{LuaLaTeX is required}{%
+    Compile this document with lualatex or ulsbs-compile, not pdfLaTeX or XeLaTeX.}
+  % Stop even in nonstopmode, rather than publishing a partial document.
+  \expandafter\@@end
+\fi
 
 % Ensure backend and set PDF version
 \RequirePackage{expl3}
@@ -81,7 +92,7 @@
 % Define macros only if options were given; else leave undefined
 % for ulsbs.sty defaults
 \ifdefempty{\ulsbs@paper}{}{% not empty
-  \newcommand{\ulPapersize}{\ulsbs@paper}
+  \newcommand{\ulPaperSize}{\ulsbs@paper}
 }
 \ifdefempty{\ulsbs@maintitle}{}{% not empty
   \newcommand{\ulMainBookTitle}{\ulsbs@maintitle}

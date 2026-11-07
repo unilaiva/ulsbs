@@ -1,0 +1,160 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Boolean-map helpers.
+% This file is part of the 'ulsbs' package.
+%
+% Requires expl3/xparse.
+% Loaded by ulsbs-utilities.code.tex at its end, before repeat-bar users.
+% Maps are caller-owned property lists; this module allocates no map or lifecycle
+% hooks. Expl3 operations accept a property-list variable, while document wrappers
+% accept its control-sequence name without a backslash and use local scratch tls.
+% Set/reset operations emit nothing; tests execute only the selected branch.
+
+\ProvidesFile{ulsbs-boolmap.code.tex}[ULSBS boolean maps]
+
+% % BEGIN Map: key -> boolean
+%
+% These helpers implement an "array"/map from arbitrary keys to boolean values.
+% Internally, the map is an expl3 property list (\prop_new:N ...).
+%
+% Each key maps to the literal token list value: "true" or "false"
+%
+% Property-list keys are compared as strings under expl3 property-list rules,
+% not by token identity. Avoid leading/trailing spaces in keys.
+%
+% Like most TeX assignments, property-list modifications are scoped:
+%   - \prop_put:Nnn, \prop_clear:N are LOCAL (inside TeX groups)
+%   - \prop_gput:Nnn, \prop_gclear:N are GLOBAL (persist outside groups)
+%
+% The helpers below come in local and global variants for setting/resetting.
+%
+% If a key is not present in the map, it is treated as "false".
+%
+% Example:
+%   \prop_new:N \g_seen_prop
+%   \ulsbs_boolmap_gset_true:Nn  \g_seen_prop {7}
+%   \ulsbs_boolmap_if_true:NnTF  \g_seen_prop {7} {YES} {NO}
+%   \ulsbs_boolmap_greset:N      \g_seen_prop
+%
+% Example using with LaTeX2e wrappers:
+%   \ExplSyntaxOn
+%   \prop_new:N \g_seen_prop
+%   \ExplSyntaxOff
+%
+%   \ulBoolSetTrue{g_seen_prop}{7}
+%   \ulIfBool{g_seen_prop}{7}{YES}{NO}
+%   \ulBoolReset{g_seen_prop}
+%
+% Expl3 :Nn helpers do not expand the supplied key. Document wrappers fully
+% expand it first; use \the for a count register, not before an ordinary macro.
+
+\ExplSyntaxOn
+
+% \ulsbs_boolmap_set_true:Nn <prop> {<key>}
+% \ulsbs_boolmap_set_false:Nn <prop> {<key>}
+%
+% Set the boolean value for <key> in <prop> to true/false.
+%
+% LOCAL assignment: the change is undone automatically at the end of the current
+%                   TeX group.
+\cs_new_protected:Npn \ulsbs_boolmap_set_true:Nn  #1#2 { \prop_put:Nnn  #1 {#2} {true} }
+
+\cs_new_protected:Npn \ulsbs_boolmap_set_false:Nn #1#2 { \prop_put:Nnn  #1 {#2} {false} }
+
+% \ulsbs_boolmap_gset_true:Nn <prop> {<key>}
+% \ulsbs_boolmap_gset_false:Nn <prop> {<key>}
+%
+% Set the boolean value for <key> in <prop> to true/false.
+%
+% GLOBAL assignment: the change persists outside groups.
+\cs_new_protected:Npn \ulsbs_boolmap_gset_true:Nn  #1#2 { \prop_gput:Nnn #1 {#2} {true} }
+
+\cs_new_protected:Npn \ulsbs_boolmap_gset_false:Nn #1#2 { \prop_gput:Nnn #1 {#2} {false} }
+
+% \ulsbs_boolmap_reset:N <prop>
+%
+% Remove all key/value pairs from <prop>.
+%
+% LOCAL reset: only affects the current group scope. The previous contents are
+%              restored at the end of the group.
+\cs_new_protected:Npn \ulsbs_boolmap_reset:N  #1 { \prop_clear:N  #1 }
+
+% \ulsbs_boolmap_greset:N <prop>
+%
+% Remove all key/value pairs from <prop>.
+%
+% GLOBAL reset: the map becomes empty globally and all keys will behave as
+%               "false" (the default).
+\cs_new_protected:Npn \ulsbs_boolmap_greset:N #1 { \prop_gclear:N #1 }
+
+% \ulsbs_boolmap_if_true:NnTF <prop> {<key>} {<true-code>} {<false-code>}
+% \ulsbs_boolmap_if_true:NnT  <prop> {<key>} {<true-code>}
+% \ulsbs_boolmap_if_true:NnF  <prop> {<key>} {<false-code>}
+%
+% Conditional test for a boolean stored in <prop> under <key>.
+%
+% Behavior:
+% - If <key> exists and its stored value is exactly "true" -> TRUE branch
+% - Otherwise (value is "false" OR key is missing) -> FALSE branch
+% - Missing keys are treated as false
+% Uses local \l_tmpa_tl scratch for lookup; no map mutation or visible output.
+\prg_new_conditional:Npnn \ulsbs_boolmap_if_true:Nn #1#2 { T, F, TF }
+  {
+    \prop_get:NnNTF #1 {#2} \l_tmpa_tl
+      {
+        \str_if_eq:VnTF \l_tmpa_tl {true}
+          { \prg_return_true: }
+          { \prg_return_false: }
+      }
+      { \prg_return_false: }
+  }
+
+% LaTeX2e wrappers
+
+% \ulBoolSetTrue{<prop-name>}{<key>}
+% Set <prop-name>[<key>] = true (GLOBAL).
+% Fully expand the key into local scratch before storing the literal true value.
+\NewDocumentCommand{\ulBoolSetTrue}{m m}
+  {
+    \tl_set:Nx \l__ulsbs_boolmap_key_tl {#2}
+    \prop_gput:cVn {#1} \l__ulsbs_boolmap_key_tl {true}
+  }
+
+% \ulBoolSetFalse{<prop-name>}{<key>}
+% Set <prop-name>[<key>] = false (GLOBAL).
+% Fully expand the key into local scratch before storing the literal false value.
+\NewDocumentCommand{\ulBoolSetFalse}{m m}
+  {
+    \tl_set:Nx \l__ulsbs_boolmap_key_tl {#2}
+    \prop_gput:cVn {#1} \l__ulsbs_boolmap_key_tl {false}
+  }
+
+% \ulBoolReset{<prop-name>}
+% Clear ALL entries from the boolean map <prop-name> (GLOBAL).
+\NewDocumentCommand{\ulBoolReset}{m}
+  { \prop_gclear:c {#1} }
+
+% \ulIfBool{<prop-name>}{<key>}{<true-code>}{<false-code>}
+%
+% Test whether <prop-name>[<key>] is true.
+%
+% Behavior:
+%
+% - If the key exists AND its value is exactly "true" -> <true-code>
+% - Otherwise (missing key OR value "false")          -> <false-code>
+%
+% Missing keys default to FALSE.
+% Expand the key into local scratch, read without mutating the map, then execute
+% #3 or #4 in the caller's scope (no implicit group around branch code).
+\NewDocumentCommand{\ulIfBool}{m m m m}
+  {
+    \tl_set:Nx \l__ulsbs_boolmap_key_tl {#2}
+    \prop_get:cVNTF {#1} \l__ulsbs_boolmap_key_tl \l__ulsbs_boolmap_val_tl
+      { \str_if_eq:VnTF \l__ulsbs_boolmap_val_tl {true} {#3} {#4} }
+      { #4 }
+  }
+
+\ExplSyntaxOff
+
+% % END Map: key -> boolean

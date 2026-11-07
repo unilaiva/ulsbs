@@ -3,25 +3,21 @@
 %
 % Post-setup for charango songbook variant.
 % This file is part of the 'ulsbs' package.
+%
+% Part of the system for automatically creating a charango variant of a book.
+% This file contains instructions for after loading the ulsbs package file.
+%
+% When compiling a charango variant, this file is automatically appended as an
+% input include right after the the main songbook document's \documentclass
+% invocation. The document class must be 'ulsbs-songbook' or one whose name
+% starts with 'ulsbs-songbook' (and loads ulsbs.sty); otherwise the variant
+% cannot be produced.
+%
+% Note that ULSBS-EXTRA-VARIANTS: charango, <...> must be defined in the
+% songbook main document also.
 
-%% ulsbs-internal-charangobook-postsetup.tex
-%% =========================================
-%%
-%% Part of the system for automatically creating a charango variant of a book.
-%% This file contains instructions for after loading the ulsbs package file.
-%%
-%% When compiling a charango variant, this file is automatically appended as an
-%% input include right after the the main songbook document's \documentclass
-%% invocation. The document class must be 'ulsbs-songbook' or one whose name
-%% starts with 'ulsbs-songbook' (and loads ulsbs.sty); otherwise the variant
-%% cannot be produced.
-%%
-%% Note that ULSBS-EXTRA-VARIANTS: charango, <...> must be defined in the
-%% songbook main document also.
-%%
+\ulCharangoBook{true}
 
-\charangobooktrue
-
-\showlilypondtrue
+\ulShowLilypond{true}
 
 \hypersetup{pdftitle={\ulThisBookTitle { (\ulBookCharangoVariantText)}}}

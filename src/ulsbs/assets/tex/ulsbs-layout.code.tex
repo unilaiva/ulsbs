@@ -1,0 +1,658 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Page layout.
+% This file is part of the 'ulsbs' package.
+%
+% LaTeX, not a song-specific output routine, owns pages.
+% Loaded after song/index and common style/PDF helpers; verse adapters are
+% resolved at document use after their later module load. Requires LuaLaTeX and
+% ulsbs-layout.lua for page-list probes and pending-continuation attributes.
+% Owns requested column/position settings, pending-output flags and scratch boxes.
+% Settings can be scoped despite g__ names; kernel column flags remain global.
+% Source is already typeset when submitted: probes copy nodes, selection copies
+% retained boxes, and only actual shipout executes their deferred writes/Lua.
+
+\ProvidesFile{ulsbs-layout.code.tex}[Page layout]
+
+\makeatletter
+\ExplSyntaxOn
+\int_new:N \g__ulsbs_layout_columns_int
+\int_gset:Nn \g__ulsbs_layout_columns_int {1}
+\int_new:N \g__ulsbs_layout_position_int
+\int_gset:Nn \g__ulsbs_layout_position_int {3}
+\bool_new:N \g__ulsbs_layout_document_bool
+\bool_new:N \l__ulsbs_layout_restore_columns_bool
+\bool_new:N \g__ulsbs_layout_fill_bool
+\bool_new:N \g__ulsbs_layout_has_output_bool
+% Ordinary prose does not create pending work for the song-clear commands.
+\bool_new:N \g__ulsbs_layout_pending_song_bool
+\dim_new:N \l__ulsbs_layout_available_dim
+\box_new:N \l__ulsbs_layout_probe_box
+\box_new:N \l__ulsbs_layout_split_box
+\box_new:N \l__ulsbs_layout_context_box
+\directlua{ulsbs_layout=dofile(kpse.find_file('ulsbs-layout.lua'))}
+\bool_new:N \g__ulsbs_layout_fits_bool
+\int_new:N \l__ulsbs_layout_page_columns_int
+\box_new:N \l__ulsbs_layout_note_box
+\box_new:N \l__ulsbs_layout_note_text_box
+\skip_new:N \l__ulsbs_layout_bottom_skip
+\skip_new:N \l__ulsbs_layout_previous_skip
+\bool_new:N \l__ulsbs_layout_intersong_bool
+\bool_new:N \l__ulsbs_layout_omit_intersong_bool
+\box_new:N \l__ulsbs_layout_intersong_box
+\box_new:N \g__ulsbs_layout_prefix_box
+\newtoks\l__ulsbs_layout_saved_output_toks
+\dim_new:N \l__ulsbs_layout_prefix_height_dim
+\box_new:N \g__ulsbs_layout_scoped_column_box
+\bool_new:N \l__ulsbs_layout_scope_restored_bool
+
+\AddToHook{begindocument/end}
+  {\bool_gset_true:N \g__ulsbs_layout_document_bool}
+\AddToHook{shipout/after}
+  {% A shipped first page does not consume a song's pending continuation.
+   \bool_gset:Nn \g__ulsbs_layout_pending_song_bool
+     {\int_compare_p:n {\directlua{tex.sprint(ulsbs_layout.has_pending_song()~and~1~or~0)}=1}}}
+
+% Includes may suppress ordinary clears without suppressing song clears.
+\cs_new_eq:NN \__ulsbs_layout_kernel_clear: \clearpage
+
+% LaTeX's empty-page tests need a positive top skip, unlike column contents.
+% No arguments; end the paragraph and drain pages using the current clearpage.
+\cs_new_protected:Npn \__ulsbs_layout_clear_page:
+  {\par\penalty10000\relax
+   \group_begin:\topskip=1sp\relax\clearpage\group_end:}
+
+% No arguments; drain using the saved kernel clear, bypassing include overrides.
+\cs_new_protected:Npn \__ulsbs_layout_clear_song_page:
+  {\group_begin:\cs_set_eq:NN \clearpage \__ulsbs_layout_kernel_clear:
+   \__ulsbs_layout_clear_page:\group_end:}
+
+% No arguments; drain only if owned song/intersong output is still pending.
+\cs_new_protected:Npn \__ulsbs_layout_clear_songs:
+  {\bool_if:NT \g__ulsbs_layout_pending_song_bool {\__ulsbs_layout_clear_song_page:}}
+
+% No arguments; force the remaining physical columns to finish the current page.
+\cs_new_protected:Npn \__ulsbs_layout_song_clear:
+  {\par
+   \if@twocolumn
+     \if@firstcolumn
+       \__ulsbs_layout_break:\null\__ulsbs_layout_break:
+     \else\__ulsbs_layout_break:\fi
+   \else\__ulsbs_layout_break:\fi}
+
+% No arguments; clear song columns, adding a blank page to reach an even page
+% in two-sided mode (the start of the next facing spread).
+\cs_new_protected:Npn \__ulsbs_layout_song_spread:
+  {\__ulsbs_layout_song_clear:
+   \if@twoside\ifodd\value{page}\null\__ulsbs_layout_song_clear:\fi\fi}
+
+% No arguments. Apply requested 1/2-column kernel mode; 0 leaves it alone.
+% On the first two-column start, retain any full-width prefix nodes and restore
+% them via a one-shot output hook, reducing the first page's column capacity.
+\cs_new_protected:Npn \__ulsbs_layout_columns:
+  {
+    \int_compare:nNnT {\g__ulsbs_layout_columns_int}>{0}
+    {
+    \topskip=1sp\relax
+    \int_compare:nNnTF {\g__ulsbs_layout_columns_int}={2}
+      {\if@twocolumn\else
+         \par
+         \bool_if:NTF \g__ulsbs_layout_has_output_bool {\twocolumn}
+           {\ifdim\pagetotal>0pt
+              % Move the already-typeset prefix; never replay its source.
+              \dim_set:Nn \l__ulsbs_layout_prefix_height_dim {\pagetotal}
+              \l__ulsbs_layout_saved_output_toks=\output
+              \output{\global\setbox\g__ulsbs_layout_prefix_box=\vbox{\unvbox255}}
+              \penalty-10000\relax
+              \output=\l__ulsbs_layout_saved_output_toks
+              \twocolumn
+              \global\@colht=\dimexpr\textheight-\l__ulsbs_layout_prefix_height_dim\relax
+              \global\@colroom=\@colht\global\vsize=\@colht
+              \AddToHookNext{cmd/@combinedblfloats/before}
+                {\setbox\@outputbox=\vbox{\unvbox\g__ulsbs_layout_prefix_box
+                   \kern0pt\nointerlineskip\box\@outputbox}
+                 \box_gclear:N \g__ulsbs_layout_prefix_box}
+            \else\twocolumn\fi}
+       \fi}
+      {\if@twocolumn\onecolumn\fi}
+    \topskip=0pt\relax
+    }
+  }
+
+% No arguments. Reconcile scoped settings with physical mode before source song
+% entry/end; selection defers physical mode changes until retained-box commit.
+\cs_new_protected:Npn \__ulsbs_layout_prepare:
+  {
+    \bool_set_false:N \l__ulsbs_layout_scope_restored_bool
+    \bool_if:NF \g__ulsbs_song_selection_bool
+      {
+        \if@twocolumn
+          \int_compare:nNnF {\g__ulsbs_layout_columns_int}={2}
+            {\__ulsbs_layout_restore_scope:}
+        \else
+          \int_compare:nNnT {\g__ulsbs_layout_columns_int}={2}
+            {\__ulsbs_layout_restore_scope:}
+        \fi
+        \__ulsbs_layout_columns:
+      }
+  }
+
+% Desired song settings are scoped, but the kernel column flags are global.
+% On scope exit retain pending contributions across the kernel mode change:
+% clearpage would otherwise move them into the old mode's next column. The
+% temporary capture can run more than once while TeX drains an overfull page.
+\cs_new_protected:Npn \__ulsbs_layout_restore_scope:
+  {
+    \bool_set_true:N \l__ulsbs_layout_scope_restored_bool
+    \par
+    \box_gclear:N \g__ulsbs_layout_scoped_column_box
+    \l__ulsbs_layout_saved_output_toks=\output
+    \output{\global\setbox\g__ulsbs_layout_scoped_column_box=\vbox{
+      \unvbox\g__ulsbs_layout_scoped_column_box\unvbox255}}
+    \penalty-10000\relax
+    \output=\l__ulsbs_layout_saved_output_toks
+    \if@twocolumn\if@firstcolumn\else\null\__ulsbs_layout_clear_page:\fi\fi
+    \cs_set_eq:NN \__ulsbs_layout_saved_clear: \clearpage
+    \cs_set_eq:NN \clearpage \prg_do_nothing:
+    \int_compare:nNnTF {\g__ulsbs_layout_columns_int}={2}{\twocolumn}{\onecolumn}
+    \cs_set_eq:NN \clearpage \__ulsbs_layout_saved_clear:
+    \vbox_unpack_drop:N \g__ulsbs_layout_scoped_column_box
+  }
+
+% {0|1|2}: set scoped requested columns, rejecting changes inside a song.
+% Apply immediately inside songs unless source is being captured for selection.
+\DeclareDocumentCommand \ulSongColumns {m}
+  {
+    \bool_if:NT \g__ulsbs_song_active_bool
+      {\__ulsbs_song_fail:n {songcolumns~inside~a~song}}
+    \int_compare:nNnTF {#1}<{0}
+      {\__ulsbs_song_fail:n {songcolumns~must~be~0,~1~or~2}}
+      {\int_compare:nNnTF {#1}>{2}
+        {\__ulsbs_song_fail:n {songcolumns~must~be~0,~1~or~2}}
+         {\int_set:Nn \g__ulsbs_layout_columns_int {#1}
+          \bool_if:NT \g__ulsbs_songs_active_bool
+            {\bool_if:NF \g__ulsbs_song_selection_bool {\__ulsbs_layout_columns:}}}}
+  }
+
+% No arguments; convenience setters for requested one/two-column song layout.
+\DeclareDocumentCommand \ulOneSongColumn {}{\ulSongColumns{1}}
+
+\DeclareDocumentCommand \ulTwoSongColumns {}{\ulSongColumns{2}}
+
+% {0..3}: scoped fit policy: flow, prefer spread, prefer page, or prefer column
+% with page/spread fallback. Changes positioning, not source shaping.
+\DeclareDocumentCommand \ulSongPosition {m}
+  {\int_compare:nNnTF {#1}<{0}
+    {\__ulsbs_song_fail:n {songpos~must~be~0,~1,~2~or~3}}
+    {\int_compare:nNnTF {#1}>{3}
+      {\__ulsbs_song_fail:n {songpos~must~be~0,~1,~2~or~3}}
+       {\int_set:Nn \g__ulsbs_layout_position_int {#1}}}}
+
+% At an unchosen breakpoint the two skips cancel. At a chosen breakpoint
+% TeX discards the compensating skip, leaving bottom glue on the outgoing page.
+% #1: break penalty; emit a candidate boundary, preserving prior inner skip.
+\cs_new_protected:Npn \__ulsbs_layout_break:n #1
+  {
+    \par
+    \skip_zero:N \l__ulsbs_layout_previous_skip
+    \ifinner
+      \skip_set:Nn \l__ulsbs_layout_previous_skip {\lastskip}\unskip
+    \fi
+    \skip_set:Nn \l__ulsbs_layout_bottom_skip {\ulColumnBottomGlue}
+    \nobreak
+    \int_compare:nNnTF {#1}<{10000}
+      {\vskip\ulColumnBottomGlue\relax\penalty#1\relax
+       \vskip\glueexpr\l__ulsbs_layout_previous_skip-\l__ulsbs_layout_bottom_skip\relax}
+      {\vskip\l__ulsbs_layout_previous_skip}
+  }
+
+% No arguments; emit bottom glue and an unconditional column/page break.
+\cs_new_protected:Npn \__ulsbs_layout_break:
+  {\par\vskip\ulColumnBottomGlue\relax\penalty-10000\relax}
+
+% Optional star forces source-time action during selection; unstarred source
+% breaks are suppressed there (selection-list directives act later at commit).
+% nextcol forces a column; sclearpage drains owned output; scleardpage also
+% reserves the next facing spread in two-sided mode.
+\DeclareDocumentCommand \nextcol {s}
+  {\IfBooleanTF{#1}{\__ulsbs_layout_break:}
+    {\bool_if:NF \g__ulsbs_song_selection_bool {\__ulsbs_layout_break:}}}
+
+\DeclareDocumentCommand \sclearpage {s}
+   {\IfBooleanTF{#1}{\__ulsbs_layout_clear_songs:}
+     {\bool_if:NF \g__ulsbs_song_selection_bool {\__ulsbs_layout_clear_songs:}}}
+
+\DeclareDocumentCommand \scleardpage {s}
+  {\IfBooleanTF{#1}{\__ulsbs_layout_spread:}
+    {\bool_if:NF \g__ulsbs_song_selection_bool {\__ulsbs_layout_spread:}}}
+
+% No arguments; drain owned output and reserve a blank odd page when needed.
+\cs_new_protected:Npn \__ulsbs_layout_spread:
+  {\__ulsbs_layout_clear_songs:
+   \if@twoside\ifodd\value{page}
+      % Let ordinary page glue decide whether the empty column fits here.
+      \dim_set:Nn \l__ulsbs_layout_available_dim {\textheight-\pagetotal}
+      \par\penalty10000\relax
+      \kern0pt\vbox_to_ht:nn {\l__ulsbs_layout_available_dim}{\hbox{}\vfil}
+      \vfil\penalty-10000\relax
+   \fi\fi}
+
+% No arguments. Apply output columns and traverse requested labels/directives;
+% submit copies of retained boxes (duplicates allowed), then clear the lookup.
+% Metadata, hooks and lyric source are not rerun; deferred nodes await shipout.
+\DeclareDocumentCommand \ulCommitSongs {}
+   {\bool_if:NT \g__ulsbs_song_selection_bool
+      {\if@twocolumn\else
+         \int_compare:nNnT {\g__ulsbs_layout_columns_int}={2}
+           {\bool_set_true:N \l__ulsbs_layout_restore_columns_bool}
+       \fi
+       \__ulsbs_layout_columns:}
+    \clist_map_inline:Nn \g__ulsbs_song_selection_clist
+    {\str_case:nnF {##1}
+      {{brk}{\__ulsbs_layout_break:}{nextcol}{\__ulsbs_layout_break:}
+        {sclearpage}{\__ulsbs_layout_clear_songs:}{scleardpage}{\__ulsbs_layout_spread:}}
+      {\prop_get:NnNT \g__ulsbs_song_selection_boxes_prop {##1}\l_tmpa_tl
+        {\tl_use:N \l_tmpa_tl}}}
+   \prop_gclear:N \g__ulsbs_song_selection_boxes_prop}
+
+% No arguments; reset block output tracking, remember entry mode for restoration
+% and establish requested columns/top skip before song source is captured.
+\cs_new_protected:Npn \__ulsbs_layout_songs_begin:
+  {\bool_gset_false:N \g__ulsbs_layout_has_output_bool
+   \ifinner\else\ifdim\pagetotal>0pt\null\nointerlineskip\fi\fi
+     \int_compare:nNnT {\g__ulsbs_layout_columns_int}>{0}
+       {\topskip=1sp\relax\flushbottom}
+    \bool_set_false:N \l__ulsbs_layout_restore_columns_bool
+    \if@twocolumn\else
+      % The environment may request two columns only after it has started.
+      \bool_set_true:N \l__ulsbs_layout_restore_columns_bool
+    \fi
+     \int_compare:nNnT {\g__ulsbs_layout_columns_int}>{0}{\__ulsbs_layout_columns:}}
+
+% No arguments; reconcile scope, drain owned continuations, restore saved outer
+% glue and entry column mode. Inner-box use leaves physical page ownership alone.
+\cs_new_protected:Npn \__ulsbs_layout_songs_end:
+   {\ifinner\else
+       \__ulsbs_layout_prepare:
+       % A restored, already-started column has no additional bottom fill.
+       \bool_if:NT \l__ulsbs_layout_scope_restored_bool {\par\penalty-10000\relax}
+         \__ulsbs_layout_clear_songs:
+          \directlua{if~ulsbs_layout.outer_glue~then~
+           node.write(ulsbs_layout.outer_glue)
+           ulsbs_layout.outer_glue=nil~end}
+         \__ulsbs_layout_clear_page:\bool_if:NT \l__ulsbs_layout_restore_columns_bool
+         {\if@twocolumn\topskip=1sp\relax\onecolumn\fi}
+   \fi}
+
+% No arguments; initialize shaping width, paragraph/block state and verse state
+% inside the song box. Selected source width need not match physical output mode.
+\cs_new_protected:Npn \__ulsbs_layout_song_begin:
+   {
+     \hsize=\linewidth\relax
+     % Selection source can change its shaping width in a local group without
+     % changing the physical page mode used later to submit retained boxes.
+     \bool_if:NT \g__ulsbs_song_selection_bool
+       {\hsize=\textwidth\relax
+        \int_compare:nNnT {\g__ulsbs_layout_columns_int}={2}
+          {\hsize=\dimexpr(\textwidth-\columnsep)/2\relax}
+        \linewidth=\hsize\columnwidth=\hsize}
+    \dim_set:Nn \l_tmpa_dim {\parindent}
+    \raggedright\parindent=\l_tmpa_dim\parskip=0pt
+    \setcounter{ulsbs@aftersongblocks}{0}\setcounter{ulsbs@explcounter}{0}
+    \__ulsbs_verse_reset:
+  }
+
+% No arguments; emit the optional top rule before the assembled prelude.
+\cs_new_protected:Npn \__ulsbs_layout_prelude_start:
+  {
+    \dim_compare:nNnT {\ulSongBarHeight}>{0pt}
+      {\hrule height\ulSongBarHeight width\hsize\nobreak\vskip5pt}
+  }
+
+% No arguments; require closed stanzas, finish body glue/paragraph and reset
+% shared block counters/color. Called before the body capture is closed.
+\cs_new_protected:Npn \__ulsbs_layout_song_end:
+  {
+    \__ulsbs_verse_require_closed:
+    \bool_if:NT \g__ulsbs_layout_fill_bool
+      {\int_compare:nNnT {\g__ulsbs_layout_columns_int}={1}
+        {\vspace{0pt~plus~1fill}}}
+    \unskip
+    \par
+    \bool_gset_true:N \g__ulsbs_layout_fill_bool
+    \setcounter{ulsbs@aftersongblocks}{0}\setcounter{ulsbs@explcounter}{0}
+    \ulsbs@setaltchordscolor{1}
+  }
+
+% No arguments; append nonbreaking postlude spacing, rights text and end rule.
+\cs_new_protected:Npn \__ulsbs_layout_song_postlude:
+  {
+    \nobreak\vskip\ulVerseSep\vskip\ulBeforePostludeSkip
+    \nointerlineskip\vbox{\ulMakePostlude}
+    \dim_compare:nNnT {\ulSongBarHeight}>{0pt}
+      {\nobreak\vskip2pt plus1pt\nointerlineskip
+       \hbox{\vrule height\ulSongBarHeight width\hsize
+         \tl_if_empty:oF {\ulSongEndMark}
+           {\llap{\normalsize\raisebox{.618034ex}[0pt][0pt]{\ulSongEndMark}}}}}
+  }
+
+% {true|false}; toggle global end-fill state only while a song is active.
+% Song end resets the default to enabled for the next source song.
+\DeclareDocumentCommand \ulEndSongVfill {m}
+  {\str_case:nnF {#1}
+     {{true}{\bool_if:NT \g__ulsbs_song_active_bool
+        {\bool_gset_true:N \g__ulsbs_layout_fill_bool}}
+      {false}{\bool_if:NT \g__ulsbs_song_active_bool
+        {\bool_gset_false:N \g__ulsbs_layout_fill_bool}}}
+     {\PackageError{ulsbs}{Invalid~boolean~value:~#1}{Use~true~or~false.}}}
+
+% Dry splitting copies boxes, not source tokens: writes/side effects are never
+% executed by lookahead. Only the actual unboxing below reaches page building.
+% No arguments; expand to the capacity of the next kernel column/page.
+\cs_new:Npn \__ulsbs_layout_next_goal:
+  {\if@twocolumn\if@firstcolumn\@colht\else\textheight\fi\else\textheight\fi}
+
+% #1: box register; #2: first split height; #3: additional split count;
+% #4: first additional height (later ones use textheight). Return TF according
+% to whether the copied list drains; preserve the original box and report the
+% result across the private probe group via the global fits boolean.
+\prg_new_protected_conditional:Npnn \__ulsbs_layout_fits:Nnnn #1#2#3#4 {TF}
+  {\group_begin:
+   \vbadness=10000\vfuzz=\maxdimen
+   \splittopskip=0pt\splitmaxdepth=\maxdepth
+   \box_set_eq:NN \l__ulsbs_layout_probe_box #1
+   \tex_setbox:D \l__ulsbs_layout_split_box=
+     \tex_vsplit:D \l__ulsbs_layout_probe_box to\dimexpr#2\relax
+   \int_step_inline:nn {#3}
+     {\box_if_empty:NF \l__ulsbs_layout_probe_box
+       {\tex_setbox:D \l__ulsbs_layout_split_box=
+          \tex_vsplit:D \l__ulsbs_layout_probe_box to\dimexpr
+            \int_compare:nNnTF {##1}={1}{#4}{\textheight}\relax}}
+   \box_if_empty:NTF \l__ulsbs_layout_probe_box
+     {\bool_gset_true:N \g__ulsbs_layout_fits_bool}
+     {\bool_gset_false:N \g__ulsbs_layout_fits_bool}
+   \group_end:
+   \bool_if:NTF \g__ulsbs_layout_fits_bool {\prg_return_true:}{\prg_return_false:}}
+
+% #1: completed box. Keep its current placement if the spread fits, otherwise
+% start the next spread only when a fresh spread can hold it; never consume it.
+\cs_new_protected:Npn \__ulsbs_layout_fit_spread:N #1
+  {\if@twoside
+     \int_set_eq:NN \l_tmpa_int \l__ulsbs_layout_page_columns_int
+     \ifodd\value{page}\else
+       \int_add:Nn \l_tmpa_int {\int_max:nn {1}{\g__ulsbs_layout_columns_int}}
+     \fi
+      \__ulsbs_layout_fits_current:NnTF #1 {\l_tmpa_int}
+        {}{\__ulsbs_layout_fits:NnnnTF #1 {\textheight}
+            {2*\int_max:nn {1}{\g__ulsbs_layout_columns_int}-1}{\textheight}
+            {\__ulsbs_layout_song_spread:}{}}
+   \fi}
+
+% #1: completed box. Probe remaining page columns, then a fresh page; if too
+% large for a fresh page, try spread policy rather than moving blindly.
+\cs_new_protected:Npn \__ulsbs_layout_fit_page:N #1
+  {\int_zero:N \l__ulsbs_layout_page_columns_int
+   \if@twocolumn\if@firstcolumn
+     \int_set:Nn \l__ulsbs_layout_page_columns_int {1}\fi\fi
+    \__ulsbs_layout_fits_current:NnTF #1 {\l__ulsbs_layout_page_columns_int}
+      {}{\__ulsbs_layout_fits:NnnnTF #1 {\textheight}
+          {\int_max:nn {1}{\g__ulsbs_layout_columns_int}-1}{\textheight}
+           {\__ulsbs_layout_song_clear:}{\__ulsbs_layout_fit_spread:N #1}}}
+
+% #1: completed box. Execute requested column/page/spread fit policy, emitting
+% breaks as needed but leaving the box intact for submission.
+\cs_new_protected:Npn \__ulsbs_layout_position:N #1
+  {\int_compare:nNnT {\g__ulsbs_layout_position_int}>{0}
+       {\bool_set_false:N \l_tmpb_bool
+        \int_compare:nNnT {\g__ulsbs_layout_position_int}={3}
+           {\__ulsbs_layout_fits_current:NnTF #1 {0}
+            {\bool_set_true:N \l_tmpb_bool}
+             {\__ulsbs_layout_fits:NnnnTF #1 {\textheight}{0}{\textheight}
+              {\__ulsbs_layout_break:\bool_set_true:N \l_tmpb_bool}{}}}
+        \bool_if:NF \l_tmpb_bool
+          {\int_compare:nNnTF {\g__ulsbs_layout_position_int}={1}
+             {\if@twoside
+                \int_zero:N \l__ulsbs_layout_page_columns_int
+                \if@twocolumn\if@firstcolumn
+                  \int_set:Nn \l__ulsbs_layout_page_columns_int {1}\fi\fi
+                \__ulsbs_layout_fit_spread:N #1
+              \else\__ulsbs_layout_fit_page:N #1\fi}
+              {\__ulsbs_layout_fit_page:N #1}}}}
+
+% #1: owned box register, consumed by unboxing. Probe placement, add intersong
+% glue, tag the real tail for Lua continuation tracking, then feed actual nodes
+% to LaTeX's page builder. Deferred record/write nodes run only if shipped.
+\cs_new_protected:Npn \__ulsbs_layout_submit:N #1
+  {
+    \par
+    % Let pending natural overflow reach the page builder before fit lookahead.
+    \dim_compare:nNnT {\pagetotal}>{\@colroom+\pageshrink}
+      {\penalty\ulSongPenalty\relax}
+    \dim_set:Nn \l__ulsbs_layout_available_dim {\@colroom-\pagetotal+\pageshrink}
+    \ifinner\else
+      \int_compare:nNnT {\g__ulsbs_layout_columns_int}>{0}
+        {\__ulsbs_layout_position:N #1}
+    \fi
+    \bool_if:NT \g__ulsbs_layout_has_output_bool
+      {\dim_compare:nNnT {\pagetotal}>{0pt}
+        {\__ulsbs_layout_break:n {\ulSongPenalty}
+         \dim_compare:nNnT {\ulSongBarHeight}>{0pt}{\vskip-\ulSongBarHeight}}}
+    \directlua{local~tail=node.tail(tex.box[\number#1].list)
+      if~tail~then~node.set_attribute(tail,ulsbs_layout.pending_attribute,1)
+        \int_compare:nNnT {\g__ulsbs_layout_columns_int}>{0}
+          {node.set_attribute(tail,ulsbs_layout.boundary_attribute,1)}~end}
+    \tex_unvbox:D #1
+    \bool_gset_true:N \g__ulsbs_layout_pending_song_bool
+    \bool_gset_true:N \g__ulsbs_layout_has_output_bool
+  }
+
+% #1: candidate box; #2: additional columns allowed. Lua combines copies of
+% actual page contributions and candidate, including boundary glue, then the
+% splitter returns TF using current capacity and the next column's goal.
+\prg_new_protected_conditional:Npnn \__ulsbs_layout_fits_current:Nn #1#2 {TF}
+  {\group_begin:
+   \skip_set:Nn \l__ulsbs_layout_bottom_skip {\ulColumnBottomGlue}
+   \directlua{ulsbs_layout.combine_page(
+     \number#1,\number\l__ulsbs_layout_context_box,
+     \bool_if:NTF\g__ulsbs_layout_has_output_bool
+       {\dim_compare:nNnTF{\pagetotal}>{0pt}{\number\ulSongPenalty}{false}}{false},
+     \number\ulSongBarHeight,'l__ulsbs_layout_bottom_skip')}
+   \__ulsbs_layout_fits:NnnnTF \l__ulsbs_layout_context_box
+      {\dim_min:nn{\@colroom}{\pagegoal}}{#2}{\__ulsbs_layout_next_goal:}
+     {\group_end:\prg_return_true:}{\group_end:\prg_return_false:}}
+
+% #1: retained box control-sequence name. Copy it, wrap nodes in a fresh index
+% replay occurrence and consume only the copy; source and original survive.
+\cs_new_protected:Npn \__ulsbs_layout_submit_copy:c #1
+   {\box_set_eq:Nc \l__ulsbs_song_box {#1}
+    \directlua{ulsbs_index_state.replay_box(\number\l__ulsbs_song_box)}
+    \__ulsbs_layout_submit:N \l__ulsbs_song_box}
+
+\AddToHook{cmd/beginsong/before}
+   {\__ulsbs_layout_prepare:
+    \bool_if:NT \l__ulsbs_layout_intersong_bool
+    {\__ulsbs_song_fail:n {beginsong~inside~intersong}}}
+
+% {true|false}; locally enable/disable submission of intersong material.
+\DeclareDocumentCommand \ulScripture {m}
+  {\str_case:nnF {#1}
+     {{true}{\bool_set_false:N \l__ulsbs_layout_omit_intersong_bool}
+      {false}{\bool_set_true:N \l__ulsbs_layout_omit_intersong_bool}}
+     {\PackageError{ulsbs}{Invalid~boolean~value:~#1}{Use~true~or~false.}}}
+
+% No arguments. Capture prose once between optional rules, rejecting nested or
+% in-song use. Submit only outside selection and when scripture is enabled;
+% preserve outer page stretch separately from internal song-column stretch.
+\DeclareDocumentEnvironment{intersong}{}
+  {\bool_if:NT \g__ulsbs_song_active_bool
+     {\__ulsbs_song_fail:n {intersong~inside~a~song}}
+    \bool_if:NT \l__ulsbs_layout_intersong_bool
+      {\__ulsbs_song_fail:n {nested~intersong}}
+    \int_compare:nNnT {\g__ulsbs_layout_columns_int}>{0}
+      {% Intersong belongs to song-column layout, including its zero top skip.
+       \topskip=0pt\relax
+       % Outer fill must not share the internal stretch of a preceding song.
+       % Retain it for the outer page after the owned columns have been drained.
+       \bool_if:NT \g__ulsbs_songs_active_bool
+         {\ifinner\else\directlua{ulsbs_layout.save_outer_glue()}\fi}}
+   \bool_set_true:N \l__ulsbs_layout_intersong_bool
+   \vbox_set:Nw \l__ulsbs_layout_intersong_box
+     \hsize=\linewidth\relax
+     \dim_compare:nNnT {\ulSongBarHeight}>{0pt}
+       {\hrule height\ulSongBarHeight width\hsize\nobreak}}
+  {\par
+     \dim_compare:nNnT {\ulSongBarHeight}>{0pt}
+       {\skip_set:Nn \l_tmpa_skip {\lastskip}\unskip\nobreak
+        \vskip\l_tmpa_skip\hbox{\vrule height\ulSongBarHeight width\hsize}}
+   \vbox_set_end:
+   % Standalone intersong blocks have no song number in a selected song list.
+   \bool_if:NF \g__ulsbs_song_selection_bool
+      {\bool_if:NF \l__ulsbs_layout_omit_intersong_bool
+        {\__ulsbs_layout_submit:N \l__ulsbs_layout_intersong_box
+         \int_compare:nNnT {\g__ulsbs_layout_columns_int}>{0}{\penalty10000\relax}}}}
+
+% The block implementations already belong to ULSBS. Replace their layout and
+% prose adapters, not the language/visibility/environment implementations.
+% No arguments; add block spacing/penalties and increment the in-song block
+% counter, or add intersong stretch without changing ordinary outside prose.
+\cs_set_protected:Npn \ulsbs@blockstart
+  {\bool_if:NT \g__ulsbs_song_active_bool
+     {\int_compare:nNnTF {\value{ulsbs@aftersongblocks}}={0}
+        {\vspace{1.618034em}}{\vspace{1em}}
+      \mode_if_horizontal:TF {\penalty-5\relax}
+        {\unpenalty\__ulsbs_layout_break:n {\ulBlockPenalty}}
+     \vspace*{\fill}\stepcounter{ulsbs@aftersongblocks}}
+   \bool_if:NT \l__ulsbs_layout_intersong_bool
+     {\vspace{1em}\vspace*{\fill}}}
+
+% No arguments; begin an image block in-song, otherwise add outer vertical fill.
+\cs_new_protected:Npn \__ulsbs_layout_image_begin:
+  {\bool_if:NTF \g__ulsbs_song_active_bool {\ulsbs@blockstart}{\vfill}}
+
+% No arguments; enable in-song end fill, otherwise add outer vertical fill.
+\cs_new_protected:Npn \__ulsbs_layout_image_end:
+  {\bool_if:NTF \g__ulsbs_song_active_bool {\ulEndSongVfill{true}}{\vfill}}
+
+% Image adapters take [scale, default 1]{image}: delegate actual image rendering
+% to imagel/imager, adding block/centering policy. The b variants suppress
+% end-song fill; c endings use the normal image-end fill policy.
+\DeclareDocumentCommand \imagecc {O{1} m}
+  {\begin{center}\__ulsbs_layout_image_begin:\imagel[#1]{#2}
+   \__ulsbs_layout_image_end:\end{center}}
+
+\DeclareDocumentCommand \imagecb {O{1} m}
+  {\begin{center}\__ulsbs_layout_image_begin:\imagel[#1]{#2}
+   \bool_if:NT \g__ulsbs_song_active_bool {\ulEndSongVfill{false}}\end{center}}
+
+\DeclareDocumentCommand \imagelc {O{1} m}
+  {\__ulsbs_layout_image_begin:\imagel[#1]{#2}\__ulsbs_layout_image_end:}
+
+\DeclareDocumentCommand \imagerc {O{1} m}
+  {\begin{center}\__ulsbs_layout_image_begin:\imager[#1]{#2}
+   \__ulsbs_layout_image_end:\end{center}}
+
+\DeclareDocumentCommand \imagerb {O{1} m}
+  {\__ulsbs_layout_image_begin:\imager[#1]{#2}
+   \bool_if:NT \g__ulsbs_song_active_bool {\ulEndSongVfill{false}}}
+
+% No arguments; switch scoped chord/lyric flags and refresh an active stanza's
+% baseline. Before document start also replace the default column-bottom glue.
+\DeclareDocumentCommand \chordsoff {}
+  {\ulsbs@chordedfalse\ulsbs@lyrictrue
+   \bool_if:NF \g__ulsbs_layout_document_bool
+     {\cs_set:Npn \ulColumnBottomGlue {0pt~plus~.5\textheight}}
+    \bool_if:NT \g__ulsbs_stanza_active_bool {\__ulsbs_verse_baseline:}}
+
+\DeclareDocumentCommand \chordson {}
+  {\ulsbs@chordedtrue\ulsbs@lyricfalse
+   \bool_if:NF \g__ulsbs_layout_document_bool {\cs_set:Npn \ulColumnBottomGlue {0pt}}
+    \bool_if:NT \g__ulsbs_stanza_active_bool {\__ulsbs_verse_baseline:}}
+
+% #1: note content. Compose it once into an hbox under prose newline rules;
+% unpack for wrapping only if wider than available width, then emit a colorbox.
+\cs_new_protected:Npn \__ulsbs_layout_prose:n #1
+  {\group_begin:\disobeylines\everypar{}
+    \char_set_active_eq:nN {13}\space
+    \hbox_set:Nn \l__ulsbs_layout_note_text_box {\ulNoteFont\relax#1}
+   \dim_set:Nn \l_tmpa_dim {\hsize-\leftskip-\rightskip-2\fboxsep}
+   \vbox_set:Nn \l__ulsbs_layout_note_box
+     {\dim_compare:nNnTF {\box_wd:N \l__ulsbs_layout_note_text_box}>{\l_tmpa_dim}
+       {\hsize=\l_tmpa_dim\ulNoteJustify
+        \tex_unhbox:D \l__ulsbs_layout_note_text_box\tex_par:D}
+       {\box_use_drop:N \l__ulsbs_layout_note_text_box}
+      \kern0pt}
+   \colorbox{\ulNoteBackgroundColor}{\box_use_drop:N \l__ulsbs_layout_note_box}
+   \group_end:}
+
+% {formatted note}: emit a left-aligned paragraph with reset side skips.
+\DeclareDocumentCommand \placenote {m}
+  {\leftskip=0pt\rightskip=0pt plus1fil\noindent#1\par}
+
+% #1: note content. Use lyric-only baseline inside a private formatting group
+% and delegate visible placement to the public placenote adapter.
+\cs_new_protected:Npn \__ulsbs_layout_note:n #1
+  {\group_begin:\everypar{}
+   \ifulChorded\ulsbs@chordedfalse\__ulsbs_verse_baseline:\ulsbs@chordedtrue\fi
+   \placenote{\__ulsbs_layout_prose:n {#1}}\group_end:}
+
+% {text}: emit a note with stanza-aware leading/trailing nonbreaking spacing.
+\DeclareDocumentCommand \textnote {m}
+  {\par\bool_if:NTF \g__ulsbs_stanza_active_bool
+     {\bool_if:NF \g__ulsbs_verse_first_line_bool {\vskip2pt}}
+     {\bool_if:NT \g__ulsbs_verse_seen_bool {\nobreak\vskip\ulVerseSep}}
+   \__ulsbs_layout_note:n {#1}
+   \nobreak\bool_if:NTF \g__ulsbs_stanza_active_bool
+     {\vskip2pt}{\bool_if:NF \g__ulsbs_verse_seen_bool {\vskip\ulVerseSep}}}
+
+% Optional star removes 2ex above {text}; emit styled passage prose with the
+% configured right skip, confined to a local paragraph-formatting group.
+\DeclareDocumentCommand \passagenote {s m}
+  {\par\group_begin:\IfBooleanT{#1}{\vspace{-2ex}}
+   \rightskip=\ulPassageRightSkip\hfill
+   \__ulsbs_layout_prose:n {\sffamily\itshape#2}\par\group_end:}
+
+% {vertical skip}: add collapsible space only outside an active stanza.
+\DeclareDocumentCommand \vspaceifnotinverse {m}
+  {\bool_if:NF \g__ulsbs_stanza_active_bool {\addvspace{#1}}}
+
+% [leading star][before skip][after skip]{text}[trailing star]: attach a note
+% before/after a stanza boundary. Leading star moves the break after the note;
+% trailing star suppresses default glueverses for an unstarred note. Skip defaults
+% are zero. Formatting is local, but attached-note brkpenalty lasts in song scope.
+\DeclareDocumentCommand \attachednote {s o o m s}
+  % Retain the conventional wrapper's token spaces before ending open prose.
+  {\mode_if_horizontal:T
+     {\space\IfNoValueT{#2}{\space}\IfNoValueT{#3}{\space}}
+    \par
+    % Attached notes also update later explicit breaks in the song's scope.
+    % Keep that state outside the note's private formatting group.
+    \bool_if:NT \g__ulsbs_song_active_bool
+      {\bool_if:NF \g__ulsbs_stanza_active_bool
+        {\bool_if:NT \g__ulsbs_verse_seen_bool
+          {\IfBooleanF{#1}{\ulBreakPenalty=\ulVerseVersePenalty\relax}}}}
+    \group_begin:
+   \skip_set:Nn \l_tmpa_skip {\IfNoValueTF{#2}{0pt}{#2}}
+   \skip_set:Nn \l_tmpb_skip {\IfNoValueTF{#3}{0pt}{#3}}
+   \bool_if:NTF \g__ulsbs_stanza_active_bool
+     {\bool_if:NF \g__ulsbs_verse_first_line_bool {\vskip2pt}}
+     {\bool_if:NTF \g__ulsbs_song_active_bool
+       {\bool_if:NT \g__ulsbs_verse_seen_bool
+          {\IfBooleanF{#1}{\__ulsbs_layout_break:n {\ulVerseVersePenalty}}
+           \vspace{\l_tmpa_skip}}}
+        {\vspace{\l_tmpa_skip}}}
+   \__ulsbs_layout_note:n {#4}\nobreak
+   \bool_if:NTF \g__ulsbs_stanza_active_bool
+     {\vskip2pt}
+     {\bool_if:NT \g__ulsbs_song_active_bool
+       {\IfBooleanTF{#1}
+         {\bool_if:NT \g__ulsbs_verse_seen_bool {\__ulsbs_layout_break:n {\ulVerseVersePenalty}}}
+         {\IfBooleanF{#5}{\glueverses}}}
+       \vspace{\l_tmpb_skip}}
+    \group_end:
+    \bool_if:NT \g__ulsbs_song_active_bool
+      {\bool_if:NF \g__ulsbs_stanza_active_bool
+        {\bool_if:NT \g__ulsbs_verse_seen_bool
+          {\IfBooleanT{#1}{\ulBreakPenalty=\ulVerseVersePenalty\relax}}}}}
+\ExplSyntaxOff
+\makeatother

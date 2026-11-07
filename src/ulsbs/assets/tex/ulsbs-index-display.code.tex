@@ -1,0 +1,371 @@
+% SPDX-FileCopyrightText: 2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Index typography.
+% This file is part of the 'ulsbs' package.
+%
+% Index conventions/typography follow songs (C) 2018 Kevin W. Hamlen, GPL-2.0-or-later.
+% See the README acknowledgement for the ULSBS derivative-work account.
+% The sorter supplies conventional .sbx commands;
+% this module owns their layout, not record collection or fragment generation.
+% Loaded after index/song/layout and common style defaults. Requires expl3,
+% xparse and the index-state Lua bridge; author fragments use normal TeX lookup.
+% Local dimensions/boxes carry the current display, pending columns and probes;
+% global badness/trial assignments pass measurements out of nested box groups.
+% Title/author/tag fragments reflect the completed previous pass, not current song
+% source. Entry formatting may run during measurement; song source never does.
+
+\ProvidesFile{ulsbs-index-display.code.tex}[Index display]
+
+\makeatletter
+\ExplSyntaxOn
+\msg_new:nnn {ulsbs-index-display}{unknown}{Unknown~index~'#1'.}
+\msg_new:nnn {ulsbs-index-display}{alternate}
+  {Alternate~entries~are~not~allowed~in~a~#1~index.}
+\tl_new:N \l__ulsbs_idx_kind_tl
+\tl_new:N \l__ulsbs_idx_path_tl
+\tl_new:N \l__ulsbs_idx_heading_tl
+\int_new:N \l__ulsbs_idx_columns_int
+\dim_new:N \l__ulsbs_idx_width_dim
+\dim_new:N \l__ulsbs_idx_height_dim
+\dim_new:N \l__ulsbs_idx_tail_dim
+\dim_new:N \l__ulsbs_idx_budget_dim
+\dim_new:N \l__ulsbs_idx_candidate_dim
+\dim_new:N \l__ulsbs_idx_step_dim
+\dim_new:N \l__ulsbs_idx_gap_dim
+\int_new:N \g__ulsbs_idx_badness_int
+\box_new:N \l__ulsbs_idx_heading_box
+\box_new:N \l__ulsbs_idx_body_box
+\box_new:N \l__ulsbs_idx_pending_box
+\box_new:N \l__ulsbs_idx_page_box
+\box_new:N \l__ulsbs_idx_column_box
+\box_new:N \l__ulsbs_idx_line_box
+\box_new:N \l__ulsbs_idx_probe_box
+\box_new:N \l__ulsbs_idx_trial_box
+\bool_new:N \l__ulsbs_idx_compact_bool
+
+% No arguments; apply current column width and nonhyphenating index paragraphs
+% in the caller's box/group. Does not emit content or change collection state.
+\cs_new_protected:Npn \__ulsbs_idx_setup:
+  {
+    \hsize=\l__ulsbs_idx_width_dim
+    \parskip=0pt \parfillskip=0pt \parindent=0pt
+    \baselineskip=\f@size pt~plus~1pt~minus~1pt
+    \lineskiplimit=0pt \lineskip=1pt~plus~1pt~minus~1pt
+    \hyphenpenalty=10000 \exhyphenpenalty=10000
+  }
+
+% No arguments; emit dot leaders (caller supplies the following leader glue).
+\cs_new_protected:Npn \__ulsbs_idx_dots:
+  {\leaders\hbox to .5em{\hss.\hss}}
+
+% No arguments; replacement for \\ within reference lists. Emit comma/glue and
+% a legal break that keeps wrapped references in the reserved reference area.
+\cs_new_protected:Npn \__ulsbs_idx_refs_separator:
+  {
+    ,\kern-2em\penalty-8\hskip2.33em~minus~.11em
+    \hskip-\l__ulsbs_idx_gap_dim~plus~-1fill
+    \vadjust{}\nobreak
+    \hskip\l__ulsbs_idx_gap_dim~plus~1fill\relax
+  }
+
+% #1: styled entry text; #2: linked references separated by \\. Measure a single
+% line, emitting its retained box if it fits or delegating to wrapped layout.
+% All separator/measurement assignments are confined to the entry group.
+\cs_new_protected:Npn \__ulsbs_idx_line:nn #1#2
+  {
+    \group_begin:
+    \dim_zero:N \l__ulsbs_idx_gap_dim
+    \cs_set_eq:NN \\ \__ulsbs_idx_refs_separator:
+    \hbox_set:Nn \l__ulsbs_idx_line_box
+      {#1\__ulsbs_idx_dots:\hskip 2em~plus~1fil {\ulIndexRefsFont\relax#2}}
+    \dim_compare:nNnTF {\box_wd:N \l__ulsbs_idx_line_box}>{\hsize}
+      {\__ulsbs_idx_wrap:nn {#1}{#2}}
+      {\hbox to\hsize{\hbox_unpack_drop:N \l__ulsbs_idx_line_box}\par}
+    \group_end:
+  }
+
+% #1: styled entry text; #2: references. Measure title tail and search a narrower
+% reference budget without increasing row count; finally emit the paragraph.
+% This can typeset fragment entry tokens repeatedly, unlike song-box fit probes.
+\cs_new_protected:Npn \__ulsbs_idx_wrap:nn #1#2
+  {
+    % Preserve the hanging title and the width of its last line, then find the
+    % narrowest reference area that does not add a row. References may break at
+    % their explicit separators, never in the middle of a link. The retained
+    % reference group is measured whole, including its separator glue.
+    \hbox_set:Nn \l__ulsbs_idx_line_box
+      {{\ulIndexRefsFont\relax#2}}
+    \dim_set:Nn \l__ulsbs_idx_tail_dim
+      {\box_wd:N \l__ulsbs_idx_line_box-.5em}
+    \vbox_set:Nn \l__ulsbs_idx_probe_box
+      {
+        \hbadness=10000 \hfuzz=\maxdimen
+        \leftskip=.5cm
+        \hskip-.5cm #1\unskip\nobreak
+        \hskip\l__ulsbs_idx_tail_dim\nobreak
+        \rightskip=2em~plus~1fil\par
+        \box_set_to_last:N \l__ulsbs_idx_line_box
+        \hbox_set:Nn \l__ulsbs_idx_line_box
+          {\hbox_unpack_drop:N \l__ulsbs_idx_line_box
+           \unskip\unskip\unpenalty\unpenalty\unskip\unpenalty}
+        \dim_gset:Nn \l__ulsbs_idx_tail_dim {\box_wd:N \l__ulsbs_idx_line_box}
+      }
+    \dim_set:Nn \l__ulsbs_idx_budget_dim {\hsize-.5cm}
+    \vbox_set:Nn \l__ulsbs_idx_probe_box
+      {\hbadness=10000 \hfuzz=\maxdimen \__ulsbs_idx_paragraph:nn {#1}{#2}}
+    \dim_set:Nn \l__ulsbs_idx_candidate_dim {.5\l__ulsbs_idx_budget_dim}
+    \dim_set_eq:NN \l__ulsbs_idx_step_dim \l__ulsbs_idx_candidate_dim
+    \bool_do_while:nn {\dim_compare_p:nNn {\l__ulsbs_idx_step_dim}>{2pt}}
+      {
+        \dim_set:Nn \l__ulsbs_idx_step_dim {.5\l__ulsbs_idx_step_dim}
+        \group_begin:
+        \dim_set_eq:NN \l__ulsbs_idx_budget_dim \l__ulsbs_idx_candidate_dim
+        \vbox_gset:Nn \l__ulsbs_idx_trial_box
+          {\hbadness=10000 \hfuzz=\maxdimen \__ulsbs_idx_paragraph:nn {#1}{#2}}
+        \group_end:
+        \bool_if:nTF
+          {\int_compare_p:nNn {\g__ulsbs_idx_badness_int}<{10000}
+           && ! \dim_compare_p:nNn {\box_ht:N \l__ulsbs_idx_trial_box}
+                >{\box_ht:N \l__ulsbs_idx_probe_box}}
+          {\dim_set_eq:NN \l__ulsbs_idx_budget_dim \l__ulsbs_idx_candidate_dim
+           \dim_sub:Nn \l__ulsbs_idx_candidate_dim {\l__ulsbs_idx_step_dim}}
+          {\dim_add:Nn \l__ulsbs_idx_candidate_dim {\l__ulsbs_idx_step_dim}}
+      }
+    \__ulsbs_idx_paragraph:nn {#1}{#2}
+  }
+
+% #1: styled text; #2: references. Emit hanging paragraph under current budget
+% and tail metrics, exporting final badness globally for the wrapping search.
+\cs_new_protected:Npn \__ulsbs_idx_paragraph:nn #1#2
+  {
+    \group_begin:
+    \dim_set:Nn \l__ulsbs_idx_gap_dim {\hsize-\l__ulsbs_idx_budget_dim}
+    \leftskip=.5cm
+    \parfillskip=0pt \interlinepenalty=10000
+    \hskip-.5cm #1\unskip\nobreak
+    % These em lengths belong to the title font, not the reference font.
+    \rightskip=2em~plus~1fil
+    \__ulsbs_idx_dots:\hskip
+      \dim_max:nn {1.5em}{\l__ulsbs_idx_gap_dim-\l__ulsbs_idx_tail_dim}~plus~1fill\nobreak
+    {\ulIndexRefsFont\relax#2}\kern-2em\par
+    \int_gset:Nn \g__ulsbs_idx_badness_int {\badness}
+    \group_end:
+  }
+
+% {group heading}: retain heading text, emit title-index letter panel unless
+% compact, and add kind-specific end spacing/marks used by column continuation.
+\DeclareDocumentEnvironment{ulIndexBlock}{m}
+  {
+    \tl_set:Nn \l__ulsbs_idx_heading_tl {#1}
+    \str_if_eq:VnT \l__ulsbs_idx_kind_tl {title}
+      {
+        \bool_if:NF \l__ulsbs_idx_compact_bool
+          {
+            \dim_compare:nNnT {\ulIndexHeadingWidth}>{0pt}
+              {
+                \hbox{\colorbox{\ulIndexBackgroundColor}{\vbox{
+                  \hbox to\ulIndexHeadingWidth{{\ulIndexHeadingFont\relax#1}\hfil}}}}
+                \nobreak\vskip 3pt~plus~2pt~minus~2pt\nointerlineskip
+              }
+          }
+      }
+  }
+  {
+    \str_case:Vn \l__ulsbs_idx_kind_tl
+      {
+        {title}{\bool_if:NF \l__ulsbs_idx_compact_bool
+          {\dim_compare:nNnT {\ulIndexHeadingWidth}>{0pt}
+            {\penalty-50\vskip 5pt~plus~5pt~minus~4pt}}}
+        {tag}{\mark{\relax}\penalty-20\vskip 3pt~plus~3pt}
+      }
+  }
+
+% {entry text}{references}: format by current title/tag/author kind. Tag text
+% comes from idxblock's heading; its mark carries continuation heading code.
+\DeclareDocumentCommand \ulIndexDisplayEntry {m m}
+  {
+    \str_case:Vn \l__ulsbs_idx_kind_tl
+      {
+        {title}{\__ulsbs_idx_line:nn
+          {\ulIndexTitleFont\relax\ignorespaces#1\unskip}{#2}}
+        {tag}{\__ulsbs_idx_line:nn
+          {\ulIndexTagFont\relax\l__ulsbs_idx_heading_tl}{#2}
+          \exp_args:Nx \mark
+            {\exp_not:N \__ulsbs_idx_continue:n {\exp_not:V \l__ulsbs_idx_heading_tl}}}
+        {author}{\__ulsbs_idx_line:nn
+          {{\ulIndexAuthorFont\relax\sfcode`.=1000~#1}}{#2}}
+      }
+  }
+
+% {alternate text}{references}: emit lyric-style title entry; diagnose use in
+% tag/author fragments rather than silently choosing another typography.
+\DeclareDocumentCommand \ulIndexDisplayAltEntry {m m}
+  {
+    \str_if_eq:VnTF \l__ulsbs_idx_kind_tl {title}
+      {\__ulsbs_idx_line:nn
+        {\ulIndexLyricFont\relax\ignorespaces#1\unskip}{#2}}
+      {\msg_error:nnx {ulsbs-index-display}{alternate}{\l__ulsbs_idx_kind_tl}}
+  }
+
+% No arguments; initialize paragraph settings and execute the selected .sbx
+% display fragment. This consumes generated display commands, not songs.
+\cs_new_protected:Npn \__ulsbs_idx_read:
+  {\__ulsbs_idx_setup:\file_input:V \l__ulsbs_idx_path_tl}
+
+% #1: tag heading. Emit a nonbreaking continuation label atop remaining content;
+% this code is recovered from split marks, not reread from source metadata.
+\cs_new_protected:Npn \__ulsbs_idx_continue:n #1
+  {
+    \hbox to\hsize{{\ulIndexContinuation{#1}}\hfil}\nobreak
+    \dim_set:Nn \l_tmpa_dim {\dim_max:nn {0pt}{4pt-\prevdepth}}
+    \vskip\l_tmpa_dim~plus~1pt~minus~\dim_min:nn {\l_tmpa_dim}{1pt}
+    \nointerlineskip
+  }
+
+% A page is a row of independently split columns. Keeping the compositor in
+% boxes leaves LaTeX's output routine, running headers and navigation untouched.
+% No arguments; split pending_box at the current height into a row in page_box,
+% leaving remainder in pending_box and prepending splitbotmark continuation code.
+\cs_new_protected:Npn \__ulsbs_idx_split:
+  {
+    \hbox_set:Nn \l__ulsbs_idx_page_box
+      {
+        \int_step_inline:nn {\l__ulsbs_idx_columns_int}
+          {
+            \int_compare:nNnT {##1}>{1}{\kern\columnsep}
+            \dim_compare:nNnTF {\box_ht:N \l__ulsbs_idx_pending_box}>{0pt}
+              {
+                \splittopskip=0pt \splitmaxdepth=\maxdepth
+                \vbox_gset_split_to_ht:NNn \l__ulsbs_idx_column_box
+                  \l__ulsbs_idx_pending_box {\l__ulsbs_idx_height_dim}
+                \box_use_drop:N \l__ulsbs_idx_column_box
+                \vbox_gset:Nn \l__ulsbs_idx_pending_box
+                  {\__ulsbs_idx_setup:\splitbotmark
+                   \vbox_unpack_drop:N \l__ulsbs_idx_pending_box}
+              }
+              {\hskip\l__ulsbs_idx_width_dim}
+          }
+      }
+  }
+
+% No arguments; reread the fragment in noncompact mode, emit retained heading
+% and begin paginated column composition from body_box.
+\cs_new_protected:Npn \__ulsbs_idx_pages:
+  {
+    \bool_set_false:N \l__ulsbs_idx_compact_bool
+    \vbox_set:Nn \l__ulsbs_idx_body_box {\__ulsbs_idx_read:\unskip}
+    \vbox_unpack_drop:N \l__ulsbs_idx_heading_box
+    \vskip .2in\nointerlineskip\null\nointerlineskip
+    \vbadness=10000 \vfuzz=\maxdimen
+    \__ulsbs_idx_next_page:
+  }
+
+% No arguments; split body_box against remaining page height. Emit full rows
+% and recurse on retained remainder; balance the final row before emitting it.
+\cs_new_protected:Npn \__ulsbs_idx_next_page:
+  {
+    \dim_set:Nn \l__ulsbs_idx_height_dim {\textheight}
+    \ifinner\else
+      \kern0pt
+      \dim_sub:Nn \l__ulsbs_idx_height_dim {\pagetotal}
+    \fi
+    \box_set_eq:NN \l__ulsbs_idx_pending_box \l__ulsbs_idx_body_box
+    \__ulsbs_idx_split:
+    \dim_compare:nNnTF {\box_ht:N \l__ulsbs_idx_pending_box}>{0pt}
+      {
+        \box_use_drop:N \l__ulsbs_idx_page_box\vfil\break
+        \box_set_eq:NN \l__ulsbs_idx_body_box \l__ulsbs_idx_pending_box
+        \__ulsbs_idx_next_page:
+      }
+      {
+        % Search upwards from the average natural height. Unlike multicol's
+        % balancing, this preserves the established one-point split grid.
+        \dim_set:Nn \l_tmpa_dim {\box_ht:N \l__ulsbs_idx_body_box}
+        \divide\l_tmpa_dim by\l__ulsbs_idx_columns_int
+        \dim_set:Nn \l__ulsbs_idx_height_dim
+          {\dim_min:nn {\l__ulsbs_idx_height_dim}{\l_tmpa_dim}}
+        \__ulsbs_idx_balance:
+        \box_use_drop:N \l__ulsbs_idx_page_box
+      }
+  }
+
+% No arguments; retry splits from the unchanged body_box, increasing target
+% height by 1pt until pending_box drains. Leaves the accepted row in page_box.
+\cs_new_protected:Npn \__ulsbs_idx_balance:
+  {
+    \box_set_eq:NN \l__ulsbs_idx_pending_box \l__ulsbs_idx_body_box
+    \__ulsbs_idx_split:
+    \dim_compare:nNnT {\box_ht:N \l__ulsbs_idx_pending_box}>{0pt}
+      {\dim_add:Nn \l__ulsbs_idx_height_dim {1pt}\__ulsbs_idx_balance:}
+  }
+
+% #1: display heading. Compute column width and retain heading once. Try compact
+% separate-page layout when enabled, falling back to normal paginated columns;
+% missing fragments get a placeholder. Separate indices finish with clearpage.
+\cs_new_protected:Npn \__ulsbs_idx_display:n #1
+  {
+    \dim_set:Nn \l__ulsbs_idx_width_dim
+      {\hsize-\int_eval:n {\l__ulsbs_idx_columns_int-1}\columnsep}
+    \divide\l__ulsbs_idx_width_dim by\l__ulsbs_idx_columns_int
+    \vbox_set:Nn \l__ulsbs_idx_heading_box
+      {\cs_if_exist:NTF \chapter {\ulSongChapter{#1}}{\ulSongSection{#1}}}
+    \file_if_exist:VTF \l__ulsbs_idx_path_tl
+      {
+        \ifulSeparateIndexes
+          \bool_set_true:N \l__ulsbs_idx_compact_bool
+          \vbox_set:Nn \l__ulsbs_idx_body_box
+            {
+              \null\vfil\vbox_unpack:N \l__ulsbs_idx_heading_box
+              \vskip .5in~minus~.3in
+              \hbox to\hsize{\hfil\vbox{\__ulsbs_idx_read:}\hfil}
+              \vskip 0pt~plus~2fil
+            }
+          \splittopskip=0pt \splitmaxdepth=\maxdepth
+          \vbox_set_split_to_ht:NNn \l__ulsbs_idx_page_box
+            \l__ulsbs_idx_body_box {\textheight}
+          \box_if_empty:NTF \l__ulsbs_idx_body_box
+            {\box_use_drop:N \l__ulsbs_idx_page_box}
+            {\__ulsbs_idx_pages:}
+        \else
+          \__ulsbs_idx_pages:
+        \fi
+      }
+      {
+        \ifulSeparateIndexes
+          \vbox to\textheight{\vfil\vbox_unpack_drop:N \l__ulsbs_idx_heading_box
+            \vskip1em\hbox to\hsize{\hfil[Index~not~yet~generated.]\hfil}
+            \vskip0pt~plus~2fil}
+        \else
+          \vbox_unpack_drop:N \l__ulsbs_idx_heading_box
+          \hbox to\hsize{\hfil[Index~not~yet~generated.]\hfil}
+        \fi
+      }
+    \ifulSeparateIndexes\clearpage\fi
+  }
+
+% [column count]{heading}{index ID}: validate ID and select kind/path locally.
+% Counts below 1 default to 3 tag columns or 2 others. Every kind asks Lua for
+% an exact prior-snapshot fragment.
+% Disabled song indices produce no display; current-pass staged records are not
+% substituted for the prior completed snapshot.
+\DeclareDocumentCommand \ulShowIndex {O{0} m m}
+  {
+    \group_begin:
+    \prop_get:NnNTF \g__ulsbs_index_kinds_prop {#3}\l__ulsbs_idx_kind_tl
+      {
+        \ifulSongIndexes
+          \int_set:Nn \l__ulsbs_idx_columns_int {#1}
+          \int_compare:nNnT {\l__ulsbs_idx_columns_int}<{1}
+            {\int_set:Nn \l__ulsbs_idx_columns_int
+              {\str_if_eq:VnTF \l__ulsbs_idx_kind_tl {tag}{3}{2}}}
+          \directlua{local~_,path=ulsbs_index_state.show("\luaescapestring{#3}");
+            token.set_macro("l__ulsbs_idx_path_tl",path~or~"")}
+          \__ulsbs_idx_display:n {#2}
+        \fi
+      }
+      {\msg_error:nnn {ulsbs-index-display}{unknown}{#3}}
+    \group_end:
+  }
+\ExplSyntaxOff
+\makeatother

@@ -1,0 +1,347 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Shared visual policy.
+% This file is part of the 'ulsbs' package.
+%
+% Loaded immediately after ulsbs-typography.code.tex, before front matter.
+% Requires imported graphics/color/header packages, defaults, book
+% strings and typography. Owns common colors, font hooks, header styles,
+% inline boxes and break policy; loads chapter marks at their original site.
+
+\ProvidesFile{ulsbs-style.code.tex}[Shared visual policy]
+
+% This is the final common policy layer, not the pre-typography bootstrap.
+% For providecommand font/header defaults, consumers may define before loading
+% or renew afterward. Hooks explicitly renewed here must be renewed
+% after loading; changing one does not rerun the earlier bootstrap measurements.
+% Use \definecolor/\colorlet after loading to replace named colors, \setlength
+% for allocated lengths/skips, and direct assignment for penalty count registers.
+
+% === Paragraph stretching and named colors ===
+% Allow further emergency stretching to fix some "overfull hbox" situations.
+% See: https://www.tex.ac.uk/FAQ-overfull.html
+\setlength{\emergencystretch}{3em}
+
+% color: Color definitions:
+\definecolor{ulChordColor}{rgb}{0.20,0,0.22} % chords
+\definecolor{ulTransposedKeyColor}{rgb}{0.60,0,0.04} % non-original prelude keys
+\definecolor{ulAltInlineChordColor}{rgb}{0.4,0,0.22} % alt. chord coloring used with \ac
+\definecolor{ulAltChordColorA}{rgb}{0.10,0.4,0.10} % green, set 1 (default)
+\definecolor{ulAltChordColorB}{rgb}{0.35,0.22,0.06} % brown, set 2
+\definecolor{ulAltChordColorC}{rgb}{0.17,0.23,0} % dirty green, set 3
+\definecolor{ulAltChordColorD}{rgb}{0.13,0,0.42} % bluish, set 4
+\definecolor{ulAltChordColorE}{rgb}{0.09,0.33,0.34} % cyan, set 5
+\definecolor{ulAltChordColorF}{rgb}{0.36,0.15,0.23} % redish, set 6
+\definecolor{ulMeasureBarColor}{rgb}{0.36,0,0.48} % measure bar
+% encircled melody note color:
+\definecolor{ulMelodyNoteColor}{rgb}{0.0,0.1536,0.1824}
+% encircled melody note color (alt.):
+\definecolor{ulMelodyNoteAltColor}{rgb}{0.2,0,0}
+% playout mark color:
+\definecolor{ulPlayoutMarkColor}{rgb}{0,0.5,0}
+% color for repetition signs:
+\definecolor{ulRepetitionSignColor}{rgb}{0,0,0.5}
+\definecolor{ulSongNumberBackgroundColor}{rgb}{1,1,1} % song number background
+\definecolor{ulNoteBackgroundColor}{rgb}{0.9,0.9,0.9} % textnote background
+\definecolor{ulIndexBackgroundColor}{rgb}{1,1,1} % index alphabet background
+\definecolor{ulInternalLinkColor}{rgb}{0,0,0.3} % internal links
+\definecolor{ulUrlLinkColor}{rgb}{0.3,0,0.3} % external links
+\definecolor{ulLinkBoxColor}{rgb}{0.5,0.9,0.6} % boxed links (view), not used now
+% ulsbs@langsect-derived environments: the color for \up marks
+\colorlet{ulLanguageSectionMarkColor}{ulChordColor}%
+% ulsbs@langsect-derived environments: colors used for different languages
+\definecolor{ulLanguageEnglishColor}{rgb}{0,0,0}%
+\definecolor{ulLanguagePortugueseColor}{rgb}{0,0.26,0.26}%
+\definecolor{ulLanguageFinnishColor}{rgb}{0,0.05,0.38}%
+
+% === PDF presentation and load-time metadata ===
+% Book metadata strings must already be set; later string changes alone do not
+% repeat this setup. A consumer can explicitly call \hypersetup after loading.
+\hypersetup{linkbordercolor=ulLinkBoxColor,%
+            linkcolor=ulInternalLinkColor,%
+            urlcolor=ulUrlLinkColor,%
+            unicode=true,%
+            % TwoPageRight: display two pages side-by-side with flipping pages,
+            %               odd pages on the right
+            % TwoColumnRight: display two pages side-by-side with continuous
+            %                 scrolling, odd pageson the right
+            pdfpagelayout=TwoColumnRight,%
+            pdfpagemode=UseNone,% alt. UseThumbs or UseOutlines (bookmarks)
+            pdfprintscaling=None,%
+            pdftitle={\ulThisBookTitle},%
+            pdfauthor={\ulBookAuthor},%
+            pdfsubject={\ulBookSubject},%
+            pdfkeywords={\ulBookKeywords},%
+            pdfinfo={DocumentVersion={\ulBookVersion}}% this is a custom attr
+           }
+
+\renewcommand{\ulSongNumberBackgroundColor}{ulSongNumberBackgroundColor} % song-number background in prelude
+\renewcommand{\ulNoteBackgroundColor}{ulNoteBackgroundColor} % \musicnote and \textnote background
+\renewcommand{\ulIndexBackgroundColor}{ulIndexBackgroundColor} % index alphabet section background
+
+
+% === Font hooks and spacing policy ===
+% Set lyric font style:
+\providecommand{\ulLyricFont}{\sffamily\large}
+% Verse layout: use the public lyric-font policy.
+\renewcommand{\ulLyricFontStyle}{\ulLyricFont} % lyrics font style
+
+% Set chord font style:
+\providecommand{\ulChordFont}{\sffamily\bfseries\small\color{ulChordColor}}
+% Chord rendering: use the public chord-font policy.
+\renewcommand{\ulPrintChord}[1]{\ulChordFont#1}
+
+
+% Chord character adjustment
+%
+% Adjust the appearance of some characters in chord definitions. Currently makes
+% parenthesis smaller and raises them upwards. This is done to get low hanging
+% characters of our default font to not collide with the lyrics below.
+%
+% To turn this off, set \ulAdjustChordChars{false}
+%
+\newcommand{\ulsbs@smraise}[1]{\ifulAdjustChordChars\raise0.234ex\hbox{\scalebox{0.81}#1}\else#1\fi}
+\renewcommand{\ulChordLocals}{%
+  \catcode`(\active
+  \catcode`)\active
+}
+\newcommand{\ulsbs@smraiseopenparen}{\ulsbs@smraise{(}}
+\newcommand{\ulsbs@smraisecloseparen}{\ulsbs@smraise{)}}
+\begingroup
+  \ulChordLocals
+  \gdef({\ulsbs@smraiseopenparen}%
+  \gdef){\ulsbs@smraisecloseparen}%
+\endgroup
+
+% Meter font style (add color):
+\renewcommand{\ulMeterFont}{\color{ulChordColor}\scriptsize\sffamily\upshape}
+\renewcommand{\ulNoteFont}{\small} % text/music note font (make smaller)
+\renewcommand{\ulIndexTitleFont}{\sffamily} % index title font
+\renewcommand{\ulIndexLyricFont}{\sffamily\slshape} % alternate (lyric) index title font
+\renewcommand{\ulIndexTagFont}{\sffamily\small\slshape} % tag index font
+% Notes: use same text color for music notes as for chords and do not show
+% at all in lyric-only books
+\renewcommand\musicnote[1]{\ifulLyricOnly\else\textnote{\color{ulChordColor}#1}\fi}%
+% Text/music notes are prose even when inserted within an active verse.
+
+% Chord accidentals: use a real sharp from the Noto Symbol font.
+\renewcommand{\ulSharpSymbol}{\textsuperscript{{\ulSymbolFont♯}}}%
+%
+% Verse spacing: keep baseline adjustment rigid.
+\ulBaselineAdjustment=0pt plus 0pt minus 0pt
+% Verse separation: bounded shrink lets the page builder fit tight songs.
+\ulVerseSep=14pt plus 0pt minus 2.7pt% was: 2.9pt%
+% Chord line: set the distance from chords to lyrics.
+\renewcommand{\ulChordLineParams}{%
+  \baselineskip=\ulChordLineBaselineSkip%
+  \lineskiplimit=\ulChordLineLineskipLimit%
+  \lineskip=\ulChordLineLineskip%
+}
+% Song layout uses these flexible skips around prelude/body/postlude.
+\ulBeforePostludeSkip=0pt plus 0pt minus 12pt % before the rights/postlude text
+\ulAfterPreludeSkip=0pt plus 8pt minus 6pt % between prelude and retained body
+
+%\addto\captionsfinnish{\renewcommand\chaptername{}} % sets chapter name prefix to nothing when babel: finnish
+\addto\captionsenglish{\renewcommand\chaptername{}} % sets chapter name prefix to nothing when babel: english
+\addto\captionsenglish{\renewcommand\appendixname{}} % sets appendix name prefix to nothing when babel: english
+
+% === Page headers (fancyhdr) ===
+%
+% Note that some pages (the first pages of TOC and chapters etc) automatically
+% use the style 'plain'. If needed, this style can also be modified with
+% \fancypagestyle{plain}
+%
+
+% The style for book, chapter and section titles in page headers
+\providecommand{\ulHeaderTitleStyle}{%
+  \rmfamily\small\itshape%
+}
+
+% The style for page numbers in page headers
+\providecommand{\ulPageNumberStyle}{%
+  \rmfamily\small%
+}
+
+% This gets rid of implicit uppercasing, as it creates problems with images
+% in the chapter titles. Upcasing is now done differently and controlled with
+% \ulUppercaseBookTitleInHeader{true|false},
+% \ulUppercaseSectionTitleInHeader{true|false} and
+% \ulUppercaseShortChapterTitle{true|false}. Mark definitions stay outside styles.
+\renewcommand{\chaptermark}[1]{\markboth{#1}{}}
+\renewcommand{\sectionmark}[1]{\markright{#1}}
+
+% Returns the book's title formatted for headers. Used in fancyhdr style below.
+\newcommand{\ulsbs@headerbooktitle}{%
+  {%
+    \ulHeaderTitleStyle%
+    \ifulUppercaseBookTitleInHeader%
+      \protect\MakeUppercase{\expandafter\ulThisBookTitle}%
+    \else%
+      \ulThisBookTitle%
+    \fi%
+  }%
+}
+
+% Returns the sections's title formatted for headers. Used in fancyhdr style
+% below.
+\newcommand{\ulsbs@headersectiontitle}{%
+  {%
+    \ulHeaderTitleStyle%
+    \ifulUppercaseSectionTitleInHeader%
+      \protect\MakeUppercase{\expandafter\rightmark}
+    \else%
+      \rightmark%
+    \fi%
+  }
+}
+
+% Returns the chapter's title formatted for headers. Used in fancyhdr style
+% below.
+\newcommand{\ulsbs@headerchaptertitle}{%
+  % Note that chapter title's optional upcasing is done elsewhere in the
+  % definition of \ulMainChapter, because it cannot be done here due to possible
+  % chapter images).
+  {\ulHeaderTitleStyle{\leftmark}}%
+}
+
+\newcommand{\ulsbs@headerchapterandsectiontitles}{%
+  \rmfamily\small%
+  \ulsbs@headerchaptertitle%
+  \ulsbs@ifnowidth{\rightmark}{}{%
+    \hspace{1em}---\hspace{1em}\ulsbs@headersectiontitle%
+  }%
+}
+
+\input{ulsbs-chapter-marks.code.tex}
+
+% Setup main header style
+\fancypagestyle{ulsbs}[fancy]{%
+  % NOTE: If fancydr warns that \headheight, \headsep or \footskip is too small,
+  % adjust the value by defining \ulHeadHeight, \ulHeadSep or \ulFootSkip
+  % commands before loading this package.
+  \setlength{\footskip}{\ulFootSkip}
+  \renewcommand{\headrulewidth}{0pt}
+  \renewcommand{\footrulewidth}{0pt}
+  \fancyhf{}
+  %\fancyhead[LE,RO]{\ulPageNumberStyle\thepage} % page nr
+  \fancyhead[CE]{\ulsbs@headerbooktitle}%    % even center: book title
+  \fancyhead[CO]{\ulsbs@headerchapterandsectiontitles} % chapter title --- section title
+  \fancyhead[RO]{%
+    \ulPageNumberStyle\thepage%
+    \ulChapterCornerMarksOuter{R}%
+  }
+  \fancyhead[LE]{%
+    \ulPageNumberStyle\thepage%
+    \ulChapterCornerMarksOuter{L}%
+  }
+}
+
+% Setup style for TOC
+\fancypagestyle{ulsbstoc}[ulsbs]{%
+  \fancyhead[LO]{} % odd left: nothing
+  \fancyhead[LE,RO]{%
+    \ulPageNumberStyle\thepage%
+  }
+  \fancyhead[CO]{\rmfamily\small\itshape{\leftmark}} % odd center: chapter title: "CONTENTS"
+}
+
+\pagestyle{ulsbs} % set the default page style
+
+% === Inline presentation boxes ===
+
+% These boxes use tcolorbox package. https://ctan.org/pkg/tcolorbox
+% They are used by giving color of the box as optional parameter, and the
+% content as the mandatory one. If the color is omitted, current color is
+% used by default. Note that the current color seems to be reset to black
+% within the box, so to use it there, it needs to be saved and reset.
+%
+% Usage examples:
+%   - \ulsbs@altchordidbox[red]{(Am)} % red box, black text
+%   - \colorlet{ulsbs@curcol}{.}\ulsbs@altchordidbox{\color{ulsbs@curcol}(Am)} % current color for box and text
+
+% Coloured box for language code.
+\newtcbox{\ulsbs@langcodebox}[1][.]{%
+  on line,arc=1pt,outer arc=.618pt,%
+  colback=#1!6!white,colframe=#1!80!black,
+  boxsep=0pt,%
+  left=0.8pt,right=0.8pt,top=0.8pt,bottom=0.8pt,%
+  boxrule=0.5pt%
+}
+
+% Coloured box for the alternate chords id (title).
+\newtcbox{\ulsbs@altchordidbox}[1][.]{%
+  on line,%
+  valign=bottom,%
+  arc=3pt,%outer arc=3pt,%
+  colback=#1!5!white,colframe=#1!94!black,%
+  boxsep=0pt,%
+  left=1.4pt,right=1.4pt,top=0.1pt,bottom=0.1pt,%
+  boxrule=0.3pt%
+}
+
+% Coloured box for the "Key: XX" text on the keyline of song prelude
+\newtcbox{\ulsbs@mainkeybox}[1][.]{%
+  on line,%
+  valign=bottom,%
+  arc=3pt,%outer arc=3pt,%
+  colback=#1!8!white,colframe=#1!92!black,%
+  boxsep=0pt,%
+  left=1.4pt,right=1.4pt,top=0.1pt,bottom=0.1pt,%
+  boxrule=0.5pt,%
+  %equal height group=preludekeyheightgroup%
+}
+
+% Coloured box for the good keys, "Good: Am (Am--Bm)", text on the keyline
+% of song prelude
+\newtcbox{\ulsbs@goodkeysbox}[1][.]{%
+  on line,%
+  valign=bottom,%
+  arc=3pt,%outer arc=3pt,%
+  colback=#1!5!white,colframe=#1!94!black,%
+  boxsep=0pt,%
+  left=1.4pt,right=1.4pt,top=0.1pt,bottom=0.1pt,%
+  boxrule=0.5pt,%
+  %equal height group=preludekeyheightgroup%
+}
+
+% Coloured box for tags in the song prelude
+\newtcbox{\ulsbs@tagsbox}[1][.]{%
+  on line,%
+  valign=bottom,%
+  arc=1pt,%outer arc=2pt,%
+  colback=#1!5!white,colframe=#1!94!black,%
+  boxsep=0pt,%
+  left=1.3pt,right=1.3pt,top=0.1pt,bottom=0.1pt,%
+  boxrule=0.5pt,%
+  %equal height group=preludekeyheightgroup%
+}
+
+% === Column break and stanza spacing policy ===
+
+% Force a column break
+\newcommand{\forcebrk}{%
+  \ulBreakPenalty=-10000\brk%
+}
+
+% Strongly suggest a column break
+\newcommand{\hardbrk}{%
+  \ulBreakPenalty=-500\brk%
+}
+
+% Layout: column/page break penalties (<=-10000 forces a break).
+% Check stanza/column break behavior when changing them. Pagination may evolve
+% with styling; unchanged historical page counts are not a runtime requirement.
+\ulSongPenalty=0     % between songs
+\ulVerseVersePenalty=200  % between verse and verse
+\ulBreakPenalty=50  % for \brk
+\interlinepenalty=1000 % between in-verse lines
+\newcount\ulGluePenalty%
+\ulGluePenalty=950 % between verses glued together with \glueverses (default here: 950)
+\newcount\ulBlockPenalty%
+\ulBlockPenalty=0 % between (and before the song's first) in-song blocks (default here: 0)
+\newcount\ulTranslationVersePenalty%
+\ulTranslationVersePenalty=900 % between translation verses (when \nextverse is called)
+
+% Do not use verse numbers
+\ulNoVerseNumbers

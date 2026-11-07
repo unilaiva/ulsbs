@@ -1,0 +1,4 @@
+circle|piiri
+earth|maa
+fire|tuli
+Ääni|sound

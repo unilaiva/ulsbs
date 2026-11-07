@@ -1,0 +1,107 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Chapter corner marks.
+% This file is part of the 'ulsbs' package.
+%
+% Requires TikZ/calc and style defaults.
+% Loaded with @ a letter, before header-style setup; no song-lifecycle dependency.
+% Owns mark dimensions, dashed flag and ccm@ drawing scratch. The surrounding
+% style updates chapter color/dashed state; this file installs no chapter hooks.
+% Header/footer callers draw overlays for the page being built, not while song
+% source is captured. Geometry defaults/segment length are computed at load time.
+
+\ProvidesFile{ulsbs-chapter-marks.code.tex}[ULSBS chapter corner marks]
+
+% Setup the colored chapter corner mark for all pages within ulMainChapters.
+%
+% \ulChapterCornerMarkOffset should be at least 2mm to leave room for imprecise
+% cutting of the page. \ulChapterCornerMarkOffset + \ulChapterCornerMarkWidth should
+% be less than 4 mm, so that the whole mark is left outside of printer margins
+% when printing on home printer to a paper that requires no cutting.
+\newdimen\ulChapterCornerMarkOffset\ulChapterCornerMarkOffset=2.5mm%
+\newdimen\ulChapterCornerMarkWidth\ulChapterCornerMarkWidth=.954915mm% 2.5 * 0.618034^2 :)
+\newdimen\ulChapterCornerMarkLength\ulChapterCornerMarkLength=\dimexpr\ulTopMargin+\ulHeadHeight-\ulChapterCornerMarkOffset\relax%
+% Gap count (must be >0): 2 gaps -> 5 segments -> gaps are segments 2 and 4
+\newcount\ulChapterCornerMarkDashCount\ulChapterCornerMarkDashCount=2%
+% Tweak: makes white gaps thicker than the mark:
+\newdimen\ulChapterCornerMarkDashOversize\ulChapterCornerMarkDashOversize=.2pt%
+
+% Set this to true to have dashed chapter corner marks. The surrounding style's
+% chapter setup resets it to false; this module only reads the flag when drawing.
+\ulsbs@newbool\ifulChapterCornerMarkDashed\ulsbs@chapcornermarkdashedtrue\ulsbs@chapcornermarkdashedfalse\ulChapterCornerMarkDashed\ulsbs@chapcornermarkdashedfalse
+
+% Corner mark's segment length = marklength / (2*dashcount + 1)
+\newdimen\ulsbs@ccm@segdim\ulsbs@ccm@segdim=\dimexpr
+  \ulChapterCornerMarkLength / \numexpr 2*\ulChapterCornerMarkDashCount + 1\relax
+\relax
+
+\newdimen\ulsbs@ccm@halfw
+
+% Corner mark style
+\tikzset{
+  ulsbs@ccm@mark/.style={
+    draw=\ulsbs@currentchaptercolor,
+    line width=\ulChapterCornerMarkWidth,
+    line cap=butt,
+    dash phase=0pt, % default: 0pt
+  },
+  ulsbs@ccm@solid/.style={dash pattern=},
+  ulsbs@ccm@dashed/.style={dash pattern=on \ulsbs@ccm@segdim off \ulsbs@ccm@segdim},
+}
+
+% Draws one chapter corner mark.
+% #1 = anchor (north east / north west / south east / south west)
+% #2 = x sign: + or -
+% #3 = y sign: + or -
+% Requires: \usetikzlibrary{calc}
+% Assumes: \ulChapterCornerMarkOffset \ulChapterCornerMarkWidth \ulChapterCornerMarkLength
+%          \ulChapterCornerMarkDashCount \ifulChapterCornerMarkDashed,
+%          \ulsbs@currentchaptercolor, \newdimen\ulsbs@ccm@segdim, \newdimen\ulsbs@ccm@halfw
+% Emits TikZ paths inside the caller's picture; updates ccm@ scratch definitions
+% and half-width locally to the current TeX group. No page space is reserved.
+\newcommand*\ulChapterCornerMark[3]{%
+  % #2 and #3 must be + or -
+  % Opposite signs (for shifting by -sign * halfwidth)
+  \def\ulsbs@ccm@xopp{+}\ifx#2+\def\ulsbs@ccm@xopp{-}\fi
+  \def\ulsbs@ccm@yopp{+}\ifx#3+\def\ulsbs@ccm@yopp{-}\fi
+  \coordinate (ulsbs@ccm@base) at
+    ($ (current page.#1) + (#2\ulChapterCornerMarkOffset, #3\ulChapterCornerMarkOffset) $);
+  \ifulChapterCornerMarkDashed
+    \def\ulsbs@ccm@dashstyle{ulsbs@ccm@dashed}%
+  \else
+    \def\ulsbs@ccm@dashstyle{ulsbs@ccm@solid}%
+  \fi
+  %%% Alternative rounded elbow cap:
+  %%\fill[\ulsbs@currentchaptercolor]
+  %%  (ulsbs@ccm@base) circle[radius=.5\ulChapterCornerMarkWidth];
+  % Square elbow cap:
+  % Shift by (-#2*halfw, -#3*halfw) so the square is centered on the corner.
+  \ulsbs@ccm@halfw=\dimexpr\ulChapterCornerMarkWidth/2\relax
+  \fill[\ulsbs@currentchaptercolor]
+   ($ (ulsbs@ccm@base) + (\ulsbs@ccm@xopp\ulsbs@ccm@halfw, \ulsbs@ccm@yopp\ulsbs@ccm@halfw) $)
+   rectangle ++(#2\ulChapterCornerMarkWidth,#3\ulChapterCornerMarkWidth);
+  % Two legs, solid or dashed according to the flag (dashes start at the corner):
+  \draw[ulsbs@ccm@mark,\ulsbs@ccm@dashstyle]
+    (ulsbs@ccm@base) -- ++(#2\ulChapterCornerMarkLength,0);
+  \draw[ulsbs@ccm@mark,\ulsbs@ccm@dashstyle]
+    (ulsbs@ccm@base) -- ++(0,#3\ulChapterCornerMarkLength);
+}
+
+% Creates chapter corner marks on the outer corners of the page
+% #1 = which side is outer?  R (odd pages) or L (even pages)
+% Emits a zero-layout-space remembered TikZ overlay only when chapter colors are
+% enabled. Caller supplies page parity; this macro does not advance page state.
+\newcommand*\ulChapterCornerMarksOuter[1]{%
+  \ifulUseChapterColors
+    \begin{tikzpicture}[overlay,remember picture]
+      \ifx#1R
+        \ulChapterCornerMark{north east}{-}{-}%
+        \ulChapterCornerMark{south east}{-}{+}%
+      \else
+        \ulChapterCornerMark{north west}{+}{-}%
+        \ulChapterCornerMark{south west}{+}{+}%
+      \fi
+    \end{tikzpicture}%
+  \fi
+}

@@ -1,0 +1,35 @@
+\input regression-test.tex
+\documentclass{ulsbs-songbook}
+\newcount\ChordEffects
+\newcommand\ChordEffect{\global\advance\ChordEffects1 Text}
+\makeatletter
+\def\SB@setchord#1{\errmessage{Vendor chord builder reached}}
+\def\SB@dotranspose#1{\errmessage{Vendor transposer reached}}
+\def\SB@rechord{\errmessage{Vendor replay reached}}
+\makeatother
+\ExplSyntaxOn
+\tl_new:N \g_chord_probe_tl
+\NewDocumentCommand\ChordProbe{}
+  {\__ulsbs_music_transpose:nN {C~F~G}\l_tmpa_tl
+   \tl_gset_eq:NN \g_chord_probe_tl \l_tmpa_tl}
+\ExplSyntaxOff
+\begin{document}
+\begin{ulSongs}{}
+\beginsong{Owned music}[key={D}]
+\transpose{2}\ChordProbe
+\beginverse*+
+\[<* C;E>C]{\ChordEffect Anchor} \[G]Tail.
+\endverse
+\beginverse*+
+^{\ChordEffect ReplayAnchor} ^Tail.
+\endverse
+\endsong
+\end{ulSongs}
+\START
+\TYPE{effects=\the\ChordEffects}
+\ExplSyntaxOn
+\TYPE{transposed=\tl_to_str:V \g_chord_probe_tl}
+\TYPE{remaining-replay=\seq_count:N \g__ulsbs_chord_replay_seq}
+\ExplSyntaxOff
+\END
+\end{document}

@@ -1,0 +1,12 @@
+\begin{ulIndexBlock}{circle}
+\ulIndexDisplayEntry{}{\ulSongLink{song1-3.0}{3}}
+\end{ulIndexBlock}
+\begin{ulIndexBlock}{earth}
+\ulIndexDisplayEntry{}{\ulSongLink{song1-20.0}{20}\\\ulSongLink{song2-2.0}{2}}
+\end{ulIndexBlock}
+\begin{ulIndexBlock}{fire}
+\ulIndexDisplayEntry{}{\ulSongLink{song1-20.0}{20}}
+\end{ulIndexBlock}
+\begin{ulIndexBlock}{Ääni}
+\ulIndexDisplayEntry{}{\ulSongLink{song1-4.0}{4}}
+\end{ulIndexBlock}

@@ -3,14 +3,14 @@
 \newsavebox{\DelayedAlternative}
 \newsavebox{\DiscardedNotation}
 \ExplSyntaxOn
-\cs_new_eq:NN \MarkLayer \UL_pdf_mark:nn
+\cs_new_eq:NN \MarkLayer \__ulsbs_pdf_mark:nn
 \ExplSyntaxOff
 \begin{document}
 \pagestyle{empty}
 Preliminary page.
 \clearpage
 \pagenumbering{roman}
-\begin{songs}{}
+\begin{ulSongs}{}
 \beginsong{Shared First}[id={shared}]
 \beginverse
 \[<C D>C]First song.
@@ -34,7 +34,7 @@ No pitched annotations.
 No shipped pitched annotations.
 \endverse
 \endsong
-\end{songs}
+\end{ulSongs}
 \clearpage
 This intervening page has no optional content.
 \clearpage

@@ -1,22 +1,9 @@
 \pdfvariable compresslevel=0
 \pdfvariable objcompresslevel=0
 \documentclass[paper={a5paper},maintitle={Repeat Break Test}]{ulsbs-songbook}
-\makeatletter
-% Production repeats are intentionally unbreakable. Relax that policy only in
-% this fixture to exercise physical page and column segmentation at shipout.
-\def\SB@par{%
-  \ifhmode
-    \SB@cnt\interlinepenalty
-    \interlinepenalty\@M
-    \endgraf
-    \interlinepenalty\SB@cnt
-    \penalty0
-  \fi
-}
-\makeatother
 \begin{document}
-\songcolumns{2}
-\begin{songs}{}
+\ulSongColumns{2}
+\begin{ulSongs}{}
 \beginsong{Repeat Break Test}
   \beginverse
     \beginrep
@@ -85,5 +72,5 @@
     \endrep
   \endverse
 \endsong
-\end{songs}
+\end{ulSongs}
 \end{document}

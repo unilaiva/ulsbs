@@ -1,0 +1,110 @@
+\documentclass[paper={a5paper},maintitle={Source Effects}]{ulsbs-songbook}
+\providecommand{\SourceEffectsLyrics}{false}
+\newcount\SourceEffectCount
+\newcommand{\SourceEffect}{\global\advance\SourceEffectCount by 1\relax}
+\newcommand{\SourceEffectsSong}{%
+  \SourceEffect
+  \typeout{SOURCE-SONG:\theulSongNumber}%
+}
+\begin{document}
+\ExplSyntaxOn
+\str_if_eq:eeT {\SourceEffectsLyrics}{true}{\chordsoff}
+\ExplSyntaxOff
+\ulSongColumns{1}
+\begin{ulSongs}{}
+\ulSongChapter{First Chapter}
+\beginsong{}[id={source-effects-empty},key={C}]
+  \SourceEffectsSong
+  \beginverse
+    \[C]EmptyTitleAnchor \[G]with a chordless tail.
+  \endverse
+\endsong
+\beginsong{A}[id={source-effects-short},key={F#m},by={Fixture Author},
+  cr={Fixture Copyright},ph={II},gk={Am, B&}]
+  \SourceEffectsSong
+  \beginverse
+    \[C]\[G]AdjacentAnchor \[F#m/C#]slash \[B&]flat \[C#]sharp.
+    \[C]sylla\[G]ble hy\[Am]phen-\[E7]ation \[F]{grouped lyric words}.
+    \[C\kern.5em]SpaceAnchor \[C\textsuperscript7]suffix
+    \[F\shrp{}m/C\shrp{}]grouped \[F#\symdim7]diminished.
+  \endverse
+  \beginverse*[2]
+    IndentedStarAnchor \[Am]explicit\ \[G]space and \[C]a chordless segment.
+    A source newline starts this line; a percent keeps these words joined:%
+    JoinedAnchor and escaped \& \% \# remain literal.
+  \endverse
+\endsong
+\beginsong{A deliberately long title with many words and a final phrase}[id={source-effects-long},key={Am}]
+  \SourceEffectsSong
+  \newchords{sourceeffectsmemory}
+  \beginverse\memorize[sourceeffectsmemory]
+    |\[Am]StoredAnchor |\[E7]second |\[Am]third.
+  \endverse
+  \transpose{2}
+  \beginverse\replay[sourceeffectsmemory]
+    |^ReplayAnchor |^second |^third.
+  \endverse
+  \beginverse[1]
+    \[C]WrappingAnchor this deliberately extended lyric line contains enough words to wrap at the song width while preserving chord alignment over the middle \[G]syllables and the final words.
+  \endverse
+  \musicnote{MusicNoteAnchor with inline \ac{1}{C} and a musical instruction.}
+  \beginverse
+    \altchords{|C |\ac{2}{G} |\notrans{Am}} AlternateAnchor
+    \beginrep
+      \[C]OuterRepeatAnchor
+      \beginrep \[G]InnerRepeatAnchor \endrep
+      \[Am]RepeatTailAnchor
+    \endrep
+  \endverse
+  \brk
+  \beginverse*
+    AfterBreakAnchor \[D]on the next song segment.
+  \endverse
+\endsong
+\end{ulSongs}
+\begin{ulSongs}{}
+\ulSongChapter{Second Chapter}
+\beginsong{Cora\c{c}\~ao, luz e ora\c{c}\~ao}[id={source-effects-accented},key={D&},by={Jos\'e da Silva}]
+  \SourceEffectsSong
+  \beginverse+
+    \[<* C D;E F @ .3em>Am]MelodyAnchor \[<A _ C;E _ G>]rest slots.
+    \[<!C>]ZeroAdvanceAnchor \[</>Am]unpitched \[<* @ 1em>]beat only.
+    \[<C>]\[<D>]AdjacentMelodyAnchor
+  \endverse
+  {\ulMelodyStyleMapping{swapped}\ulMelodySecondaryPosition{below}
+    \beginverse*+[2]
+      \[<C# D&;A C>Am7]SwappedAnchor \[<C @ -.4em>]negative offset.
+    \endverse}
+  \notesoff
+  \beginverse+[1]
+    \[<* C>G]HiddenNotesAnchor with a visible beat.
+  \endverse
+  \noteson\beatsoff
+  \beginverse+
+    \[<* C>G]HiddenBeatsAnchor with a visible note.
+  \endverse
+  \notesoff
+  \beginverse*+
+    \[<* C>G]HiddenBothAnchor keeps only its chord.
+  \endverse
+  \noteson\beatson
+\endsong
+\beginsong{Suomi, Portugu\^es, Espa\~nol, Fran\c{c}ais}[id={source-effects-languages},key={G}]
+  \SourceEffectsSong
+  \beginverse
+    \[G]LanguageAnchor hyv\"a\"a y\"ot\"a, cora\c{c}\~ao, ma\~nana, lumi\`ere.
+    {\SourceEffect GroupedEffectAnchor} preserves source evaluation.
+  \endverse
+\endsong
+\beginsong{Standard Title}[id={source-effects-standard},key={C}]
+  \SourceEffectsSong
+  \beginverse
+    \[C]FinalAnchor \[G]ordinary numbered verse.
+  \endverse
+  \beginverse*
+    UnnumberedAnchor without a chord.
+  \endverse
+\endsong
+\end{ulSongs}
+\typeout{SOURCE-EFFECTS:\the\SourceEffectCount}
+\end{document}

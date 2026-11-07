@@ -66,6 +66,8 @@ def score_layer_drawings(pdf, *, generic=False):
 
 
 class LilyPondScoreIntegrationTests(unittest.TestCase):
+    backend_preamble = ""
+
     def test_generated_minimum_scale_controls_real_tex_graphic_fallback(self):
         if shutil.which('lualatex') is None:
             self.skipTest('lualatex is not installed')
@@ -244,13 +246,14 @@ class LilyPondScoreIntegrationTests(unittest.TestCase):
                 (root / child).mkdir()
             doc = root / 'ul-selection_score_A5.tex'
             doc.write_text(
-                r'\documentclass[maintitle={Score Milestone}]{ulsbs-songbook}' + '\n'
-                r'\begin{document}\begin{songs}{}' + '\n'
+                self.backend_preamble
+                + r'\documentclass[maintitle={Score Milestone}]{ulsbs-songbook}' + '\n'
+                r'\begin{document}\begin{ulSongs}{}' + '\n'
                 r'\input{content/song.tex}' + '\n'
                 r'\input{content/song.tex}' + '\n'
                 r'\input{content/custom.tex}' + '\n'
                 r'\input{content/long.tex}' + '\n'
-                r'\end{songs}\end{document}' + '\n',
+                r'\end{ulSongs}\end{document}' + '\n',
                 encoding='utf-8',
             )
             song = (

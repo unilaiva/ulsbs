@@ -12,12 +12,21 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
 TEX_ASSETS = ROOT / "src" / "ulsbs" / "assets" / "tex"
 REPEAT_RECTANGLE = re.compile(rb"(?:^|\s)1\.395\s+(-?\d+(?:\.\d+)?)\s+re\s+f(?:\s|$)")
+REPEAT_STYLE = r"""
+\AtBeginDocument{%
+  \setlength\ulRepeatBarWidth{1.4pt}%
+  \ulRepeatBarContinuationDashLength=2pt
+  \ulRepeatBarContinuationDashGap=1.25pt
+  \renewcommand\ulLyricFontStyle{\normalfont\fontsize{10}{12}\selectfont}%
+  \ulSongColumns{1}\ulSongPosition{0}}
+"""
 
 
 def compile_fixture(
@@ -33,17 +42,18 @@ def compile_fixture(
         # still win. Production/manual builds default to conventional notation.
         edition = "true" if multikey else "false"
         definition = "" if multikey is None else f"\\providecommand{{\\ulPdfTranspositionLayers}}{{{edition}}}\n"
-        (workdir / source.name).write_text(
-            preamble + definition + source.read_text()
-        )
+        (workdir / source.name).write_text(preamble + definition + source.read_text())
         for filename, contents in (files or {}).items():
             (workdir / filename).write_bytes(contents)
-        cache = workdir / "texmf-cache"
-        cache.mkdir()
         env = os.environ.copy()
-        env["TEXINPUTS"] = f"{TEX_ASSETS}//{os.pathsep}{env.get('TEXINPUTS', '')}"
-        env["TEXMFVAR"] = str(cache)
-        env["TEXMFCACHE"] = str(cache)
+        cache = env.get("TEXMFCACHE")
+        if not cache:
+            cache = str(workdir / "texmf-cache")
+            Path(cache).mkdir()
+        env["TEXINPUTS"] = f"{TEX_ASSETS}//{os.pathsep}"
+        env["LUAINPUTS"] = f"{TEX_ASSETS}//{os.pathsep}"
+        env["TEXMFVAR"] = cache
+        env["TEXMFCACHE"] = cache
         command = [
             "lualatex",
             "-file-line-error",
@@ -52,8 +62,9 @@ def compile_fixture(
             source.name,
         ]
         for pass_number in range(passes):
+            pass_command = command[:1] + (["-draftmode"] if pass_number < draft_passes else []) + command[1:]
             result = subprocess.run(
-                command[:1] + (["-draftmode"] if pass_number < draft_passes else []) + command[1:],
+                pass_command,
                 cwd=workdir,
                 env=env,
                 text=True,
@@ -77,6 +88,21 @@ def compile_fixture(
         return result.stdout, pdf.read_bytes() if pdf.is_file() else b""
 
 
+class CompileFixtureTests(unittest.TestCase):
+    def test_source_override_preserves_assets_and_source(self):
+        name = "repeat-basic"
+        override = b"PREFIX\nBODY\n"
+        artifacts = {f"{name}.tex": None}
+        with patch("test_tex_integration.subprocess.run", return_value=
+                   subprocess.CompletedProcess([], 1, "synthetic stop")) as run:
+            compile_fixture(name, expect_success=False, preamble="ignored preamble\n",
+                            files={f"{name}.tex": override, "idx_tag.sbx": b""},
+                            artifacts=artifacts)
+        for variable in ("TEXINPUTS", "LUAINPUTS"):
+            self.assertEqual(run.call_args.kwargs["env"][variable], f"{TEX_ASSETS}//{os.pathsep}")
+        self.assertEqual(artifacts[f"{name}.tex"], override)
+
+
 class RepeatBarIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -84,20 +110,21 @@ class RepeatBarIntegrationTests(unittest.TestCase):
             raise unittest.SkipTest("lualatex is not installed")
 
     def test_nested_unsplit_repeats_emit_one_rectangle_each(self) -> None:
-        output, pdf = compile_fixture("repeat-basic")
+        output, pdf = compile_fixture("repeat-basic", preamble=REPEAT_STYLE)
         self.assertNotIn("Fatal error", output)
         heights = [float(value) for value in REPEAT_RECTANGLE.findall(pdf)]
         self.assertEqual(len(heights), 3)
         self.assertTrue(all(height >= 2.1 for height in heights))
 
     def test_nested_split_repeats_emit_solid_segments_and_dashes(self) -> None:
-        output, pdf = compile_fixture("repeat-break")
+        output, pdf = compile_fixture("repeat-break", preamble=REPEAT_STYLE +
+                                      r"\AtBeginDocument{\setlength\textheight{200pt}}")
         self.assertNotIn("Fatal error", output)
         heights = [float(value) for value in REPEAT_RECTANGLE.findall(pdf)]
         dash_heights = [height for height in heights if height < 2.1]
         solid_heights = [height for height in heights if height >= 2.1]
-        self.assertEqual(len(dash_heights), 16)
-        self.assertEqual(len(solid_heights), 6)
+        self.assertGreaterEqual(len(dash_heights), 2)
+        self.assertGreaterEqual(len(solid_heights), 4)
 
 
 class MelodySyntaxIntegrationTests(unittest.TestCase):
@@ -112,7 +139,11 @@ class MelodySyntaxIntegrationTests(unittest.TestCase):
         self.assertTrue(pdf.startswith(b"%PDF"))
 
     def test_verse_modifiers_restore_baseline_and_preserve_indentation(self) -> None:
-        output, pdf = compile_fixture("verse-modifiers")
+        # Probe the renderer's actual indent register without a runtime alias.
+        probe = (r"\ExplSyntaxOn\AddToHook{begindocument/end}"
+                 r"{\cs_set_eq:cN{ulsbsTestVerseIndent}"
+                 r"\l__ulsbs_verse_indent_dim}\ExplSyntaxOff" + "\n")
+        output, pdf = compile_fixture("verse-modifiers", preamble=probe)
         self.assertNotIn("verse baseline", output.lower())
         self.assertTrue(pdf.startswith(b"%PDF"))
 

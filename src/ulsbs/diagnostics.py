@@ -96,7 +96,6 @@ def parse_tool_warnings(
     aliases = {
         "Audio": ("ulsbs-midi2audio", "fluidsynth", "ffmpeg"),
         "Images": ("pdftoppm", "magick", "convert"),
-        "Index": ("songidx", "texlua"),
         "ConTeXt": ("context", "contextjit"),
     }
     prefix = "|".join(re.escape(name) for name in (source, *aliases.get(source, ())))

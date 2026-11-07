@@ -1,7 +1,7 @@
 \input regression-test.tex
 \documentclass[paper={a5paper},maintitle={Repeat Regression}]{ulsbs-songbook}
 \begin{document}
-\begin{songs}{}
+\begin{ulSongs}{}
 \beginsong{Repeat Regression}
   \beginverse
     \beginrep
@@ -13,19 +13,21 @@
     \endrep
   \endverse
 \endsong
-\end{songs}
+\end{ulSongs}
 \START
 \makeatletter
 \TYPE{engine=LuaTeX}
-\TYPE{repeat-level=\the\UL@rep@level}
-\TYPE{repeat-occurrences=\the\UL@rep@serial}
-\TYPE{dash-length=\the\repbarcontinuationdashlengthdimen}
-\TYPE{dash-gap=\the\repbarcontinuationdashgapdimen}
+\TYPE{repeat-level=\the\ulsbs@rep@level}
+\TYPE{repeat-occurrences=\the\ulsbs@rep@serial}
+\ulRepeatBarContinuationDashLength=2pt
+\ulRepeatBarContinuationDashGap=1.25pt
+\TYPE{dash-length=\the\ulRepeatBarContinuationDashLength}
+\TYPE{dash-gap=\the\ulRepeatBarContinuationDashGap}
 \setbox0=\vbox{Marker before\par}
-\UL@rep@level=1
-\expandafter\def\csname UL@rep@id@1\endcsname{1}
-\setbox2=\vbox{Marker before\par\UL@rep@endmarker}
-\UL@rep@level=0
+\ulsbs@rep@level=1
+\expandafter\def\csname ulsbs@rep@id@1\endcsname{1}
+\setbox2=\vbox{Marker before\par\ulsbs@rep@endmarker}
+\ulsbs@rep@level=0
 \TYPE{marker-height-delta=\the\dimexpr\ht2-\ht0\relax}
 \TYPE{marker-depth-delta=\the\dimexpr\dp2-\dp0\relax}
 \TYPE{marker-last-penalty=\the\lastpenalty}

@@ -5,13 +5,11 @@ For installation, your first complete project, compiler options, and output
 variants and editions, start with the [README](README.md). Engine internals
 belong in [Architecture](ARCHITECTURE.md).
 
-ULSBS builds on LaTeX, LilyPond, and Kevin W. Hamlen's `songs` LaTeX package.
-The examples below use ULSBS's current syntax. The underlying
-[`songs` documentation](https://songs.sourceforge.net/songsdoc/songs.html)
-is useful additional reading; its PDF is also bundled at
-[`misc/ext_package_songs_distribution/songs.pdf`](misc/ext_package_songs_distribution/songs.pdf).
-Where this guide describes ULSBS-specific syntax, use it rather than an older
-`songs` example, especially for melody hints and repeat markup.
+Song-content notation uses short lowercase commands; configuration, book assembly,
+fonts and metadata accessors use `ulCamelCase` names. Public boolean settings take
+an explicit `{true}` or `{false}` argument and respect TeX grouping. Use the
+commands documented here when writing new sources; see
+[syntax migration](README.md#ulsbs-migrate-syntax-v2) when upgrading existing ones.
 
 ## Contents
 
@@ -34,21 +32,24 @@ Where this guide describes ULSBS-specific syntax, use it rather than an older
   - [Converting LilyPond lyrics](#converting-lilypond-lyrics)
 - [Book organization](#book-organization)
 - [Tags and indices](#tags-and-indices)
+  - [Author names](#author-names)
   - [Defining your own tags](#defining-your-own-tags)
+- [Manual LuaLaTeX builds](#manual-lualatex-builds)
 - [Creating song selections](#creating-song-selections)
 - [Layout and style reference](#layout-and-style-reference)
   - [`ulsbs-songbook` document class options](#ulsbs-songbook-document-class-options)
   - [Preamble configuration after loading the class](#preamble-configuration-after-loading-the-class)
+- [Extension points](#extension-points)
 
 ## Your first song
 
-Put song definitions inside a `songs` environment in the main document, either
-directly or through `\input{content/songs_main.tex}`:
+Put song definitions inside a `ulSongs` environment in the main document, either
+directly or through an input file like `\input{content/songs_main.tex}`:
 
 ```tex
-\begin{songs}{titleidx,authidx,tagidx}
-\input{content/songs_main.tex}
-\end{songs}
+\begin{ulSongs}{titleidx,authidx,tagidx}
+  \input{content/songs_main.tex}
+\end{ulSongs}
 ```
 
 The included file contains songs, not another `\documentclass` or
@@ -78,6 +79,15 @@ Ordinary LaTeX text rules still apply: `%` starts a comment, and literal text
 characters such as an ampersand must be escaped (`\&`). Musical accidental
 contexts have special `#` and `&` rules described below.
 
+Printed song numbering starts at 1 in each `ulSongs` environment and advances
+by one after each song. Chapter headings do not reset it. To give the next song
+a specific number, set `ulSongNumber` inside the environment, before that song's
+`\beginsong` command. For example, `\setcounter{ulSongNumber}{1}` restarts numbering
+at 1.
+
+Printed song numbers and their formatting are independent of stable song IDs
+and repeated-song occurrence identities.
+
 Compile the main document, not the included song file:
 
 ```sh
@@ -93,7 +103,7 @@ and `\beginverse*+[n]`. Combined modifiers must appear in the order
 `*`, then `+`, then `[n]`.
 
 - `*` makes the verse unnumbered.
-- `[n]` indents the whole verse by `n` times `\verseindentwidthbase` (default `1em`).
+- `[n]` indents the whole verse by `n` times `\ulVerseIndentWidth` (default `1em`).
 - `+` increases lyric-line spacing for melody notes beyond the first line when
   chords and melody notes are visible. Normal spacing returns at `\endverse`.
 
@@ -131,9 +141,24 @@ Use `\ac{<repetition>}{<chord>}` for repetition-specific alternatives:
 The alternatives have superscript repetition numbers. Balanced brace arguments
 are required; the former `\ac<1>{Em}` form is not supported.
 
-The `songs` package can memorize and replay chord sequences with `^` in later
-verses. ULSBS also replays melody/beat annotations; see
+ULSBS can memorize and replay chord sequences with `^` in later
+verses, including melody/beat annotations; see
 [replay and spacing](#replay-advance-and-whitespace) for the detailed rules.
+The first stanza records the default chord register and later stanzas replay it;
+the default resets at each song. `\memorize` explicitly clears and records a
+register, and `\replay` rewinds the current one. For named sequences, declare
+`\newchords{bridge}`, then use `\memorize[bridge]` and `\replay[bridge]`.
+Memory stores raw annotations, so replay uses the current transposition and
+visibility/style settings. An unknown register or exhausted replay is an error.
+Each stanza starts with the default register; select a named register again in
+each stanza that needs it.
+
+Annotations are TeX tokens, not plain strings. The first ungrouped `]` closes
+the annotation; balanced groups, slash basses, typography commands and explicit
+spacing remain intact. `\[C]\[G]word` places sequential adjacent annotations;
+`sylla\[Am]ble` anchors within a word, and `\[C]{grouped words}` retains the
+group. Use separate adjacent annotations for separate melody blocks, not multiple
+blocks within one annotation.
 
 ### Alternate chord sets
 
@@ -146,8 +171,8 @@ labels it, and `\ac{<n>}{<chord>}` identifies a repetition-specific chord:
 
 Standalone alternate sets do not switch with multikey PDF layers and do not
 follow source `\transpose` by default. Enable source transposition explicitly
-with `\transposealtchordstrue`; restore the default with
-`\transposealtchordsfalse`.
+with `\ulTransposeAltChords{true}`; restore the default with
+`\ulTransposeAltChords{false}`.
 
 When enabled, plain chords and chord-like content inside `\id` and `\ac` follow
 the current interval. Write accidentals as `#` and `&`; `\shrp` and `\flt` are
@@ -156,7 +181,7 @@ must remain unchanged with `\notrans{...}`:
 
 ```tex
 \transpose{2}
-\transposealtchordstrue
+\ulTransposeAltChords{true}
 \altchords{\id[1]{alt. (C)}|C |\ac{2}{D} |\notrans{E}}
 ```
 
@@ -218,12 +243,19 @@ They can be nested:
 
 `\prep{<n>}` puts a repeat count on its own line after `\beginrep`.
 `\goto{Beginning words of the verse}` marks a jump target by text.
-ULSBS does not use the original `songs` package's `\beginchorus` / `\endchorus`
-environments for repeat markup.
+
+Use verses for all lyric stanzas and explicit repeat regions within them for
+repeat markup.
 
 ## Page and line breaks
 
-The `songs` package handles most line and page breaking automatically.
+Within a verse, each source newline ends a lyric line; long source lines can wrap.
+Braces, spaces and `%` comments affect how the source is read and spaced, so take
+care when reformatting lyrics. Chord placement and minimum annotation widths also
+affect where lyrics wrap.
+Hidden alternate PDF layers in optional MULTIKEY editions never reserve extra
+space: the effective original notation alone determines line and page geometry.
+
 Use `\brk` within a lyric line to suggest a line break. Between verses or
 songs, it suggests a page or column break.
 
@@ -322,13 +354,18 @@ value keep commas inside that value from being read as field separators:
 | `off` | Offered-to / dedication text in the prelude |
 | `ph` | Phase information, if useful for your collection |
 | `tags` | Comma-separated tags; see [Tags and indices](#tags-and-indices) |
-| `cr`, `li` | Underlying `songs` copyright and license fields; metadata is not a substitute for permission to publish |
+| `cr`, `li` | Copyright and license fields; metadata is not a substitute for permission to publish |
+| `index`, `ititle` | Additional index entries; repeat the field to add multiple entries |
 
 Only add the optional fields relevant to your book. The
 [visibility switches](#preamble-configuration-after-loading-the-class) control
 which prelude information is displayed. Recommended singing keys (`gk=`) are
 recommendations, not transposition instructions, and do not switch with multikey
 layers.
+
+Unknown metadata keys are errors; declare custom fields with
+[`\ulNewSongKey`](#extension-points). Public metadata values remain available after
+`\endsong` within the surrounding scope, until the next song resets them.
 
 You can associate an external recording with a song using:
 
@@ -361,7 +398,7 @@ handles its own verse layout; use `\nextverse` between translated verses:
 
 The optional language code is uppercase. `EN`, `PT`, and `FI` have explicit
 English, Portuguese, and Finnish handling. Omit the code when no language
-annotation is needed. `\showtranslationfalse` hides all translations;
+annotation is needed. `\ulShowTranslation{false}` hides all translations;
 `\translationoff` / `\translationon` controls them within a song, subject to
 the global switch.
 
@@ -382,8 +419,8 @@ Use a passage for a titled prose section, such as material between songs:
 ```
 
 Use `\begin{passage}*{Title}` (with the same `\end{passage}`) for the alternate,
-note-like style. `\showexplanationfalse` and
-`\showpassagefalse` hide their respective environments. The `feeler` environment
+note-like style. `\ulShowExplanation{false}` and
+`\ulShowPassage{false}` hide their respective environments. The `feeler` environment
 provides another short, styled text block inside a song:
 
 ```tex
@@ -391,6 +428,13 @@ provides another short, styled text block inside a song:
   Quietly, with a steady pulse.
 \end{feeler}
 ```
+
+For a note attached to a stanza boundary, use
+`\attachednote[<skip before>][<skip after>]{Text}`. Both skips default to zero.
+A leading star attaches it to preceding material; without that star it attaches
+to following material. A trailing star suppresses the usual inter-verse glue
+for an unstarred note. This is distinct from the shorter `\textnote{Text}`
+command, not an alias for it.
 
 ## Melody hints and beat marks
 
@@ -446,10 +490,13 @@ natural width:
 
 ### Replay, advance, and whitespace
 
-The leading `^` retains its `songs` replay meaning. `\[^<C>Am]` is excluded
+The leading `^` retains its chord-replay meaning. `\[^<C>Am]` is excluded
 from chord memorization; a bare `^` in lyric text later replays the next saved
 annotation, including its chord, melody, and beats. Note and beat visibility is
 evaluated at replay time.
+While replaying, a leading `^` inside an annotation consumes the next saved
+annotation in the same box. Its saved melody takes precedence over a newly
+written melody prefix; additional chord text still renders in that box.
 
 Layers within one annotation overlay. Its advance is the widest rendered
 layer: a chord can determine it, and a melody-only block reserves its own width.
@@ -470,16 +517,16 @@ notes, and beats do not trigger the minimum. Set it to `0pt` to disable it.
 ### Placement, style, and visibility
 
 Primary and secondary are semantic roles. Scoped
-`\melodyPrimaryPosition{normal}` or `low` selects the primary lane (default:
-`normal`). `\melodySecondaryPosition{above}`, `below`, or `same` selects the
+`\ulMelodyPrimaryPosition{normal}` or `low` selects the primary lane (default:
+`normal`). `\ulMelodySecondaryPosition{above}`, `below`, or `same` selects the
 secondary lane relative to it (default: `above`); `same` is the primary lane.
 With a low primary, `above` is the normal lane and `below` may overlap lyrics.
 
-Set styles independently with `\melodyStyleMapping{normal}` (primary uses the
-normal style) or `\melodyStyleMapping{swapped}` (primary uses the alternate
+Set styles independently with `\ulMelodyStyleMapping{normal}` (primary uses the
+normal style) or `\ulMelodyStyleMapping{swapped}` (primary uses the alternate
 style). Neither setting changes which sequence is primary.
 
-`\shownotesfalse` and `\notesoff` hide notes; `\showbeatsfalse` and
+`\ulShowNotes{false}` and `\notesoff` hide notes; `\ulShowBeats{false}` and
 `\beatsoff` hide beats. `\noteson` and `\beatson` restore them. Use
 `\beginverse+` for looser spacing when melody hints occur throughout a verse;
 ordinary `\beginverse` is suitable when they occur only on its first line.
@@ -580,17 +627,17 @@ provide the usual front matter and chapters:
 ```tex
 \ulCoverPage{}
 \ulImprintPage
-\ulTOC
+\ulToc
 
 \ulMainChapter{Morning Songs}{blue}
-\begin{songs}{titleidx,authidx,tagidx}
+\begin{ulSongs}{titleidx,authidx,tagidx}
 \input{content/songs_morning.tex}
-\end{songs}
+\end{ulSongs}
 
 \ulMainChapter{Evening Songs}{violet}
-\begin{songs}{titleidx,authidx,tagidx}
+\begin{ulSongs}{titleidx,authidx,tagidx}
 \input{content/songs_evening.tex}
-\end{songs}
+\end{ulSongs}
 ```
 
 `\ulCoverPage{}` generates a title cover; its argument can instead name a cover
@@ -601,40 +648,169 @@ are a useful convention, not a requirement.
 
 ## Tags and indices
 
-The `songs` environment's argument selects which index data to collect.
-The standard index names are `titleidx`, `authidx`, and `tagidx`.
-To display the automatically generated title and tag indices, place these after
-the relevant `songs` environments:
+The `ulSongs` environment requires a comma-separated list of declared index
+identifiers. It actively routes automatic records within that block, not just
+describes which indices to display. The package declares `titleidx`, `authidx`,
+and `tagidx`; these are index names, not filenames or fixed keywords.
+Use `{titleidx,authidx,tagidx}` to collect all three kinds, or omit any destination
+you do not need. `{}` collects no automatic records. An explicit entry can
+override the block's routing, for example `\ulIndexEntry[titleidx]{Other title}`
+inside a song, including one in an empty-list block.
+
+To generate and display all three indices:
 
 ```tex
-\showindex{Song Title Index}{titleidx}
-\showindex{Tag Index}{tagidx}
+\ulShowIndex{Song Title Index}{titleidx}
+\ulShowIndex{Author Index}{authidx}
+\ulShowIndex{Tag Index}{tagidx}
 ```
 
-The compiler generates the title index between LaTeX passes. It generates the
-tag index when `include/tags.can` exists. `authidx` is declared for author-index
-data, but the current compiler does not run its index-generation step; simply
-adding `\showindex{Author Index}{authidx}` is not enough to generate an author
-index automatically. Author-index processing requires a manual `songs` index
-workflow. The table of contents (`\ulTOC`) is separate from these indices.
+For title, author and tag indices, `\ulShowIndex{Heading}{identifier}` displays
+the **whole destination from the previous pass**, regardless of its location
+before, between, or after song blocks. It is not a partial index of only preceding
+songs. Reusing an identifier across blocks accumulates records into the same
+index. For separate chapter or volume indices, declare separate identifiers and
+output names in the preamble, then route each block to its own destinations:
+
+```tex
+\ulNewIndex{morningtitles}{idx_morning_titles}
+\ulNewAuthorIndex{morningauthors}{idx_morning_authors}
+\ulNewTagIndex{morningtags}{idx_morning_tags}
+% In the document:
+\begin{ulSongs}{morningtitles,morningauthors,morningtags}
+  \input{content/songs_morning.tex}
+\end{ulSongs}
+\ulShowIndex{Morning Titles}{morningtitles}
+\ulShowIndex{Morning Authors}{morningauthors}
+\ulShowIndex{Morning Tags}{morningtags}
+```
+
+The constructors take `{identifier}{output-name}`; choose a distinct output name
+without an extension for each custom index. `\ulNewIndex` declares a
+title index, `\ulNewAuthorIndex` declares an author index, and
+`\ulNewTagIndex` declares a tag index. The package-declared destinations are:
+
+| Identifier | Kind |
+|---|---|
+| `titleidx` | Title |
+| `authidx` | Author |
+| `tagidx` | Tag |
+
+Printed song numbering restarts at 1 in each `ulSongs` block, independently of
+index accumulation. Set `ulSongNumber` to override the next number, or use
+`\ulIndexSongsAs{titleidx}{A-\theulSongNumber}` within the block to override that
+index's reference labels without changing printed song numbers or stable IDs.
+`\ulSongIndexes{false}` disables both index collection and index display globally;
+`\ulShowTags{false}` only hides prelude tag badges.
+
+Separate alternate song titles with top-level `\\` in the title argument;
+grouped `\\` remains part of the group. Repeated `index={...}` and
+`ititle={...}` metadata fields add separate index entries in input order.
+
+The compiler generates the requested title, author and tag indices automatically;
+no separate indexing command is needed.
+For manual builds, follow the [pass sequence below](#manual-lualatex-builds)
+and repeat if an index or reference rerun warning remains. A requested
+tag index requires tag definitions; missing definitions and unknown/malformed
+tags are errors rather than silently omitted entries.
+The table of contents (`\ulToc`) is separate from these indices.
+
+### Author names
+
+Use `by=` for one or more names, written exactly as you want them displayed:
+
+```tex
+\beginsong{Shared Song}[by={Alice Smith, Bob Jones; {Family, Given} and Carol Lee}]
+  \beginverse
+    Example lyrics.
+  \endverse
+\endsong
+```
+
+This indexes `Alice Smith`, `Bob Jones`, `Family, Given` (one name), and `Carol Lee`.
+Top-level commas, semicolons and standalone case-insensitive `and` separate names;
+braced groups and TeX arguments protect their contents, and TeX control symbols
+are not separators. Names are preserved **as written**: ULSBS does not guess
+surnames or roles. By default a standalone case-insensitive `by` marker keeps
+only text after its last occurrence in each attribution segment, so
+`Words by Alice; Music by Bob` indexes Alice and Bob. Hyphenated and apostrophe-joined
+words are not standalone markers.
+Empty fields add no entries. Repeated names within one `by=` value are listed once;
+separate uses retain their links, including repeated song selections.
+Identical display names are grouped with their song links, using the same
+deterministic Finnish-compatible/natural sorting as titles. TeX formatting is
+preserved and `\ulIndexAuthorFont` styles entries; author indices have no letter
+heading panels.
+
+Configure author-parsing settings in the preamble. They apply globally, not just
+within the current TeX group. Mid-document changes can affect songs differently
+from what their source order suggests.
+Separator and attribution markers must be single alphabetic words, or empty
+values; ignore settings may name a whole cleaned author. For example:
+
+```tex
+\ulAuthorSepWord{ja}      % First call replaces default "and"; later calls add words.
+\ulAuthorByWord{von}      % First call replaces default "by"; later calls add words.
+\ulAuthorIgnoreWord{Traditional} % Ignore this whole cleaned name, case-insensitively.
+```
+
+An empty first `\ulAuthorSepWord{}` or `\ulAuthorByWord{}` clears its respective
+default; commas and semicolons still separate names. Ignore words match whole
+cleaned candidates, never arbitrary substrings. Custom author indices work the
+same way: declare `\ulNewAuthorIndex{writers}{idx_writers}`, route a block to
+`writers`, then request `\ulShowIndex{Authors}{writers}`. Explicit
+`\ulIndexEntry[authidx]{...}` / `\ulIndexTitleEntry[authidx]{...}` and
+`\ulIndexSongsAs` also work with author destinations.
+
+Title and author sorting is consistent across machines and Finnish-compatible:
+A to Z precede ring-A, umlaut-A and umlaut-O. Case, accents, punctuation and numeric
+prefixes also affect ordering. Supported characters include ASCII, selected
+precomposed accented Latin letters, Sanskrit transliteration characters and
+Persian title letters; not all Unicode characters are supported. An unsupported
+character causes an error identifying its Unicode code point; installing a locale
+will not fix it. Tag groups follow their definition order rather than title
+sorting. Printed index reference labels, persistent song IDs and multikey
+range-page numbers are different concepts.
 
 ### Defining your own tags
 
-Create `include/tags.can` in your project. Each tag definition occupies two
-lines: the name (optionally followed by `|`-separated aliases), then `1`:
+Create `include/tags.txt` in your project. This is ordered UTF-8 plain text,
+not TeX source. Each non-comment line defines a canonical tag, optionally followed
+by `|`-separated aliases:
 
 ```text
+# Tags are displayed in this order.
 light
-1
 love|affection
-1
+% Full-line percent comments are allowed too.
 peace
-1
 ```
 
-The `1` is required by the underlying scripture-index format; it is not shown
-as a tag number. Tags appear in the index in definition-file order, so arrange
-the file as you want the index ordered. An alias indexes under the first name.
+Surrounding whitespace is trimmed from names and aliases. Blank lines and full-line
+`#` or `%` comments are ignored. There are no count lines: do not put `1` after
+definitions or append numbered references to tag names. Tags appear in
+definition-file order, so arrange the file as you want the index ordered. An alias
+indexes under the first (canonical) name.
+
+Names are literal text, not TeX code; special characters are escaped when printed
+in the index. Names and aliases cannot contain the list separators `,` or `;`,
+and a definition cannot consist only of numbers. Matching remains case-insensitive;
+the first definition wins when aliases overlap. An inline `#` or `%` is literal,
+not the start of an inline comment.
+
+By default, lookup checks `include/tags.txt` first, then asks TeX's file lookup
+for `tags.txt`. To choose another filename, put this **preamble-only** setter
+after class loading and before `\begin{document}`:
+
+```tex
+\ulTagFile{my-tags.txt}
+```
+
+An explicit filename is resolved through TeX lookup. If it is missing, the build
+fails; it does not fall back to `include/tags.txt` or `tags.txt`. Legacy `.can`
+parsing is migration-only, not a runtime option. Use the
+[v2 migrator's explicit `--tags-file` option](README.md#ulsbs-migrate-syntax-v2)
+to convert old definitions and rename them to `.txt`.
 
 Use the tag names in song metadata:
 
@@ -646,9 +822,44 @@ Use the tag names in song metadata:
 \endsong
 ```
 
-Use `\showtagsfalse` in the main preamble to hide tag display/usage. A book
-without tags needs no tag-definition file; omit the tag `\showindex` call in
-that case. The compiler may report that tag-index generation was skipped.
+Use `\ulShowTags{false}` in the main preamble to hide tags in song preludes. It does
+not disable tag collection or the tag index. A book without a tag index needs no
+tag-definition file; omit the tag `\ulShowIndex` call in that case.
+
+Indices need multiple LuaLaTeX passes: a first-pass PDF is not final. The normal
+compiler handles reruns before publication. For manual builds, follow the pass
+sequence below and any recovery instructions reported after an interrupted build.
+Do not use `\nofiles` when displaying indices. Concurrent builds require separate
+compile directories.
+
+## Manual LuaLaTeX builds
+
+A standalone book containing lyrics, chords and melody hints can compile
+directly with LuaLaTeX, without Python, LilyPond or an upstream `songs` install.
+Keep all companion ULSBS assets together, not just `ulsbs.sty`. From the project
+root, with the engine checked out in `ulsbs/`, a POSIX-shell setup is:
+
+```sh
+export TEXINPUTS="$(pwd)/ulsbs/src/ulsbs/assets/tex//:$(pwd)/ulsbs/src/ulsbs/assets/img//:$(pwd)/include//:${TEXINPUTS:-}"
+export LUAINPUTS="$(pwd)/ulsbs/src/ulsbs/assets/tex//:${LUAINPUTS:-}"
+lualatex -interaction=nonstopmode -halt-on-error -draftmode my-songbook_A5.tex
+lualatex -interaction=nonstopmode -halt-on-error my-songbook_A5.tex
+lualatex -interaction=nonstopmode -halt-on-error my-songbook_A5.tex
+```
+
+The trailing search-path separator preserves the TeX distribution's default
+package lookup. Use absolute paths and adjust the engine location for another
+checkout; ensure included project sources and images are also discoverable.
+The draft collects index data; the first full pass displays the indices,
+and the second full pass settles references and PDF resources. Repeat full
+passes until rerun warnings disappear. A first-pass PDF is not final; follow any
+reported recovery instructions if a build is interrupted.
+
+This is a TeX build, not a replacement for the Python publication pipeline:
+LilyPond source processing, optional score alternatives, font sharing, range
+packaging, JSON, printouts and media exports are compiler responsibilities. Use
+`ulsbs-compile` for those products. Merely enabling PDF layers in manual TeX does
+not produce a validated `_MULTIKEY_RANGES.json` package.
 
 ## Creating song selections
 
@@ -656,15 +867,18 @@ For a reusable selection, create another main document with the same class,
 needed preamble settings, and song inputs, and add this in its preamble:
 
 ```tex
-\includeonlysongs{3,1,7}
+\ulIncludeOnlySongs{3,1,7}
 ```
 
 This selects **song numbers**, not `id=` values, and uses the selection order
-within a `songs` environment. The numbers refer to the original numbering from
+within a `ulSongs` environment. The numbers refer to the original numbering from
 the included collection; selecting songs does not automatically renumber them
 from 1. Keep the input collection and numbering setup consistent with the source
-book. The command is allowed in the preamble or between `songs` environments,
+book. The command is allowed in the preamble or between `ulSongs` environments,
 not inside one.
+Omitting `\ulIncludeOnlySongs` includes all songs; `\ulIncludeOnlySongs{}` explicitly
+selects none. Unselected song boxes do not contribute shipped index/TOC records,
+although source processing and hooks may already have run.
 
 For a small independent collection, explicitly inputting just the desired song
 files is often simpler than a numbered selection. The Unilaiva repository's
@@ -716,61 +930,103 @@ for the separate `_A5` printout convention.
 ### Preamble configuration after loading the class
 
 Put these commands after `\documentclass{ulsbs-songbook}` and before
-`\begin{document}`. Most visibility settings are boolean switch pairs, not
-commands taking `true` or `false` as an argument:
+`\begin{document}`. Boolean settings take exactly `true` or `false` as an
+argument. Assignments are local to the surrounding TeX group:
 
 ```tex
-\showtagsfalse
-\showgoodkeysfalse
+\ulShowTags{false}
+\ulShowGoodKeys{false}
 \renewcommand{\ulSongEndMark}{*}
 ```
 
-| Toggle pair | Default | Meaning |
+| Setter (`{true}` or `{false}`) | Default | Meaning |
 |---|---|---|
-| `\showextrue` / `\showexfalse` | `true` | Show extra prelude info (`ex=`) |
-| `\showofftrue` / `\showofffalse` | `true` | Show offered-to info (`off=`) |
-| `\showkeytrue` / `\showkeyfalse` | `true` | Show the main musical key |
-| `\showgoodkeystrue` / `\showgoodkeysfalse` | `true` | Show recommended singing keys |
-| `\showphtrue` / `\showphfalse` | `true` | Show phase info in preludes |
-| `\showphintoctrue` / `\showphintocfalse` | `true` | Show phases in the TOC |
-| `\showtagstrue` / `\showtagsfalse` | `true` | Show tags in preludes / tag index usage |
-| `\shownotestrue` / `\shownotesfalse` | `true` | Show melody-note hints |
-| `\showbeatstrue` / `\showbeatsfalse` | `true` | Show beat marks |
-| `\showauthtrue` / `\showauthfalse` | `true` | Show song authors in preludes |
-| `\showlilypondtrue` / `\showlilypondfalse` | `true` | Show LilyPond score blocks |
-| `\showpassagetrue` / `\showpassagefalse` | `true` | Show `passage` environments |
-| `\showexplanationtrue` / `\showexplanationfalse` | `true` | Show `explanation` environments |
-| `\showtranslationtrue` / `\showtranslationfalse` | `true` | Show `translation` environments |
-| `\showfeelertrue` / `\showfeelerfalse` | `true` | Show `feeler` environments |
-| `\showaltchordstrue` / `\showaltchordsfalse` | `true` | Show alternate chord sets |
-| `\showimageinchapternametrue` / `\showimageinchapternamefalse` | `true` | Include chapter symbol/image in TOC and headers |
-| `\showimageonchapterfrontpagetrue` / `\showimageonchapterfrontpagefalse` | `true` | Show chapter image/symbol on chapter front pages |
-| `\upcaselongchaptertitletrue` / `\upcaselongchaptertitlefalse` | `false` | Uppercase long chapter titles on front pages |
-| `\upcaseshortchaptertitletrue` / `\upcaseshortchaptertitlefalse` | `true` | Uppercase short chapter titles in TOC and headers |
-| `\upcasesectiontitleinheadertrue` / `\upcasesectiontitleinheaderfalse` | `false` | Uppercase section titles in headers |
-| `\upcasebooktitleinheadertrue` / `\upcasebooktitleinheaderfalse` | `true` | Uppercase the book title in headers |
-| `\usechaptercolorstrue` / `\usechaptercolorsfalse` | `true` | Enable colored chapter corner marks |
-| `\adjustchordcharstrue` / `\adjustchordcharsfalse` | `true` | Apply chord-character typography adjustments |
+| `\ulShowExtraInfo` | `true` | Show extra prelude info (`ex=`) |
+| `\ulShowOfferedTo` | `true` | Show offered-to info (`off=`) |
+| `\ulShowKey` | `true` | Show the main musical key |
+| `\ulShowGoodKeys` | `true` | Show recommended singing keys |
+| `\ulShowPhase` | `true` | Show phase info in preludes |
+| `\ulShowPhaseInToc` | `true` | Show phases in the TOC |
+| `\ulShowTags` | `true` | Show/hide tags in preludes; collection and index membership are unchanged |
+| `\ulSongIndexes` | `true` | Enable both index collection and display; false disables both |
+| `\ulShowNotes` | `true` | Show melody-note hints |
+| `\ulShowBeats` | `true` | Show beat marks |
+| `\ulShowAuthors` | `true` | Show song authors in preludes |
+| `\ulShowLilypond` | `true` | Show LilyPond score blocks |
+| `\ulShowPassage` | `true` | Show `passage` environments |
+| `\ulShowExplanation` | `true` | Show `explanation` environments |
+| `\ulShowTranslation` | `true` | Show `translation` environments |
+| `\ulShowFeeler` | `true` | Show `feeler` environments |
+| `\ulShowAltChords` | `true` | Show alternate chord sets |
+| `\ulShowImageInChapterName` | `true` | Include chapter symbol/image in TOC and headers |
+| `\ulShowImageOnChapterFrontPage` | `true` | Show chapter image/symbol on chapter front pages |
+| `\ulUppercaseLongChapterTitle` | `false` | Uppercase long chapter titles on front pages |
+| `\ulUppercaseShortChapterTitle` | `true` | Uppercase short chapter titles in TOC and headers |
+| `\ulUppercaseSectionTitleInHeader` | `false` | Uppercase section titles in headers |
+| `\ulUppercaseBookTitleInHeader` | `true` | Uppercase the book title in headers |
+| `\ulUseChapterColors` | `true` | Enable colored chapter corner marks |
+| `\ulAdjustChordChars` | `true` | Apply chord-character typography adjustments |
 
 Other useful settings:
 
 | Setting | Purpose |
 |---|---|
-| `\verseindentwidthbase` | Length used by `\beginverse[<n>]`; change with `\setlength` |
+| `\ulTagFile{filename}` | Preamble-only tag-definition filename; default `tags.txt` with the lookup order documented above |
+| `\renewcommand{\ulIndexTagFont}{...}` | Tag-index heading font |
+| `\ulVerseIndentWidth` | Length used by `\beginverse[<n>]`; change with `\setlength` |
 | `\renewcommand{\ulSongEndMark}{...}` | Mark at the right end of the song-ending line |
 | `\renewcommand{\ulLyricFont}{...}` | Default lyric font |
 | `\renewcommand{\ulChordFont}{...}` | Default chord font |
+| `\renewcommand{\ulAltChordsStyle}{...}` | Standalone alternate-chord style |
+| `\renewcommand{\ulChordLineBaselineSkip}{...}` / `\ulChordLineLineskipLimit` / `\ulChordLineLineskip` | Chord-line spacing controls; redefine their dimension-valued macros in the needed scope |
 | `\renewcommand{\ulChordWhitespaceMinimumWidth}{...}` | Minimum advance for a visible annotation followed by source whitespace; default `.8ex`, `0pt` disables |
-| `\renewcommand{\translationfont}{...}` | Translation font |
-| `\renewcommand{\explanationfont}{...}` | Explanation font |
-| `\renewcommand{\passagefont}{...}` / `\renewcommand{\altpassagefont}{...}` | Passage fonts |
-| `\renewcommand{\mnsymbolstyle}{...}` | Melody-note symbol style |
-| `\renewcommand{\mntagtext}{...}` / `\renewcommand{\mnalttagtext}{...}` | Melody-note tag text |
-| `\renewcommand{\headertitlestyle}{...}` | Header title style |
-| `\renewcommand{\pagenumberstyle}{...}` | Page-number style in headers |
+| `\renewcommand{\ulTranslationFont}{...}` | Translation font |
+| `\renewcommand{\ulExplanationFont}{...}` | Explanation font |
+| `\renewcommand{\ulPassageFont}{...}` / `\renewcommand{\ulAltPassageFont}{...}` | Passage fonts |
+| `\renewcommand{\ulMelodySymbolStyle}{...}` | Melody-note symbol style |
+| `\renewcommand{\ulMelodyTagText}{...}` / `\renewcommand{\ulMelodyAltTagText}{...}` | Melody-note tag text |
+| `\renewcommand{\ulHeaderTitleStyle}{...}` | Header title style |
+| `\renewcommand{\ulPageNumberStyle}{...}` | Page-number style in headers |
 
 For custom class development beyond these settings, see
 [developer navigation](ARCHITECTURE.md#developer-navigation). Build-output
 choices such as lyrics-only and instrument variants, plus multikey editions
 where supported, are configured separately; see
 [Variants and editions](README.md#variants-and-editions).
+
+## Extension points
+
+Use the documented class options, pre-load `\ul...` settings and post-load
+font/visibility commands rather than modifying private module state. For example,
+`\ulSongbookType` may be defined as `lyric` before class loading for a manual
+lyrics-only build; leave compiler-provided definitions to the compiler.
+`\ulSongColumns{0}`, `{1}` and `{2}` select unpositioned flow, one column and two
+columns respectively; set columns outside an individual song. `\ulSongPosition{0}`
+through `{3}` control song-positioning lookahead, not the number of columns.
+Zero disables lookahead; 1 considers spreads in two-sided books (pages otherwise),
+2 considers pages, and the default 3 first tries to keep a song within one column
+before trying page/spread placement. LaTeX still breaks material that cannot fit.
+
+Custom metadata keys retain the conventional reset/set callback interface:
+
+```tex
+\newcommand{\songregion}{}
+\ulNewSongKey{region}{\renewcommand{\songregion}{}}{\renewcommand{\songregion}{#1}}
+\AddToHook{ulsbs/song/begin}{\typeout{Song region: \songregion}}
+```
+
+Put declarations in the preamble, then use `region={...}` in `\beginsong`.
+The reset runs before each song's option list, and the set callback receives
+the field value as `#1`. A custom field does not automatically become a printed
+badge or an exported JSON field.
+
+The argument-free LaTeX hooks are `ulsbs/song/begin`, `ulsbs/stanza/start`,
+`ulsbs/stanza/finish`, `ulsbs/song/finish`, `ulsbs/index/record` and
+`ulsbs/song/anchor`. Accessors such as `\ulSongTitle`, `\ulSongAuthors`
+and `\ulSongId` are available in the relevant song scope. Stanza hooks run once
+per stanza, not once per transposition layer. The anchor hook runs when anchor
+nodes are inserted, not when their eventual page coordinates become known.
+Hooks may run while a song is being boxed, including a song later excluded by a
+selection; they are not publication callbacks. Do not depend on private
+`\__ulsbs_...` variables, internal Lua tables or old upstream `\SB@...` commands.
+See [song engine ownership](ARCHITECTURE.md#song-engine) for boundaries.

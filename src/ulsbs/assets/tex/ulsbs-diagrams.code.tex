@@ -1,0 +1,313 @@
+% SPDX-FileCopyrightText: 2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Guitar-diagram parser, grid renderer, and deferred annotation inset.
+% This file is part of the 'ulsbs' package.
+%
+% Private module loaded after chords/music/multikey and common printchord,
+% chordlocals, and font helpers. It wraps existing annotation/begin/emit seams,
+% saving their definitions before replacement; load order is significant and
+% these wrappers must delegate exactly once. No separate song hooks are added.
+%
+% A draw call groups all parsed strings, barre intervals, row metrics, and boxes.
+% Delimiter maps are scoped declarations, initialized with () and []. Parsed
+% string/finger fields expand once before token classification; rows consume the
+% resulting data, not the original specification. Titles use source transposition
+% but diagrams are not twelve alternative fingerings for interactive PDF keys.
+%
+% The exceptional global state is pending lyric inset: a diagram rendered inside
+% an annotation records grid alignment through inner box groups. The next
+% independent chord begin snapshots and clears it, and its emit wrapper prepends
+% a kern before the lyric is typeset. Adjacent annotations do not begin a new
+% independent anchor. This deferred state has no reset hook in this module.
+
+\ProvidesFile{ulsbs-diagrams.code.tex}[Guitar diagrams]
+
+\ExplSyntaxOn
+% Parse once into strings and closed intervals. A barre's row is the minimum
+% positive fret in its interval; rows never mutate or reinterpret source tokens.
+\int_new:N \ulMinFrets
+\int_set:Nn \ulMinFrets {4}
+\seq_new:N \l__ulsbs_diagram_fields_seq
+\seq_new:N \l__ulsbs_diagram_strings_seq
+\seq_new:N \l__ulsbs_diagram_barres_seq
+\tl_new:N \l__ulsbs_diagram_base_tl
+\tl_new:N \l__ulsbs_diagram_strings_tl
+\tl_new:N \l__ulsbs_diagram_fingers_tl
+\prop_new:N \l__ulsbs_diagram_open_prop
+\prop_new:N \l__ulsbs_diagram_close_prop
+\prop_new:N \l__ulsbs_diagram_stacks_prop
+\clist_new:N \l__ulsbs_diagram_stack_clist
+\int_new:N \l__ulsbs_diagram_min_int
+\int_new:N \l__ulsbs_diagram_rows_int
+\int_new:N \l__ulsbs_diagram_row_int
+\int_new:N \l__ulsbs_diagram_string_int
+\dim_new:N \l__ulsbs_diagram_width_dim
+\dim_new:N \l__ulsbs_diagram_grid_dim
+\box_new:N \l__ulsbs_diagram_title_box
+\box_new:N \l__ulsbs_diagram_base_box
+\box_new:N \l__ulsbs_diagram_top_box
+\bool_new:N \l__ulsbs_diagram_annotation_bool
+\dim_new:N \g__ulsbs_diagram_pending_indent_dim
+\dim_new:N \l__ulsbs_diagram_lyric_indent_dim
+\msg_new:nnn {ulsbs-diagrams}{syntax}{Invalid~guitar~diagram:~#1.}
+
+% #1 is syntax detail; abort rather than render a partially parsed specification.
+\cs_new_protected:Npn \__ulsbs_diagram_fail:n #1
+  {\msg_fatal:nnn {ulsbs-diagrams}{syntax}{#1}}
+
+% #1/#2 are opening/closing delimiter tokens. Register their two lookup directions
+% in the current scope; an already registered opener is a fatal duplicate.
+\DeclareDocumentCommand \ulBarreDelims {mm}
+  {\prop_if_in:NnTF \l__ulsbs_diagram_open_prop {#1}
+     {\__ulsbs_diagram_fail:n {duplicate~barre~delimiter~#1}}
+     {\prop_put:Nnn \l__ulsbs_diagram_open_prop {#1}{#2}
+      \prop_put:Nnn \l__ulsbs_diagram_close_prop {#2}{#1}}}
+\ulBarreDelims()
+\ulBarreDelims[]
+\cs_generate_variant:Nn \seq_set_split:Nnn {NVn}
+
+% #1 accepts strings, base:strings, strings:fingers, or base:strings:fingers.
+% A two-field form with a one-token first field is interpreted as base:strings.
+% Split literal catcode-other colons before expanding string/finger fields; an
+% empty string field defaults to six open strings. Base text is a printed label,
+% not a numeric offset added to fret digits. Positive digits grow the row count
+% above minfrets; X mutes, 0/O opens, and delimiters do not count as strings.
+% Each opener pushes the number of preceding strings onto its own LIFO stack,
+% allowing nested/overlapping delimiter types without rescanning grid source.
+\cs_new_protected:Npn \__ulsbs_diagram_parse:n #1
+  {\tl_clear:N \l__ulsbs_diagram_base_tl
+   \tl_clear:N \l__ulsbs_diagram_fingers_tl
+   \seq_set_split:NVn \l__ulsbs_diagram_fields_seq \c_colon_str {#1}
+   \seq_pop_left:NN \l__ulsbs_diagram_fields_seq \l__ulsbs_diagram_strings_tl
+   \int_case:nnF {\seq_count:N \l__ulsbs_diagram_fields_seq}
+     {{0}{}
+      {1}{\int_compare:nNnTF {\tl_count:N \l__ulsbs_diagram_strings_tl}={1}
+            {\tl_set_eq:NN \l__ulsbs_diagram_base_tl \l__ulsbs_diagram_strings_tl
+             \seq_pop_left:NN \l__ulsbs_diagram_fields_seq \l__ulsbs_diagram_strings_tl}
+            {\seq_pop_left:NN \l__ulsbs_diagram_fields_seq \l__ulsbs_diagram_fingers_tl}}
+      {2}{\tl_set_eq:NN \l__ulsbs_diagram_base_tl \l__ulsbs_diagram_strings_tl
+          \seq_pop_left:NN \l__ulsbs_diagram_fields_seq \l__ulsbs_diagram_strings_tl
+          \seq_pop_left:NN \l__ulsbs_diagram_fields_seq \l__ulsbs_diagram_fingers_tl}}
+     {\__ulsbs_diagram_fail:n {expected~strings,~base:strings,~strings:fingers,~or~base:strings:fingers}}
+   \tl_set:Nx \l__ulsbs_diagram_strings_tl {\l__ulsbs_diagram_strings_tl}
+   \tl_set:Nx \l__ulsbs_diagram_fingers_tl {\l__ulsbs_diagram_fingers_tl}
+   \tl_if_empty:NT \l__ulsbs_diagram_strings_tl
+     {\tl_set:Nn \l__ulsbs_diagram_strings_tl {000000}}
+   \seq_clear:N \l__ulsbs_diagram_strings_seq
+   \seq_clear:N \l__ulsbs_diagram_barres_seq
+   \prop_clear:N \l__ulsbs_diagram_stacks_prop
+   \int_set:Nn \l__ulsbs_diagram_rows_int {\int_max:nn {1}{\ulMinFrets}}
+   \tl_map_inline:Nn \l__ulsbs_diagram_strings_tl
+     {\prop_if_in:NnTF \l__ulsbs_diagram_open_prop {##1}
+       {\prop_get:NnNTF \l__ulsbs_diagram_stacks_prop {##1}\l_tmpa_tl
+          {\clist_set:NV \l__ulsbs_diagram_stack_clist \l_tmpa_tl}
+          {\clist_clear:N \l__ulsbs_diagram_stack_clist}
+        \clist_put_left:Nx \l__ulsbs_diagram_stack_clist
+          {\seq_count:N \l__ulsbs_diagram_strings_seq}
+        \prop_put:NnV \l__ulsbs_diagram_stacks_prop {##1}\l__ulsbs_diagram_stack_clist}
+       {\prop_get:NnNTF \l__ulsbs_diagram_close_prop {##1}\l_tmpa_tl
+          {\exp_args:NV \__ulsbs_diagram_close:n \l_tmpa_tl}
+          {\str_if_in:nnTF {XO0123456789}{##1}
+            {\seq_put_right:Nn \l__ulsbs_diagram_strings_seq {##1}
+             \str_if_in:nnT {123456789}{##1}
+               {\int_set:Nn \l__ulsbs_diagram_rows_int
+                  {\int_max:nn {\l__ulsbs_diagram_rows_int}{##1}}}}
+            {\__ulsbs_diagram_fail:n {unknown~string~symbol~\tl_to_str:n {##1}}}}}}
+   % An omitted closing delimiter extends its barre through the last string.
+   \prop_map_inline:Nn \l__ulsbs_diagram_open_prop
+     {\prop_get:NnNT \l__ulsbs_diagram_stacks_prop {##1}\l_tmpa_tl
+        {\clist_set:NV \l__ulsbs_diagram_stack_clist \l_tmpa_tl
+         \clist_map_inline:Nn \l__ulsbs_diagram_stack_clist
+           {\__ulsbs_diagram_interval:n {####1}}}}
+   \dim_set:Nn \l__ulsbs_diagram_grid_dim
+     {6pt*\seq_count:N \l__ulsbs_diagram_strings_seq}}
+
+% #1 is an opener resolved from a closing token. Pop its most recent starting
+% boundary and close at the current string count; unmatched closes are fatal.
+\cs_new_protected:Npn \__ulsbs_diagram_close:n #1
+  {\prop_get:NnNTF \l__ulsbs_diagram_stacks_prop {#1}\l_tmpa_tl
+     {\clist_set:NV \l__ulsbs_diagram_stack_clist \l_tmpa_tl}
+     {\clist_clear:N \l__ulsbs_diagram_stack_clist}
+   \clist_if_empty:NTF \l__ulsbs_diagram_stack_clist
+     {\__ulsbs_diagram_fail:n {unbalanced~barre~delimiter}}
+     {\clist_pop:NN \l__ulsbs_diagram_stack_clist \l_tmpa_tl
+      \prop_put:NnV \l__ulsbs_diagram_stacks_prop {#1}\l__ulsbs_diagram_stack_clist
+      \exp_args:NV \__ulsbs_diagram_interval:n \l_tmpa_tl}}
+
+% #1 is the zero-based boundary before the first covered string. Inspect through
+% the current string count, store {boundary}{last string}{minimum positive fret},
+% and omit intervals containing no fretted strings. Draw uses this fixed triple.
+\cs_new_protected:Npn \__ulsbs_diagram_interval:n #1
+  {\int_set:Nn \l__ulsbs_diagram_min_int {10}
+   \int_step_inline:nnn {#1+1}{\seq_count:N \l__ulsbs_diagram_strings_seq}
+     {\tl_set:Nx \l_tmpa_tl {\seq_item:Nn \l__ulsbs_diagram_strings_seq {##1}}
+      \exp_args:NnV \str_if_in:nnT {123456789}\l_tmpa_tl
+        {\int_set:Nn \l__ulsbs_diagram_min_int
+          {\int_min:nn {\l__ulsbs_diagram_min_int}{\l_tmpa_tl}}}}
+   \int_compare:nNnT {\l__ulsbs_diagram_min_int}<{10}
+     {\seq_put_right:Nx \l__ulsbs_diagram_barres_seq
+       {{#1}{\seq_count:N \l__ulsbs_diagram_strings_seq}{\int_use:N \l__ulsbs_diagram_min_int}}}}
+
+% Ink coordinates are a typography contract: 6pt cells, .4pt grid rules,
+% OMS cross/open/dot glyphs at 7/10/12pt, and 6pt sans-serif finger labels.
+% symbol:nn takes font size #1 and OMS character code #2, scoped to one glyph.
+\cs_new_protected:Npn \__ulsbs_diagram_symbol:nn #1#2
+  {{\fontencoding{OMS}\fontfamily{cmsy}\fontseries{m}\fontshape{n}
+    \fontsize{#1}{#1}\selectfont\char#2\relax}}
+
+% #1 is cell ink, centered in one 6pt column with an overlaid vertical grid rule.
+\cs_new_protected:Npn \__ulsbs_diagram_cell:n #1
+  {\hbox_to_wd:nn {0pt}{\kern2.8pt\vrule width.4pt height6pt\hss}
+   \hbox_to_wd:nn {6pt}{\hfil#1\hfil}}
+
+% #1 is a parsed string symbol; only mute/open strings get ink above the grid.
+\cs_new_protected:Npn \__ulsbs_diagram_top:n #1
+  {\hbox_to_wd:nn {6pt}{\hfil
+     \str_case:nn {#1}
+       {{X}{\hbox{\kern-.2pt\__ulsbs_diagram_symbol:nn {7}{2}\kern-.2pt}}
+        {0}{\__ulsbs_diagram_open:}
+        {O}{\__ulsbs_diagram_open:}}
+     \hfil}}
+
+% Open-circle marker includes a stable vertical strut independent of glyph depth.
+\cs_new_protected:Npn \__ulsbs_diagram_open:
+  {\vrule width0pt height4.3333pt depth.8333pt
+   \lower.74pt\hbox{\__ulsbs_diagram_symbol:nn {10}{14}}}
+
+% Horizontal fret rule spans between outside string centers, without line glue.
+\cs_new_protected:Npn \__ulsbs_diagram_rule:
+  {\nointerlineskip
+   \hbox_to_wd:nn {\l__ulsbs_diagram_grid_dim}
+     {\hfil\vrule width\dimexpr\l__ulsbs_diagram_grid_dim-5.6pt\relax height.4pt depth0pt\hfil}
+   \nointerlineskip}
+
+% #1/#2/#3 are the stored boundary/end/fret triple. Draw only when traversal
+% reaches its end string and row, backtracking horizontally over covered cells.
+\cs_new_protected:Npn \__ulsbs_diagram_barre:nnn #1#2#3
+  {\int_compare:nNnT {#2}={\l__ulsbs_diagram_string_int}
+    {\int_compare:nNnT {#3}={\l__ulsbs_diagram_row_int}
+      {\kern\dimexpr -6pt*\numexpr #2-#1\relax\relax
+       \__ulsbs_diagram_cell:n {\__ulsbs_diagram_symbol:nn {12}{15}}
+       \kern-3pt
+       \raise.7pt\hbox{\vrule height4.6pt width\dimexpr6pt*\numexpr#2-#1-1\relax\relax}
+       \kern-3pt
+       \__ulsbs_diagram_cell:n {\__ulsbs_diagram_symbol:nn {12}{15}}}}}
+
+% Render the current fret row from parsed string symbols, then overlay each
+% matching closed barre. Row traversal does not mutate parsed strings/intervals.
+\cs_new_protected:Npn \__ulsbs_diagram_row:
+  {\int_zero:N \l__ulsbs_diagram_string_int
+   \seq_map_inline:Nn \l__ulsbs_diagram_strings_seq
+     {\int_incr:N \l__ulsbs_diagram_string_int
+      \__ulsbs_diagram_cell:n
+        {\str_if_in:nnT {123456789}{##1}
+          {\int_compare:nNnT {##1}={\l__ulsbs_diagram_row_int}
+            {\__ulsbs_diagram_symbol:nn {12}{15}}}}
+      \seq_map_inline:Nn \l__ulsbs_diagram_barres_seq
+        {\__ulsbs_diagram_barre:nnn ####1}}}
+
+% #1 is chord-title source, #2 diagram specification. Parse once in a local
+% group, retain title/base/top boxes, then draw rows and finger labels. Overall
+% width is the maximum of title width and base-plus-grid width. In annotation
+% context export the base/centering inset globally before local metrics vanish;
+% after drawing, clear the caller's annotation flag to avoid treating nested
+% subsequent diagrams as another deferred-inset producer in the same context.
+\cs_new_protected:Npn \__ulsbs_diagram_draw:nn #1#2
+  {\group_begin:
+   \__ulsbs_diagram_parse:n {#2}
+   \mode_leave_vertical:
+   \vbox{\normalfont\normalsize
+     \hbox_set:Nn \l__ulsbs_diagram_title_box
+       {\thinspace{\ulPrintChord{\transposehere{#1}\strut}}\thinspace}
+     \hbox_set:Nn \l__ulsbs_diagram_base_box
+       {{\sffamily\fontsize{10}{10}\selectfont\l__ulsbs_diagram_base_tl}}
+     \hbox_set:Nn \l__ulsbs_diagram_top_box
+       {\seq_map_function:NN \l__ulsbs_diagram_strings_seq \__ulsbs_diagram_top:n}
+     \dim_set:Nn \l__ulsbs_diagram_width_dim
+       {\dim_max:nn {\box_wd:N \l__ulsbs_diagram_title_box}
+          {\box_wd:N \l__ulsbs_diagram_base_box+\l__ulsbs_diagram_grid_dim}}
+     \bool_if:NT \l__ulsbs_diagram_annotation_bool
+       {\dim_gset:Nn \g__ulsbs_diagram_pending_indent_dim
+          {\box_wd:N \l__ulsbs_diagram_base_box+2.5pt}
+        \dim_set:Nn \l_tmpa_dim {\l__ulsbs_diagram_width_dim
+          -\box_wd:N \l__ulsbs_diagram_base_box-\l__ulsbs_diagram_grid_dim}
+        \tex_divide:D \l_tmpa_dim by 2\scan_stop:
+        \dim_gadd:Nn \g__ulsbs_diagram_pending_indent_dim {\l_tmpa_dim}}
+     \hbox_to_wd:nn {\l__ulsbs_diagram_width_dim}
+       {\hfil\hbox_unpack_drop:N \l__ulsbs_diagram_title_box\hfil}
+     \kern-1pt\nointerlineskip
+     \hbox_to_wd:nn {\l__ulsbs_diagram_width_dim}
+       {\hfil\vtop{\kern3pt\box_use_drop:N \l__ulsbs_diagram_base_box}
+        \vtop{\box_use_drop:N \l__ulsbs_diagram_top_box
+          \int_step_inline:nn {\l__ulsbs_diagram_rows_int}
+            {\int_set:Nn \l__ulsbs_diagram_row_int {##1}
+             \__ulsbs_diagram_rule:\hbox{\__ulsbs_diagram_row:}}
+          \__ulsbs_diagram_rule:
+          \kern1.5pt
+          \hbox{\tl_map_inline:Nn \l__ulsbs_diagram_fingers_tl
+            {\hbox_to_wd:nn {6pt}{\hfil
+              \str_if_in:nnF {X0O}{##1}{\sffamily\fontsize{6}{6}\selectfont##1}\hfil}}}}
+        \hfil}
+     \kern3pt}
+   \group_end:\bool_set_false:N \l__ulsbs_diagram_annotation_bool}
+
+% #1/#2 are name/specification. Default non-octave source-transposition fallback
+% prints only the transposed name: the old fingering would represent another
+% sounding chord. Authors may redefine this adapter to choose another diagram.
+\DeclareDocumentCommand \gtabtrans {mm}{\transposehere{#1}}
+
+% Read the name under accidental/chord typography catcodes, then read the
+% specification under catcode-other colon. These groups must precede argument
+% capture: changing catcodes after xparse has read both arguments is too late.
+\cs_new_protected:Npn \gtab
+  {\group_begin:\char_set_catcode_active:n {35}\char_set_catcode_active:n {38}
+   \char_set_catcode_other:n {58}\ulChordLocals\__ulsbs_diagram_name:n}
+
+% #1 is the captured name. Restore its read scope before opening a fresh colon
+% scope for the still-unread specification; carry name tokens through unchanged.
+\cs_new_protected:Npn \__ulsbs_diagram_name:n #1
+  {\group_end:\group_begin:\char_set_catcode_other:n {58}\__ulsbs_diagram_args:nn {#1}}
+
+% #1/#2 are captured name/specification. Octave-equivalent source offsets retain
+% the diagram; otherwise call gtabtrans with a local direct-draw gtab binding so
+% a custom fallback can emit a replacement without recursively testing offsets.
+\cs_new_protected:Npn \__ulsbs_diagram_args:nn #1#2
+  {\group_end:
+   \int_compare:nNnTF {\int_mod:nn {\l__ulsbs_music_transpose_int}{12}}={0}
+     {\__ulsbs_diagram_draw:nn {#1}{#2}}
+     {\group_begin:\cs_set_eq:NN \gtab \__ulsbs_diagram_draw:nn
+      \gtabtrans{#1}{#2}\group_end:}}
+
+% Mark only the annotation-rendering phase as an inset producer. Saving the
+% existing music definition preserves multikey behavior and avoids recursion.
+\cs_new_eq:NN \__ulsbs_diagram_annotation:n \__ulsbs_music_annotation:n
+
+\cs_set_protected:Npn \__ulsbs_music_annotation:n #1
+  {\bool_set_true:N \l__ulsbs_diagram_annotation_bool
+   \__ulsbs_diagram_annotation:n {#1}
+   \bool_set_false:N \l__ulsbs_diagram_annotation_bool}
+
+% Snapshot the previous annotation's exported inset before rendering this new
+% anchor, which may itself export a different inset for a later independent one.
+\cs_new_eq:NN \__ulsbs_diagram_chord_begin:n \__ulsbs_chord_begin:n
+
+\cs_set_protected:Npn \__ulsbs_chord_begin:n #1
+  {\dim_set_eq:NN \l__ulsbs_diagram_lyric_indent_dim \g__ulsbs_diagram_pending_indent_dim
+   \dim_gzero:N \g__ulsbs_diagram_pending_indent_dim
+   \__ulsbs_diagram_chord_begin:n {#1}}
+
+% Insert layout tokens into the unexpanded lyric fragment, not a second box of
+% lyric source. Single-hyphen emission uses the saved pre-hyphen tl, so target
+% that instead of the ordinary lyric tl in that case. Delegate typesetting once.
+\cs_new_eq:NN \__ulsbs_diagram_chord_emit: \__ulsbs_chord_emit:
+
+\cs_set_protected:Npn \__ulsbs_chord_emit:
+  {\dim_compare:nNnT {\l__ulsbs_diagram_lyric_indent_dim}>{0pt}
+     {\int_compare:nNnTF {\l__ulsbs_chord_hyphens_int}={1}
+        {\tl_put_left:Nx \l__ulsbs_chord_before_hyphen_tl
+          {\kern\dim_use:N \l__ulsbs_diagram_lyric_indent_dim\scan_stop:}}
+        {\tl_put_left:Nx \l__ulsbs_chord_lyric_tl
+          {\kern\dim_use:N \l__ulsbs_diagram_lyric_indent_dim\scan_stop:}}}
+   \__ulsbs_diagram_chord_emit:}
+\ExplSyntaxOff

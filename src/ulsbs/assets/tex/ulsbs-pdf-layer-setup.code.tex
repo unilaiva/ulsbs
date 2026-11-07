@@ -1,0 +1,368 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Second-phase PDF transposition setup and safe chord-token splitter.
+% This file is part of the 'ulsbs' package.
+%
+% Load: ulsbs.sty, immediately after its original makeatletter, before language
+% selection. Phase one (option defaults/validation and optional ocgx2 import)
+% remains in the loader before makeatletter; do not combine/reorder the phases.
+% Requires: init, expl3, etoolbox, LuaTeX and, when enabled, ocgx2.
+% State: enters/exits with @ a letter and ordinary (non-expl3) syntax. Allocates
+% song/layer registries, key metadata, visual scratch boxes and splitter token
+% lists; registers Lua shipout/end-document collection and validation hooks.
+% Later multikey owns key spelling and visual rendering implementations called
+% here; melody/chord modules supply replay payloads and annotation commands.
+% The splitter preserves token groups/active notation rather than expanding
+% arbitrary input. Its explicit local space-scanner group must remain intact.
+
+\ProvidesFile{ulsbs-pdf-layer-setup.code.tex}[ULSBS PDF transposition layer setup]
+
+% PDF transposition layers. Only complete, bounded visual boxes contain marked
+% content; measuring or discarding a box never emits its operators into a page.
+\newcount\ulsbs@pdfsongcount
+\newif\ifulsbs@pdfsong
+\newif\ifulsbs@pdfchord
+\newif\ifulsbs@pdfrightalign
+% The engine's -draftmode pass needs only t00 geometry and metadata requests.
+% Keep registering every OCG, but avoid constructing eleven discarded visuals.
+% Full PDF-producing passes always render all alternatives as before.
+\newif\ifulsbs@pdfdraftpass
+\ifulsbs@pdflayers
+  \ifnum\draftmode>0\relax\ulsbs@pdfdraftpasstrue\fi
+\fi
+\newif\ifulsbs@keytranspose\ulsbs@keytransposetrue
+\newsavebox{\ulsbs@pdfbasebox}
+\newsavebox{\ulsbs@pdfaltbox}
+\newsavebox{\ulsbs@pdfresultbox}
+\newsavebox{\ulsbs@pdfanchorbox}
+
+% No arguments: emit alternate ink using the current scale and alternate box.
+% Keep it in a zero-advance transform, adjustable after lyric collection without
+% changing any layout-bearing node.
+\newcommand{\ulsbs@pdfscalechord}{%
+  \pdfextension save\relax
+  \pdfextension setmatrix{\ulsbs@pdfscale\space 0 0 \ulsbs@pdfscale}%
+  \rlap{\copy\ulsbs@pdfaltbox}%
+  \pdfextension restore\relax}
+\let\ulsbs@pdfpreludesongid\@empty
+\ifulsbs@pdflayers
+  \directlua{ulsbs_multikey=dofile(assert(kpse.find_file("ulsbs-multikey.lua","tex"),
+    "ULSBS multikey Lua module not found"))}
+  \AddToHook{enddocument/afterlastpage}{\directlua{ulsbs_multikey.finish()}}
+  \AddToHook{shipout/before}{\directlua{ulsbs_multikey.track_page(tex.box["ShipoutBox"])}}
+\fi
+\ExplSyntaxOn
+\tl_new:N \l__ulsbs_pdf_chunk_tl
+\tl_new:N \l__ulsbs_pdf_output_tl
+\tl_new:N \l__ulsbs_pdf_original_tl
+\tl_new:N \g__ulsbs_pdf_transpose_key_tl
+\tl_new:N \l__ulsbs_pdf_key_tl
+\seq_new:N \l__ulsbs_pdf_key_seq
+\prop_new:N \g__ulsbs_pdf_occurrences_prop
+\prop_new:N \g__ulsbs_pdf_allocated_layers_prop
+\prop_new:N \g__ulsbs_pdf_layer_prefixes_prop
+\tl_new:N \l__ulsbs_pdf_source_id_tl
+\tl_new:N \l__ulsbs_pdf_original_key_tl
+\tl_new:N \l__ulsbs_pdf_labels_lua_tl
+\tl_new:N \l__ulsbs_pdf_label_tl
+\int_new:N \l__ulsbs_pdf_occurrence_int
+\cs_generate_variant:Nn \prop_gput:Nnn {NVx}
+\clist_const:Nn \c__ulsbs_pdf_letters_clist {C,D,E,F,G,A,B}
+\clist_const:Nn \c__ulsbs_pdf_natural_clist {0,2,4,5,7,9,11}
+\clist_const:Nn \c__ulsbs_pdf_minor_clist {0,2,3,5,7,8,10}
+\clist_new:N \l__ulsbs_pdf_scale_clist
+\int_new:N \l__ulsbs_pdf_key_letter_int
+\int_new:N \l__ulsbs_pdf_key_pitch_int
+\int_new:N \l__ulsbs_pdf_key_minor_int
+\int_new:N \l__ulsbs_pdf_target_letter_int
+\int_new:N \l__ulsbs_pdf_target_pitch_int
+\int_new:N \l__ulsbs_pdf_accidental_int
+\bool_new:N \l__ulsbs_pdf_key_available_bool
+
+\cs_generate_variant:Nn \regex_extract_once:nnNTF {nV}
+
+% No arguments: read effective original \ulSongKey and globally cache tonic/mode.
+% Unsupported nonempty keys warn; the saved tuple is cleared before parsing.
+% The cache is independent of source transposition and the body's local group.
+\cs_new_protected:Npn \__ulsbs_pdf_key_save:
+ {
+  \tl_gclear:N \g__ulsbs_pdf_transpose_key_tl
+  \tl_set:Nx \l__ulsbs_pdf_key_tl {\tl_to_str:V \ulSongKey}
+  \regex_replace_all:nnN {\{\}} {} \l__ulsbs_pdf_key_tl
+  \regex_replace_all:nnN {\s+} {} \l__ulsbs_pdf_key_tl
+  \tl_trim_spaces:N \l__ulsbs_pdf_key_tl
+  \regex_extract_once:nVNTF {\A([A-G])(\#|\&|\\shrp|\\flt)?(m?)\Z}
+    \l__ulsbs_pdf_key_tl \l__ulsbs_pdf_key_seq
+   {
+    \int_set:Nn \l__ulsbs_pdf_key_letter_int
+      {\str_case:en {\seq_item:Nn \l__ulsbs_pdf_key_seq {2}}
+        {{C}{0}{D}{1}{E}{2}{F}{3}{G}{4}{A}{5}{B}{6}}}
+    \tl_set:Nx \l__ulsbs_pdf_key_tl {\seq_item:Nn \l__ulsbs_pdf_key_seq {3}}
+    \regex_match:nVTF {\#|\\shrp} \l__ulsbs_pdf_key_tl
+      {\int_set:Nn \l__ulsbs_pdf_accidental_int {1}}
+      {\int_set:Nn \l__ulsbs_pdf_accidental_int
+        {\tl_if_empty:NTF \l__ulsbs_pdf_key_tl {0}{-1}}}
+    \int_set:Nn \l__ulsbs_pdf_key_pitch_int
+      {\int_mod:nn {12+
+        \clist_item:Nn \c__ulsbs_pdf_natural_clist {\l__ulsbs_pdf_key_letter_int+1}+
+        \l__ulsbs_pdf_accidental_int}{12}}
+    \int_set:Nn \l__ulsbs_pdf_key_minor_int
+      {\str_if_eq:eeTF {\seq_item:Nn \l__ulsbs_pdf_key_seq {4}}{m}{1}{0}}
+    \tl_gset:Nx \g__ulsbs_pdf_transpose_key_tl
+      {{\int_use:N \l__ulsbs_pdf_key_letter_int}
+       {\int_use:N \l__ulsbs_pdf_key_pitch_int}
+       {\int_use:N \l__ulsbs_pdf_key_minor_int}}
+   }
+   {\tl_if_empty:NF \l__ulsbs_pdf_key_tl
+     {\PackageWarning{ulsbs}{Song~\tl_to_str:V\ulSongTitle :~unsupported~key=\tl_to_str:V\ulSongKey;
+       ~using~current~sharp/flat~preference~for~transposition}}}
+ }
+
+% #1/#2/#3: restore tonic letter index, pitch class and minor flag locally.
+\cs_new_protected:Npn \__ulsbs_pdf_key_use:nnn #1#2#3
+ {
+  \int_set:Nn \l__ulsbs_pdf_key_letter_int {#1}
+  \int_set:Nn \l__ulsbs_pdf_key_pitch_int {#2}
+  \int_set:Nn \l__ulsbs_pdf_key_minor_int {#3}
+ }
+
+% #1 = minimum width, #2 = integer expression; expand to zero-padded digits.
+\cs_new:Npn \__ulsbs_pdf_pad:nn #1#2
+  {\prg_replicate:nn {\int_max:nn {0}{#1-\str_count:e {\int_eval:n {#2}}}}{0}\int_eval:n {#2}}
+
+% No arguments: register the current occurrence's navigation/key labels with
+% the Lua shipout collector. Temporary label/key calculations are grouped.
+\cs_new_protected:Npn \__ulsbs_pdf_metadata_song:
+ {
+  \begingroup
+  \tl_set:Nx \l__ulsbs_pdf_original_key_tl {\tl_to_str:V\ulSongKey}
+  \tl_trim_spaces:N \l__ulsbs_pdf_original_key_tl
+  \tl_set:Nn \l__ulsbs_pdf_labels_lua_tl {nil}
+  \__ulsbs_pdf_key_load:
+  \bool_if:NT \l__ulsbs_pdf_key_available_bool
+   {
+    \tl_set:Nx \l__ulsbs_pdf_labels_lua_tl {\c_left_brace_str}
+    \int_step_inline:nnn {0}{11}
+     {
+      \int_set:Nn \l__ulsbs_pdf_target_pitch_int
+        {\int_mod:nn {\l__ulsbs_pdf_key_pitch_int+##1}{12}}
+      \int_compare:nNnTF {##1}={0}
+        {\int_set_eq:NN \l__ulsbs_pdf_target_letter_int \l__ulsbs_pdf_key_letter_int}
+        {\__ulsbs_pdf_canonical_tonic:n {\l__ulsbs_pdf_target_pitch_int}}
+      \int_set:Nn \l__ulsbs_pdf_accidental_int
+        {\int_mod:nn {18+\l__ulsbs_pdf_target_pitch_int-
+          \clist_item:Nn \c__ulsbs_pdf_natural_clist {\l__ulsbs_pdf_target_letter_int+1}}{12}-6}
+      \tl_set:Nx \l__ulsbs_pdf_label_tl
+        {\clist_item:Nn \c__ulsbs_pdf_letters_clist {\l__ulsbs_pdf_target_letter_int+1}
+         \int_case:nn {\l__ulsbs_pdf_accidental_int}{{-1}{♭}{1}{♯}}
+         \int_if_zero:nF {\l__ulsbs_pdf_key_minor_int}{m}}
+      \tl_put_right:Nx \l__ulsbs_pdf_labels_lua_tl
+        {"\luaescapestring{\l__ulsbs_pdf_label_tl}",}
+     }
+    \tl_put_right:Nx \l__ulsbs_pdf_labels_lua_tl {\c_right_brace_str}
+   }
+  \directlua{ulsbs_multikey.begin_song(
+    "\ulsbs@pdfsongid","\luaescapestring{\l__ulsbs_pdf_source_id_tl}",
+    \int_use:N\l__ulsbs_pdf_occurrence_int,"\ulsbs@pdfnameprefix",
+    \tl_if_empty:NTF\l__ulsbs_pdf_original_key_tl{nil}
+      {"\luaescapestring{\l__ulsbs_pdf_original_key_tl}"},\l__ulsbs_pdf_labels_lua_tl)}
+  \endgroup
+ }
+
+% No arguments: advance the global song counter/occurrence registries, assign
+% this occurrence's layer prefix and prelude ID, then register metadata.
+% Does not eagerly allocate OCGs.
+\cs_new_protected:Npn \__ulsbs_pdf_song_layers:
+ {
+  \global\advance\ulsbs@pdfsongcount by 1\relax
+  \ulsbs@pdfsongtrue
+  \edef\ulsbs@pdfsongid{s\__ulsbs_pdf_pad:nn {6}{\ulsbs@pdfsongcount}}
+  \prop_get:NVNTF \g__ulsbs_pdf_occurrences_prop \l__ulsbs_pdf_source_id_tl \l_tmpa_tl
+    {\int_set:Nn \l__ulsbs_pdf_occurrence_int {\l_tmpa_tl+1}}
+    {\int_set:Nn \l__ulsbs_pdf_occurrence_int {1}}
+  \prop_gput:NVx \g__ulsbs_pdf_occurrences_prop \l__ulsbs_pdf_source_id_tl
+    {\int_use:N\l__ulsbs_pdf_occurrence_int}
+  \edef\ulsbs@pdfnameprefix{ulsbs:transpose:v1:id:\l__ulsbs_pdf_source_id_tl
+    \int_compare:nNnT {\l__ulsbs_pdf_occurrence_int}>{1}
+      {:o\__ulsbs_pdf_pad:nn {2}{\l__ulsbs_pdf_occurrence_int}}}
+  \prop_gput:NVx \g__ulsbs_pdf_layer_prefixes_prop \ulsbs@pdfsongid {\ulsbs@pdfnameprefix}
+  % Keep this occurrence available to the prelude header anchor.
+  \global\let\ulsbs@pdfpreludesongid\ulsbs@pdfsongid
+  \__ulsbs_pdf_metadata_song:
+ }
+
+% No arguments: allocate this occurrence's twelve exclusive OCGs at most once,
+% recording allocation globally and using the result box for empty OCG setup.
+\cs_new_protected:Npn \__ulsbs_pdf_ensure_layers:
+ {
+  \prop_if_in:NVF \g__ulsbs_pdf_allocated_layers_prop \ulsbs@pdfsongid
+   {
+   \prop_gput:NVn \g__ulsbs_pdf_allocated_layers_prop \ulsbs@pdfsongid {1}
+   \int_step_inline:nnn {0}{11}
+   {
+    \edef\ulsbs@pdfid{ulsbs:transpose:v1:\ulsbs@pdfsongid :t\__ulsbs_pdf_pad:nn {2}{##1}}
+    \edef\ulsbs@pdfname{\prop_item:NV \g__ulsbs_pdf_layer_prefixes_prop \ulsbs@pdfsongid
+      :t\__ulsbs_pdf_pad:nn {2}{##1}}
+    \ifdefstring{\ulPdfTranspositionLayerUi}{hidden}
+      {\def\ulsbs@pdfshowingui{false}}{\def\ulsbs@pdfshowingui{true}}
+    \edef\ulsbs@pdfoptions{radiobtngrps={\ulsbs@pdfsongid},
+      showingui=\ulsbs@pdfshowingui,
+      printocg=\ifnum##1=0 always\else never\fi}
+    \ifnum##1=0\relax\def\ulsbs@pdfinitial{1}\else\def\ulsbs@pdfinitial{0}\fi
+    % Internal references remain private sequences; exposed names use source IDs.
+    \sbox\ulsbs@pdfresultbox{\begin{ocg}[\ulsbs@pdfoptions]{\ulsbs@pdfname}{\ulsbs@pdfid}
+       {\ulsbs@pdfinitial}\end{ocg}}
+    }
+   }
+ }
+
+% #1 = step, #2 = actual content: wrap it in marked content and record its
+% eventual physical shipout page via a deferred Lua mark.
+\cs_new_protected:Npn \__ulsbs_pdf_mark:nn #1#2
+ {
+  \__ulsbs_pdf_ensure_layers:
+  \ocgbase_oc_bdc:n
+    {\use:c {ocgxii_ocg_ulsbs:transpose:v1:\ulsbs@pdfsongid :t\__ulsbs_pdf_pad:nn {2}{#1}}}
+  % Execute only if the box is shipped, not when it is measured or discarded.
+  \exp_args:Nx \latelua {ulsbs_multikey.mark_used("\ulsbs@pdfsongid")}
+  #2
+  \ocgbase_oc_emc:
+ }
+
+% No arguments: append pending safe notation as original-footprint alternatives
+% to the output token list, then clear the pending chunk.
+\cs_new_protected:Npn \ulsbs@pdfchunkflush
+ {
+  \tl_if_empty:NF \l__ulsbs_pdf_chunk_tl
+   {\tl_put_right:Nx \l__ulsbs_pdf_output_tl
+     {\exp_not:N\ulsbs@pdfvisual{\exp_not:V\l__ulsbs_pdf_chunk_tl}{\exp_not:N\@firstofone}{1}}
+    \tl_clear:N \l__ulsbs_pdf_chunk_tl}
+ }
+
+% #1 = token/group: append without re-executing notation-side effects.
+\cs_new_protected:Npn \ulsbs@pdfchunkadd #1 {\tl_put_right:Nn \l__ulsbs_pdf_chunk_tl {#1}}
+
+% #1 = shared content: flush notation before appending it unchanged.
+\cs_new_protected:Npn \ulsbs@pdfsharedadd #1
+ {\ulsbs@pdfchunkflush\tl_put_right:Nn \l__ulsbs_pdf_output_tl {#1}}
+\cs_generate_variant:Nn \regex_match:nnTF {nV}
+
+% #1 = group contents: accept safe literals or fall back for arbitrary commands.
+\cs_new_protected:Npn \ulsbs@pdfgroup #1
+ {
+  \tl_set:Nx \l_tmpa_tl {\tl_to_str:n {#1}}
+  % The chord scanner preserves braced groups without inspecting them.
+  % Arbitrary nested commands are unsafe in eleven extra visual boxes.
+  \regex_match:nVTF {\\|\^} \l_tmpa_tl
+    {\ulsbs@pdfunknown{{#1}}}
+    {\ulsbs@pdfchunkadd{{#1}}\ulsbs@pdfsplit}
+ }
+
+% #1 = chord token: route to safe notation, shared payload or explicit fallback.
+\cs_new_protected:Npn \ulsbs@pdfsplittoken #1
+ {
+  % Test the character, not its meaning: replay rebinds active ^.
+  % It must never be re-evaluated in an alternative representation.
+  \str_if_eq:eeTF {\token_to_str:N #1}{\char_generate:nn {94}{12}}
+   {\ulsbs@pdfsharedadd{#1}\ulsbs@pdfsplit}
+   {
+    \token_if_eq_meaning:NNTF #1\ulsbs@melodyreplaypayload
+      {\ulsbs@pdfsplitpayload}
+      {\token_if_eq_meaning:NNTF #1\ac
+        {\ulsbs@pdfsplitac}
+        {\token_if_eq_meaning:NNTF #1\notrans
+          {\ulsbs@pdfsplitnotrans}
+          {\token_if_active:NTF #1
+            {\ulsbs@pdfchunkadd{#1}\ulsbs@pdfsplit}
+            {\token_if_cs:NTF #1
+            {\clist_if_in:nnTF
+              {\shrp,\flt,\symdim,\symhalfdim,\textdegree,
+               \textsuperscript,\textsubscript,\up,
+               \kern,\hspace,\hphantom,\phantom,\strut,\relax,
+               \ulsbs@smraiseopenparen,\ulsbs@smraisecloseparen}
+              {#1}{\ulsbs@pdfchunkadd{#1}\ulsbs@pdfsplit}
+              {\ulsbs@pdfunknown{#1}}}
+            {\ulsbs@pdfchunkadd{#1}\ulsbs@pdfsplit}}}}}
+   }
+ }
+
+% #1 = unsupported token/group, #2 = tail through the split terminator.
+% Restore the complete original chord text and warn rather than replay it.
+\cs_new_protected:Npn \ulsbs@pdfunknown #1#2\ulsbs@pdfsplitend
+ {
+  % Unknown commands may consume dimensions, optional or unbraced arguments.
+  % Preserve the complete tail, rather than injecting boxes into that stream.
+  \tl_set_eq:NN \l__ulsbs_pdf_output_tl \l__ulsbs_pdf_original_tl
+  \tl_clear:N \l__ulsbs_pdf_chunk_tl
+  \PackageWarning{ulsbs}{Song~\ulsbs@pdfsongid :~unsupported~chord~command/group~
+    \tl_to_str:n {#1};~interactive~transposition~is~not~applied~to~this~chord~text}
+ }
+
+% #1 = effective chord text: reset splitter buffers, split into transposable
+% chunks and unchanged shared items, then execute the resulting output.
+\cs_new_protected:Npn \ulsbs@pdfchordtext #1
+ {
+  \tl_clear:N \l__ulsbs_pdf_chunk_tl
+  \tl_clear:N \l__ulsbs_pdf_output_tl
+  \tl_set:Nn \l__ulsbs_pdf_original_tl {#1}
+  \ulsbs@pdfsplit #1\ulsbs@pdfsplitend
+  \tl_use:N \l__ulsbs_pdf_output_tl
+ }
+\ExplSyntaxOff
+% Optional generated-score fallback: #1/#2 are ignored, #3 is the graphic file.
+% A generated score-layer file may replace this when interactive layers are on.
+\ifdefstring{\ulMultikeyLilypondScores}{true}{%
+  \providecommand{\ulScoreSystem}[3]{\includegraphics{#3}}%
+  \ifulsbs@pdflayers\input{ulsbs-score-layers.tex}\fi
+}{}
+
+% No arguments: peek without expanding active notation/replay commands.
+\def\ulsbs@pdfsplit{\futurelet\ulsbs@pdfnext\ulsbs@pdfsplitdispatch}
+
+% No arguments: route the peeked terminator, group, space or ordinary token.
+\def\ulsbs@pdfsplitdispatch{%
+  \ifx\ulsbs@pdfnext\ulsbs@pdfsplitend\let\ulsbs@pdfnextstep\ulsbs@pdfsplitfinish
+  \else\ifx\ulsbs@pdfnext\bgroup\let\ulsbs@pdfnextstep\ulsbs@pdfsplitgroup
+  \else\ifcat\noexpand\ulsbs@pdfnext\@sptoken\let\ulsbs@pdfnextstep\ulsbs@pdfsplitspace
+  \else\let\ulsbs@pdfnextstep\ulsbs@pdfsplitstep\fi\fi\fi
+  \ulsbs@pdfnextstep}
+
+% Consume the terminator and emit the final pending chord chunk.
+\def\ulsbs@pdfsplitfinish\ulsbs@pdfsplitend{\ulsbs@pdfchunkflush}
+
+% #1 = a braced group: consume it while retaining its grouping boundaries.
+\def\ulsbs@pdfsplitgroup#1{\ulsbs@pdfgroup{#1}}
+
+% #1 = an ordinary token: pass it through the safe-token dispatcher.
+\def\ulsbs@pdfsplitstep#1{\ulsbs@pdfsplittoken{#1}}
+
+% #1/#2 = already captured melody payload arguments: preserve as shared content.
+\def\ulsbs@pdfsplitpayload#1#2{\ulsbs@pdfsharedadd{\ulsbs@melodyreplaypayload{#1}{#2}}\ulsbs@pdfsplit}
+
+% #1/#2 = alternate annotation arguments: share without extra parser executions.
+\def\ulsbs@pdfsplitac#1#2{\ulsbs@pdfsharedadd{\ac{#1}{#2}}\ulsbs@pdfsplit}
+
+% #1 = notrans contents: preserve wrapper and argument as one shared parser item.
+\def\ulsbs@pdfsplitnotrans#1{\ulsbs@pdfsharedadd{\notrans{#1}}\ulsbs@pdfsplit}
+% Define a space-consuming scanner without losing that space to TeX arguments.
+\begingroup
+
+\def\:{\ulsbs@pdfsplitspace}\expandafter\gdef\: {\ulsbs@pdfchunkadd{ }\ulsbs@pdfsplit}
+\endgroup
+
+\AtBeginDocument{%
+  \typeout{ULSBS PDF transposition layers: \ifulsbs@pdflayers enabled (UI: \ulPdfTranspositionLayerUi)\else disabled\fi}%
+}
+\ExplSyntaxOn
+\AtBeginDocument{
+  \ifulsbs@pdflayers
+    \fp_compare:nNnTF {\ulPdfTranspositionMinimumScale}>{0}
+      {\fp_compare:nNnT {\ulPdfTranspositionMinimumScale}>{1}
+        {\PackageError{ulsbs}{Invalid~PDF~chord~minimum~scale}{Use~a~number~greater~than~0~and~at~most~1.}}}
+      {\PackageError{ulsbs}{Invalid~PDF~chord~minimum~scale}{Use~a~number~greater~than~0~and~at~most~1.}}
+  \fi
+}
+\AtEndDocument{\typeout{ULSBS~PDF~transposition:~\the\ulsbs@pdfsongcount\space registered~songs,
+  ~\int_eval:n {12*\prop_count:N\g__ulsbs_pdf_allocated_layers_prop}\space OCGs}}
+\ExplSyntaxOff

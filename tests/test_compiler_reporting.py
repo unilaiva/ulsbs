@@ -99,11 +99,11 @@ class CompilerReportingTests(unittest.TestCase):
         self.assertNotIn("OLD", worker.diagnostics[0].message)
         self.assertEqual(stdout.getvalue() + stderr.getvalue(), "")
 
-    def test_native_and_multiple_external_sources_count_once(self):
+    def test_score_and_multiple_external_sources_count_once(self):
         worker = pipeline._JobUI(self.ui, self.job)
-        native_log = self.log("scores.log", "score extraction details\n")
+        log = self.log("scores.log", "score extraction details\n")
         worker.warning_line("Some supplemental scores omitted", source="Scores",
-                            category="omitted-score", log_path=native_log, affected_count=7)
+                            category="omitted-score", log_path=log, affected_count=7)
         lily = self.log("lilypond.log", "warning: barcheck failed\n" * 2)
         tex = self.log("final.log", "Missing character: There is no X in font example!\n")
         index = self.log("indices.log", "Index: warning: unknown entry\n")
@@ -141,7 +141,7 @@ class CompilerReportingTests(unittest.TestCase):
                     self.assertIn("LilyPond: 1 unclassified warning", text)
                     self.assertNotIn("An unfamiliar future diagnostic", text)
 
-    def test_native_readme_warning_is_not_recounted_from_media_log(self):
+    def test_readme_warning_is_not_recounted_from_media_log(self):
         worker = pipeline._JobUI(self.ui, self.job)
         log = self.log("midi.log", (
             "Warning: Readme for MIDI directories does not exist: missing.md\n"
@@ -189,11 +189,11 @@ class CompilerReportingTests(unittest.TestCase):
 
     def test_warning_details_and_paths_precede_success_at_both_verbosity_levels(self):
         tex = self.log("final.log", "details\n")
-        native = self.log("scores.log", "details\n")
+        scores = self.log("scores.log", "details\n")
         diagnostics = (
             Diagnostic("TeX", "fonts", "Specific final font warning", tex, occurrences=2),
-            Diagnostic("Scores", "omitted-score", "Some scores omitted", native, affected_count=4),
-            Diagnostic("Scores", "other", "Another score issue", native),
+            Diagnostic("Scores", "omitted-score", "Some scores omitted", scores, affected_count=4),
+            Diagnostic("Scores", "other", "Another score issue", scores),
         )
         for verbose in (False, True):
             with self.subTest(verbose=verbose), self.capture() as (stdout, stderr):
@@ -638,8 +638,8 @@ class CompilerReportingTests(unittest.TestCase):
         self.assertNotIn("line", data["error"])
         self.assertIsNone(pipeline._tex_error_location(log.read_text(), self.job))
 
-    def test_failure_wrapper_retains_native_tex_error_location(self):
-        log = self.log("native-error.log", "./input.tex:7: Undefined control sequence.\n")
+    def test_failure_wrapper_retains_tex_error_location(self):
+        log = self.log("error.log", "./input.tex:7: Undefined control sequence.\n")
         with self.capture(), patch.object(pipeline, "_compile_one_job", side_effect=pipeline.CompileError(
             "Compilation failed", log,
         )):
@@ -650,12 +650,12 @@ class CompilerReportingTests(unittest.TestCase):
         self.assertEqual(data["error"]["line"], 7)
 
     @unittest.skipUnless(shutil.which("lualatex"), "LuaLaTeX not installed")
-    def test_native_lualatex_reports_the_included_files_local_line(self):
+    def test_lualatex_reports_the_included_files_local_line(self):
         content = self.compile_dir / "content"
         content.mkdir()
         included = content / "included.tex"
         included.write_text("% first line\n% second line\n\\ulsbsUndefinedTestCommand\n", encoding="utf-8")
-        (self.compile_dir / "native-location.tex").write_text(
+        (self.compile_dir / "location.tex").write_text(
             "\\documentclass{article}\n\\begin{document}\n"
             "\\input{content/included.tex}\n\\end{document}\n", encoding="utf-8",
         )
@@ -664,7 +664,7 @@ class CompilerReportingTests(unittest.TestCase):
         env = dict(os.environ, TEXMFVAR=str(cache), TEXMFCACHE=str(cache))
         with self.capture(), self.assertRaises(pipeline.CompileError) as caught:
             pipeline.step_lualatex_pass(
-                self.ui, self.cfg, self.job, "native-location", env, 1, 1, draftmode=False,
+                self.ui, self.cfg, self.job, "location", env, 1, 1, draftmode=False,
             )
         report = pipeline.write_diagnostic_report(
             self.cfg, self.job, (), "failed", error=caught.exception,

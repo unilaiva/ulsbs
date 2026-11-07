@@ -21,6 +21,8 @@ from ulsbs.jobs import Job
 
 
 LABEL_REQUEST = "LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.\n"
+INDEX_REQUEST = ("Package ulsbs-index Warning: Index data changed. "
+                 "Rerun LuaLaTeX to refresh the index.\n")
 
 
 class ReferenceConvergenceTests(unittest.TestCase):
@@ -55,6 +57,7 @@ class ReferenceConvergenceTests(unittest.TestCase):
     def test_explicit_requests_retry_once_and_return_latest_log(self):
         requests = (
             LABEL_REQUEST,
+            INDEX_REQUEST,
             "LaTeX Warning: Label(s) may have\n changed.\n",
             "LaTeX Warning: Rerun to get cross-\nreferences right.\n",
             "Package rerunfilecheck Warning: File `a-long-public-name\n.out' has changed.\n"
@@ -89,6 +92,8 @@ class ReferenceConvergenceTests(unittest.TestCase):
             "Package rerunfilecheck Info: File `public.out' has changed.\n\n"
             "Package rerunfilecheck Warning: File `public.bcf' has changed.\n\n"
             "Package unrelated Warning: Rerun to get cross-references right.\n\n"
+            "Package unrelated Warning: Rerun LuaLaTeX to refresh the index.\n\n"
+            "Package ulsbs-index Warning: Index data is unavailable.\n\n"
             "warning: barcheck failed\n",
             encoding="utf-8",
         )
@@ -119,6 +124,17 @@ class ReferenceConvergenceTests(unittest.TestCase):
                     with self.assertRaisesRegex(pipeline.CompileError, f"after {budget} extra passes"):
                         self.converge()
                 self.assertEqual(latex.call_count, budget)
+
+    def test_index_and_reference_requests_share_retry_budget(self):
+        self.log.write_text(INDEX_REQUEST, encoding="utf-8")
+        latest = self.root / "07_lualatex-pass4.log"
+        latest.write_text(LABEL_REQUEST, encoding="utf-8")
+        with patch.object(pipeline, "step_lualatex_pass",
+                          side_effect=[(latest, 8), (self.log, 9)]) as latex:
+            with self.assertRaisesRegex(pipeline.CompileError, "after 2 extra passes") as caught:
+                self.converge()
+        self.assertEqual(latex.call_count, 2)
+        self.assertIn(INDEX_REQUEST.strip(), caught.exception.log_path.read_text())
 
     def test_multikey_resources_and_reference_requests_share_retry_budget(self):
         latest = self.root / "07_lualatex-pass4.log"
@@ -160,7 +176,7 @@ class ReferenceConvergenceTests(unittest.TestCase):
         latex.assert_called_once()
 
 
-@unittest.skipUnless(all(shutil.which(tool) for tool in ("lualatex", "texlua", "pdftotext")),
+@unittest.skipUnless(all(shutil.which(tool) for tool in ("lualatex", "pdftotext")),
                      "ordinary songbook PDF tools unavailable")
 class OrdinaryReferenceIntegrationTests(unittest.TestCase):
     def test_toc_song_index_and_named_page_references_settle_by_pass_three(self):
@@ -174,27 +190,27 @@ class OrdinaryReferenceIntegrationTests(unittest.TestCase):
 \begin{document}
 \tableofcontents
 \clearpage
-\showindex{Song Title Index}{titleidx}
+\ulShowIndex{Song Title Index}{titleidx}
 \clearpage
 \chapter{Public Alpha}\hypertarget{public-alpha-target}{}\label{alpha}
 Alpha target page \pageref{alpha}. Beta target page \pageref{beta}.\par
-\begin{songs}{titleidx}
+\begin{ulSongs}{titleidx}
 \beginsong{Public Alpha Song}[id={public-alpha},key={C}]
 \beginverse
 \[C]Public synthetic line.
 \endverse
 \endsong
-\end{songs}
+\end{ulSongs}
 \clearpage
 \chapter{Public Beta}\hypertarget{public-beta-target}{}\label{beta}
 Alpha target page \pageref{alpha}. Beta target page \pageref{beta}.\par
-\begin{songs}{titleidx}
+\begin{ulSongs}{titleidx}
 \beginsong{Public Beta Song}[id={public-beta},key={G}]
 \beginverse
 \[G]Another public synthetic line.
 \endverse
 \endsong
-\end{songs}
+\end{ulSongs}
 \end{document}
 """
         with tempfile.TemporaryDirectory(prefix="ulsbs-test-ordinary-refs-") as directory:
@@ -211,12 +227,6 @@ Alpha target page \pageref{alpha}. Beta target page \pageref{beta}.\par
                 last, step = pipeline.step_lualatex_pass(ui, cfg, job, "public", env, 1, 1, True)
             except pipeline.CompileError as error:
                 self.fail(error.log_path.read_text())
-            subprocess.run(
-                ["texlua", str(TEX_ASSETS / "ext_packages/songs/songidx.lua"),
-                 "idx_title.sxd", "idx_title.sbx"],
-                cwd=root, env=env, check=True, capture_output=True, text=True,
-            )
-            self.assertIn("Public Alpha Song", (root / "idx_title.sbx").read_text())
             for pass_no in (2, 3):
                 last, step = pipeline.step_lualatex_pass(
                     ui, cfg, job, "public", env, step, pass_no, False,

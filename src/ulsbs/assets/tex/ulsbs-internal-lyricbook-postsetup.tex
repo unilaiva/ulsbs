@@ -3,40 +3,36 @@
 %
 % Post-setup for lyrics-only songbook variant.
 % This file is part of the 'ulsbs' package.
+%
+% Part of the system for automatically creating lyrics-only variant of a book.
+% This file contains instructions for after loading the ulsbs package file.
+%
+% When compiling a lyric variant, this file is automatically appended as an
+% input include right after the the main songbook document's \documentclass
+% invocation. The document class must be 'ulsbs-songbook' or one whose name
+% starts with 'ulsbs-songbook' (and loads ulsbs.sty); otherwise the variant
+% cannot be produced.
+%
+% Note that lyric-only variants don't require an entry in ULSBS-EXTRA-VARIANTS
+% marker.
 
-%% ulsbs-internal-lyricbook-postsetup.tex
-%% ======================================
-%%
-%% Part of the system for automatically creating lyrics-only variant of a book.
-%% This file contains instructions for after loading the ulsbs package file.
-%%
-%% When compiling a lyric variant, this file is automatically appended as an
-%% input include right after the the main songbook document's \documentclass
-%% invocation. The document class must be 'ulsbs-songbook' or one whose name
-%% starts with 'ulsbs-songbook' (and loads ulsbs.sty); otherwise the variant
-%% cannot be produced.
-%%
-%% Note that lyric-only variants don't require an entry in ULSBS-EXTRA-VARIANTS
-%% marker.
-%%
-
-\lyriconlytrue
+\ulLyricOnly{true}
 
 \chordsoff
 \measureson
 
-\showkeyfalse
-\showgoodkeysfalse
-\shownotesfalse
-\showbeatsfalse
-\showlilypondfalse
-\showaltchordsfalse
+\ulShowKey{false}
+\ulShowGoodKeys{false}
+\ulShowNotes{false}
+\ulShowBeats{false}
+\ulShowLilypond{false}
+\ulShowAltChords{false}
 
 % Make the measure bar lighter
-\definecolor{mbarcolor}{rgb}{.68,.44,.82}
+\definecolor{ulMeasureBarColor}{rgb}{.68,.44,.82}
 
 % Make numbers in the meter smaller and the same color as mbar:
-\renewcommand{\meterfont}{\color{mbarcolor}\tiny\sffamily\upshape}
+\renewcommand{\ulMeterFont}{\color{ulMeasureBarColor}\tiny\sffamily\upshape}
 
-\baselineadj=+1.5pt plus 0pt minus 0pt
+\ulBaselineAdjustment=+1.5pt plus 0pt minus 0pt
 \hypersetup{pdftitle={\ulThisBookTitle { (\ulBookLyricVariantText)}}}
