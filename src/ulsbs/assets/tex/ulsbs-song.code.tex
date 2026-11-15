@@ -504,7 +504,8 @@
     \dim_compare:nNnTF {\ulSongNumberWidth}>{0pt}
       {\hbox{\colorbox{\ulSongNumberBackgroundColor}
         {\vbox to\box_ht:N \l__ulsbs_song_prelude_box
-          {\hbox to\ulSongNumberWidth{\ulPrintSongNumber{\theulSongNumber}\hfil}\vfil}}
+          % Allow number ink to use the padding without enlarging short headings.
+          {\hbox to\ulSongNumberWidth{\ulPrintSongNumber{\theulSongNumber}\hfil}\vss}}
         \kern3pt\box_use_drop:N \l__ulsbs_song_prelude_box}}
       {\box_use_drop:N \l__ulsbs_song_prelude_box}
     \fi

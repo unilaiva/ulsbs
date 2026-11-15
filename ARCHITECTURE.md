@@ -703,6 +703,11 @@ the first title baseline. The PDF UI save-position marker uses that baseline and
 the original full heading right edge, independently of title wrapping or lane
 width. Measure retained nodes rather than replaying title, badge or style hooks.
 
+The song-number panel keeps the prelude's height and uses trailing `\vss` so
+larger number glyphs can extend into the color-box padding without an overfull
+vbox warning. This intentional overhang does not enlarge the heading or move
+the number, lyrics or anchors.
+
 `ulsbs-multikey.code.tex` pads the key-badge envelope outside its visible frame
 to accommodate the transpose arrow, following space and widest tonic/accidental
 with a minor suffix in the configured badge font. Ordinary and layered editions

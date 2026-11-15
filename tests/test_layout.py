@@ -23,6 +23,63 @@ class LayoutTests(unittest.TestCase):
     compile_source = lifecycle.SongLifecycleTests.compile_source
     pdf_text = lifecycle.SongLifecycleTests.pdf_text
 
+    def test_short_song_number_panels_fit_without_changing_geometry(self):
+        songs = []
+        for number in (414, 211, 148, 153, 306):
+            songs.append(r"""
+\setcounter{ulSongNumber}{NUMBER}
+\beginsong{Short}[id={panel-NUMBER}]
+\beginverse*
+BODYMARK
+\endverse
+\endsong
+""".replace("NUMBER", str(number)))
+        songs.append(r"""
+\renewcommand\theulSongNumber{\Roman{ulSongNumber}}
+\setcounter{ulSongNumber}{1}
+\beginsong{Short}[id={panel-roman}]
+\beginverse*
+BODYMARK
+\endverse
+\endsong
+""")
+        body = (r"\begin{ulSongs}{}" + "".join(songs)
+                + r"\end{ulSongs}\typeout{PANEL-PRINTS:\the\PanelPrints}")
+        preamble = r"""
+\ulSongPosition{0}
+\newcount\PanelPrints
+\let\OriginalPrintSongNumber\ulPrintSongNumber
+\renewcommand\ulPrintSongNumber[1]{\global\advance\PanelPrints1\relax\OriginalPrintSongNumber{#1}}
+\makeatletter\ExplSyntaxOn
+PATCH
+\cs_new_eq:NN \OriginalMakePrelude \ulMakePrelude
+\renewcommand\ulMakePrelude
+  {\vbox_set:Nn \l_tmpa_box {\OriginalMakePrelude}
+   \iow_term:x {PANEL-DIMS:\theulSongNumber/
+     \dim_eval:n {\box_wd:N \l_tmpa_box}/
+     \dim_eval:n {\box_ht:N \l_tmpa_box}/
+     \dim_eval:n {\box_dp:N \l_tmpa_box}}
+   \box_use_drop:N \l_tmpa_box}
+\ExplSyntaxOff\makeatother
+"""
+        snapshots = []
+        legacy_patch = (r"\exp_args:Nc\patchcmd{ulMakePrelude~code}{\vss}{\vfil}{}"
+                        r"{\errmessage{Number panel glue not found}}")
+        for label, patch in (("current", ""), ("legacy", legacy_patch)):
+            output = self.compile_source(document(body, preamble.replace("PATCH", patch)), label=label)
+            if label == "current":
+                self.assertNotIn("Overfull \\vbox", output)
+            else:
+                self.assertEqual(output.count("Overfull \\vbox"), 6)
+            self.assertEqual(re.findall(r"PANEL-PRINTS:(\d+)", output), ["6"])
+            dimensions = re.findall(r"PANEL-DIMS:([^\n]+)", output)
+            self.assertEqual(len(dimensions), 6)
+            anchors = [line for line in (self.book / "book.ulsbs.psv").read_text().splitlines()
+                       if line.startswith("ID-NR-PAGE-Y|")]
+            self.assertEqual(len(anchors), 6)
+            snapshots.append((dimensions, self.positioned_words(), anchors))
+        self.assertEqual(*snapshots)
+
     def test_song_titles_wrap_without_replaying_display_source(self):
         body = r"""
 \begin{ulSongs}{}
