@@ -1080,6 +1080,7 @@ requests in the body, as described in [Variants and visibility](#variants-and-vi
 | `\ulShowPhaseInToc` | `true` | Show phases in the TOC |
 | `\ulShowTags` | `true` | Show/hide tags in preludes; collection and index membership are unchanged |
 | `\ulSongIndexes` | `true` | Enable both index collection and display; false disables both |
+| `\ulTitleBadgeOverlap` | `false` | Allow prelude text to overlap the key, tag and phase badges |
 | `\ulShowChords` | `true` | Show inline chord symbols, not score ChordNames |
 | `\ulShowMeasures` | `true` | Show measure bars independently of chords |
 | `\ulShowNotes` | `true` | Show melody-note hints |
@@ -1104,6 +1105,19 @@ requests in the body, as described in [Variants and visibility](#variants-and-vi
 Preset changes are listed above; these baseline values are not a guarantee for a
 custom class. `\ulSongIndexes`, title casing, chapter colors and chord typography
 are ordinary configuration, not `\ulLocalShow` features.
+
+Song titles wrap automatically when space is limited, for example in a
+two-column section. By default, titles and the author, dedication and extra text
+below them leave room for the badges on the right.
+
+To let this text use the full width instead, allowing it to overlap the badges:
+
+```tex
+\ulTitleBadgeOverlap{true}
+```
+
+Set this in the preamble for the whole book, or inside a group for a particular
+section. Use `\ulTitleBadgeOverlap{false}` to restore the default.
 
 Other useful settings:
 

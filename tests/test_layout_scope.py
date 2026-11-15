@@ -52,6 +52,32 @@ class LayoutScopeTests(unittest.TestCase):
             self.assertEqual(re.findall(r"EFFECTS:(\d+)", output), [str(effects)] * 2)
         return outputs
 
+    def test_title_badge_overlap_is_a_scoped_boolean_not_visibility_policy(self):
+        source = lifecycle.document(r"""
+\ifulTitleBadgeOverlap\errmessage{Expected default false}\fi
+\iffalse\ifulTitleBadgeOverlap\errmessage{Skipped predicate}\fi\fi
+{\ulTitleBadgeOverlap{true}
+ \ifulTitleBadgeOverlap\else\errmessage{Expected local true}\fi
+ {\ulTitleBadgeOverlap{false}
+  \ifulTitleBadgeOverlap\errmessage{Expected nested false}\fi}
+ \ifulTitleBadgeOverlap\else\errmessage{Lost enclosing true}\fi}
+\ifulTitleBadgeOverlap\errmessage{Leaked local true}\fi
+\ulTitleBadgeOverlap{true}
+\ifulTitleBadgeOverlap\else\errmessage{Body setter was frozen}\fi
+\ulTitleBadgeOverlap{false}
+\ifulTitleBadgeOverlap\errmessage{Body setter did not reset}\fi
+\typeout{TITLE-BADGE-BOOLEAN:OK}
+Text.
+""")
+        self.assertIn("TITLE-BADGE-BOOLEAN:OK", self.compile_source(source))
+        for number, value in enumerate(("yes", r"\ComputedBoolean")):
+            with self.subTest(value=value):
+                source = lifecycle.document(
+                    rf"\ulTitleBadgeOverlap{{{value}}}Text.",
+                    r"\def\ComputedBoolean{true}")
+                self.compile_source(source, failure="Invalid boolean value",
+                                    label=f"invalid-{number}")
+
     def test_bottom_glue_is_independent_scoped_policy_and_matches_break_probes(self):
         probe = r"""
 \newskip\ActualGlue\newskip\ExpectedGlue

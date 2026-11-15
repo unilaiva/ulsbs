@@ -19,6 +19,10 @@
 \msg_new:nnn {ulsbs-song}{state}{Invalid~song~lifecycle:~#1.}
 \msg_new:nnn {ulsbs-song}{index}{Unknown~song~index~'#1'.}
 \msg_new:nnn {ulsbs-song}{key}{Unknown~metadata~key~'#1'.}
+\msg_new:nnn {ulsbs-song}{badge-width}
+  {Song~badges~leave~no~room~for~the~title.~Use~shorter~badges,~a~wider~heading,~or~allow~title/badge~overlap.}
+\msg_new:nnn {ulsbs-song}{heading-width}
+  {Song~number~panel~leaves~no~room~for~the~title.~Use~a~smaller~number~panel~or~a~wider~heading.}
 \bool_new:N \g__ulsbs_song_active_bool
 \bool_new:N \g__ulsbs_songs_active_bool
 \bool_new:N \g__ulsbs_song_heading_pending_bool
@@ -46,10 +50,17 @@
 \box_new:N \l__ulsbs_song_anchor_box
 \box_new:N \l__ulsbs_song_prelude_box
 \box_new:N \l__ulsbs_song_attribution_box
+\box_new:N \l__ulsbs_song_title_box
+\box_new:N \l__ulsbs_song_titles_box
+\box_new:N \l__ulsbs_song_header_anchor_box
+\box_new:N \l__ulsbs_song_badges_box
+\box_new:N \l__ulsbs_song_badge_box
 \tl_new:N \l__ulsbs_song_tagline_tl
 \dim_new:N \l__ulsbs_song_badge_raise_dim
+\dim_new:N \l__ulsbs_song_badge_width_dim
 \int_new:N \l__ulsbs_song_badge_row_int
 \dim_new:N \l__ulsbs_song_title_width_dim
+\dim_new:N \l__ulsbs_song_title_available_dim
 \dim_new:N \l__ulsbs_song_heading_reserve_dim
 \NewHook{ulsbs/song/begin}
 \NewHook{ulsbs/stanza/start}
@@ -417,30 +428,75 @@
     \legacy_if:nT {ulShowExtraInfo}{\ulExtraInfo\par}
   }
 
+% Rebreak retained title nodes only when necessary; fitting titles keep their
+% original horizontal box. A vtop keeps the first baseline as the reference.
+\cs_new_protected:Npn \__ulsbs_song_wrap_title:
+  {\dim_compare:nNnT {\box_wd:N \l__ulsbs_song_title_box}>{\l__ulsbs_song_title_available_dim}
+    {\vbox_set_top:Nn \l__ulsbs_song_title_box
+      {\hsize=\l__ulsbs_song_title_available_dim\relax\linewidth=\hsize
+       \normalbaselines\lineskip=1pt\relax
+       \ifulSlides\Centering\else
+         \ifulPagePreludesEnabled\Centering\else\RaggedRight\fi\fi
+       \parindent=0pt\relax
+       % Retain font leading at both ends when joining alternate title blocks.
+       \strut\hbox_unpack_drop:N \l__ulsbs_song_title_box\strut\par}}}
+
 % No arguments. Build title variants, badges and optional number panel after
 % body capture; emit the prelude box and restore iteration to the first title.
 \DeclareDocumentCommand \ulMakePrelude {}
   {
     \ulResetTitles
     \ifulSlides
-      \hbox to\hsize{\hfil\ulSongTitleFont\ulSongTitle\hfil\ulsbs@pdfheaderanchor}
+      {\ulSongTitleFont
+       \dim_set:Nn \l__ulsbs_song_title_available_dim {\hsize}
+       \hbox_set:Nn \l__ulsbs_song_title_box {\ulSongTitle}
+       \__ulsbs_song_wrap_title:
+       \hbox to\hsize{\hfil\box_use_drop:N \l__ulsbs_song_title_box\hfil\ulsbs@pdfheaderanchor}}
       \vskip5pt\relax
       \hbox to\hsize{\hfil\vbox{\hsize=.5\hsize\centering\small\ulExtendPrelude}\hfil}
     \else
     \dim_set:Nn \l__ulsbs_song_title_width_dim {\hsize}
     \dim_compare:nNnT {\ulSongNumberWidth}>{0pt}
       {\dim_sub:Nn \l__ulsbs_song_title_width_dim {\ulSongNumberWidth+2\fboxsep+3pt}}
+    \dim_compare:nNnF {\l__ulsbs_song_title_width_dim}>{0pt}
+      {\msg_warning:nn {ulsbs-song}{heading-width}
+       \dim_set:Nn \l__ulsbs_song_title_width_dim {1pt}}
     \vbox_set:Nn \l__ulsbs_song_prelude_box
       {
         \hsize=\l__ulsbs_song_title_width_dim\relax
         \ifulPagePreludesEnabled\centering\else\raggedright\fi
          \offinterlineskip\lineskip=1pt\relax
-         {\ulSongTitleFont\raisebox{0pt}[\ulSongTitleDefaultHeight]
-           {% Keep the marker at the header edge, inside the existing title box.
-            \ifulsbs@pdflayers\makebox[0pt][l]{\kern\hsize\ulsbs@pdfheaderanchor}\fi
-            \ulSongTitle}
-         \hfill\__ulsbs_song_badges:\par
-          \ulNextTitle\ulForEachTitle{(\ulSongTitle)\par}}
+         \group_begin:
+          \ulSongTitleFont
+          % Keep the UI marker independent of the title's width and line count.
+          \hbox_set:Nn \l__ulsbs_song_header_anchor_box
+            {\ifulsbs@pdflayers\makebox[0pt][l]{\kern\hsize\ulsbs@pdfheaderanchor}\fi}
+          \hbox_set:Nn \l__ulsbs_song_title_box {\ulSongTitle}
+          \__ulsbs_song_prepare_badges:
+          \dim_set_eq:NN \l__ulsbs_song_title_available_dim \l__ulsbs_song_title_width_dim
+          \ifulTitleBadgeOverlap\else
+            \dim_compare:nNnT {\l__ulsbs_song_badge_width_dim}>{0pt}
+              {\dim_sub:Nn \l__ulsbs_song_title_available_dim
+                 {\l__ulsbs_song_badge_width_dim+.5em}
+               \dim_compare:nNnF {\l__ulsbs_song_title_available_dim}>{0pt}
+                 {\msg_warning:nn {ulsbs-song}{badge-width}
+                  \dim_set:Nn \l__ulsbs_song_title_available_dim {1pt}}}
+          \fi
+          \vbox_set_top:Nn \l__ulsbs_song_titles_box
+            {\hsize=\l__ulsbs_song_title_available_dim\relax
+             \__ulsbs_song_wrap_title:
+             \raisebox{0pt}[\ulSongTitleDefaultHeight]{\box_use_drop:N \l__ulsbs_song_title_box}\hfill\par
+             \ulNextTitle\ulForEachTitle
+               {\hbox_set:Nn \l__ulsbs_song_title_box {(\ulSongTitle)}
+                \__ulsbs_song_wrap_title:\box_use_drop:N \l__ulsbs_song_title_box\par}}
+          \hbox to\l__ulsbs_song_title_width_dim
+            {\box_use_drop:N \l__ulsbs_song_header_anchor_box
+             \box_use_drop:N \l__ulsbs_song_titles_box\hfil
+              \box_use_drop:N \l__ulsbs_song_badges_box}
+          % Restore the caller's font while carrying the left-lane width out.
+          \exp_args:NNNx \group_end: \dim_set:Nn \hsize
+            {\dim_use:N \l__ulsbs_song_title_available_dim}
+         \linewidth=\hsize
         \ifdim\prevdepth=0pt\kern1pt\fi
         \tiny\parskip=1pt\relax\ulExtendPrelude
         \kern0pt
@@ -455,22 +511,29 @@
     \ulResetTitles
   }
 
-% #1: formatted badge content. Emit a zero-width raised row and advance row state.
+% Retain each formatted row once and measure only its horizontal lane.
+% Badge overlays keep zero width, height and depth, including below the title.
 \cs_new_protected:Npn \__ulsbs_song_badge:n #1
   {
     \dim_set:Nn \l__ulsbs_song_badge_raise_dim
       {\int_case:nnF {\l__ulsbs_song_badge_row_int}
         {{0}{\ulsbs@preludeRTfirstraise}{1}{\ulsbs@preludeRTsecondraise}
          {2}{\ulsbs@preludeRTthirdraise}}{\ulsbs@preludeRTfourthraise}}
-    \makebox[0pt][r]{\raisebox{\l__ulsbs_song_badge_raise_dim}[0pt][0pt]
-      {\ulPreludeBadgeFont#1}}
+    \hbox_set:Nn \l__ulsbs_song_badge_box {\ulPreludeBadgeFont#1}
+    \dim_set:Nn \l__ulsbs_song_badge_width_dim
+      {\dim_max:nn {\l__ulsbs_song_badge_width_dim}{\box_wd:N \l__ulsbs_song_badge_box}}
+    \hbox_set:Nn \l__ulsbs_song_badges_box
+      {\hbox_unpack_drop:N \l__ulsbs_song_badges_box
+       \makebox[0pt][r]{\raisebox{\l__ulsbs_song_badge_raise_dim}[0pt][0pt]
+         {\box_use_drop:N \l__ulsbs_song_badge_box}}}
     \int_incr:N \l__ulsbs_song_badge_row_int
   }
 
-% No arguments. Reset rows, measure enabled tags/phases, then emit visible
-% tag/phase/key/good-key badges in the current title context.
-\cs_new_protected:Npn \__ulsbs_song_badges:
+% No arguments. Retain visible rows and their lane metrics in the title context.
+\cs_new_protected:Npn \__ulsbs_song_prepare_badges:
   {
+    \box_clear:N \l__ulsbs_song_badges_box
+    \dim_zero:N \l__ulsbs_song_badge_width_dim
     \int_zero:N \l__ulsbs_song_badge_row_int
     \tl_clear:N \l__ulsbs_song_tagline_tl
     % Visibility follows natural width in the title context, not token-list
@@ -494,6 +557,9 @@
         {\ulPreludeKeyLineStyle\ulsbs@goodkeysbox
           {\textit{\ulPreludeTextGoodKeysAlone}~\textbf{\ulGoodKeys\ulsbs@vphantommaxtext}}}}\fi
   }
+
+\cs_new_protected:Npn \__ulsbs_song_badges:
+  {\__ulsbs_song_prepare_badges:\box_use_drop:N \l__ulsbs_song_badges_box}
 
 % No arguments; typeset the public postlude extension in small ragged text.
 \DeclareDocumentCommand \ulMakePostlude {}

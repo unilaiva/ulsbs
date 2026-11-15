@@ -10,6 +10,7 @@ customization, use [Writing Songbooks](WRITING_SONGBOOKS.md).
   - [Named variants](#named-variants)
   - [Reading and documenting runtime code](#reading-and-documenting-runtime-code)
   - [Song and page lifecycle](#song-and-page-lifecycle)
+  - [Prelude layout](#prelude-layout)
   - [Annotation scanner contract](#annotation-scanner-contract)
   - [Retained geometry and spacing](#retained-geometry-and-spacing)
 - [Index Lifecycle](#index-lifecycle)
@@ -637,10 +638,10 @@ enter the multikey manifest.
 
 The body typesets before prelude/postlude, then assembles below the retained
 prelude. Attributions compose once in a retained horizontal box and unpack for
-paragraph layout. Badge widths measure in the title font; the save-position
-marker stays at the title box's right edge. Initial public chord-font metrics
-precede the shared document font policy. Preserve these boundaries to avoid
-font-first-use or anchor changes without replaying source.
+paragraph layout; [prelude layout](#prelude-layout) owns title wrapping, badge
+space and the save-position marker. Initial public chord-font metrics precede
+the shared document font policy. Preserve these boundaries to avoid font-first-use
+or anchor changes without replaying source.
 
 Positioning dry-splits copies of completed boxes against actual page contributions
 and finite stretch/shrink, then submits real material once. Pending owned
@@ -674,6 +675,42 @@ distinguish in-stanza, between-stanza and outside-song contexts. An attached not
 `\ulBreakPenalty=\ulVerseVersePenalty` lasts for the rest of the song scope;
 glue requested before the first stanza waits for a real boundary. Block counters, alternate
 colors and song-local settings reset at song end.
+
+### Prelude layout
+
+`ulsbs-song.code.tex` measures each formatted title once and retains its nodes.
+Titles that fit keep their horizontal box and existing metrics. Oversized titles
+unpack into a paragraph at the actual heading width, after subtracting any song
+number panel and reserved badge lane. `\RaggedRight`/`\Centering` permit the active
+language's hyphenation; a `vtop` preserves the first baseline, and struts retain
+font leading at the ends of wrapped title blocks. Alternate titles remain
+separate paragraphs. Explicitly unbreakable content can still overflow.
+
+`\ulTitleBadgeOverlap` defaults to false and uses the ordinary scoped boolean
+infrastructure, including `\ifulTitleBadgeOverlap`; it is not a frozen visibility
+permission. When false, the widest visible badge row plus `.5em` in the title
+font reserves a rectangular right-hand lane. Titles, authors, dedication and
+extra info share the remaining width. Attribution/extra text follows the title
+immediately, with the caller's font restored and `\hsize`/`\linewidth` set to the
+left-lane width. When true, all prelude text has the full heading width. Hidden
+badges reserve nothing and execute no display source. Exhausted heading/lane
+widths produce an owned warning and a positive fallback width.
+
+Badge rows retain zero advance, height and depth in both modes. Their lower
+extent must not push attribution, extra info or verses down; only the text's own
+wrapping contributes additional height. Badges keep their existing offsets from
+the first title baseline. The PDF UI save-position marker uses that baseline and
+the original full heading right edge, independently of title wrapping or lane
+width. Measure retained nodes rather than replaying title, badge or style hooks.
+
+`ulsbs-multikey.code.tex` pads the key-badge envelope outside its visible frame
+to accommodate the transpose arrow, following space and widest tonic/accidental
+with a minor suffix in the configured badge font. Ordinary and layered editions
+use the same envelope, preserving title wrapping and pagination across keys.
+Visible frames and alternative badges remain right-aligned at the original edge;
+the alternatives do not add their own layout dimensions. Geometry, source-effect
+and anchor regressions live in `test_layout.py`, `test_badge_metrics.py` and
+`test_multikey_anchors.py`.
 
 ### Annotation scanner contract
 

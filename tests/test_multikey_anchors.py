@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 import unittest
 
-from test_pdf_transposition_layers import PdfStructure
+from test_pdf_transposition_layers import PdfStructure, words_and_geometry
 from test_tex_integration import FIXTURES, ROOT, TEX_ASSETS
 
 
@@ -32,8 +32,8 @@ class MultikeyAnchorTests(unittest.TestCase):
         cls.diagnostics = ROOT / "build/multikey-anchors"
         cls.diagnostics.mkdir(parents=True, exist_ok=True)
 
-    def compile(self, source, *, multikey=True):
-        work = self.root / self._testMethodName / ("layered" if multikey else "ordinary")
+    def compile(self, source, *, multikey=True, label=None):
+        work = self.root / self._testMethodName / (label or ("layered" if multikey else "ordinary"))
         work.mkdir(parents=True)
         source = (rf"\def\ulPdfTranspositionLayers{{{'true' if multikey else 'false'}}}" + "\n"
                   + source)
@@ -145,7 +145,82 @@ class MultikeyAnchorTests(unittest.TestCase):
         manifest = self.manifest(book)
         first, second = manifest["multikey_info"]["songs"]
         self.assertLess((first["page_index"], -first["anchor"]["y"]),
-                        (second["page_index"], -second["anchor"]["y"]))
+                         (second["page_index"], -second["anchor"]["y"]))
+
+    def test_wrapping_and_badge_lanes_preserve_first_line_ui_anchor(self):
+        source = r"""
+\documentclass[oneside,openany]{ulsbs-songbook}
+\setlength\textwidth{200pt}
+\ulShowTags{true}\ulShowPhase{true}\ulShowKey{true}\ulShowGoodKeys{true}
+SETTING
+\begin{document}
+\begin{ulSongs}{}
+\beginsong{TITLE}[id={fixed-anchor},key={C},gk={Dm},tags={nature},ph={II},by={Author},ex={Supplementary heading text}]
+\beginverse*
+\[C]A chorded line.
+\endverse
+\endsong
+\end{ulSongs}
+\end{document}
+"""
+        long_title = "Alpha Beta Gamma Delta Epsilon Zeta Eta Theta Iota Kappa"
+        for numbered in (False, True):
+            anchors = []
+            for name, title, overlap in (("short", "Short", True),
+                                          ("wrapped", long_title, True),
+                                          ("reserved", long_title, False)):
+                with self.subTest(numbered=numbered, mode=name):
+                    setting = r"\ulTitleBadgeOverlap{" + str(overlap).lower() + "}"
+                    if not numbered:
+                        setting += r"\ulNoSongNumbers"
+                    book, output = self.compile(source.replace("SETTING", setting).replace("TITLE", title),
+                                                label=f"{numbered}-{name}")
+                    self.assertNotIn("Overfull \\hbox", output)
+                    song, = self.manifest(book)["multikey_info"]["songs"]
+                    anchors.append(song["anchor"])
+            self.assertEqual(anchors[0], anchors[1])
+            self.assertEqual(anchors[0], anchors[2])
+
+    def test_all_transposed_key_badges_share_the_ordinary_title_lane(self):
+        source = r"""
+\documentclass[oneside,openany]{ulsbs-songbook}
+\ulNoSongNumbers\setlength\textwidth{230pt}
+\ulShowKey{true}\ulShowGoodKeys{false}\ulShowTags{false}\ulShowPhase{false}
+\renewcommand\ulPreludeBadgeFont{\normalfont\fontsize{13}{17}\selectfont}
+\renewcommand\ulPreludeTextKey{KEYMARK}
+\begin{document}
+\begin{ulSongs}{}
+\beginsong{Alpha Beta Gamma Delta Epsilon Zeta Eta Theta}[id={reserved-keys},key={C}]
+\beginverse*
+\[C]BODYMARK
+\endverse
+\endsong
+\end{ulSongs}
+\end{document}
+"""
+        ordinary, _ = self.compile(source, multikey=False)
+        plain = (ordinary / "book.pdf").read_bytes()
+        layered, output = self.compile(source)
+        self.assertNotIn("Overfull \\hbox", output)
+        data = (layered / "book.pdf").read_bytes()
+        self.assertEqual(words_and_geometry(plain), words_and_geometry(data))
+        title_words = set("Alpha Beta Gamma Delta Epsilon Zeta Eta Theta".split())
+        expected_title = [row for row in words_and_geometry(plain) if row[1] in title_words]
+        self.assertGreater(len({row[3] for row in expected_title}), 1)
+        for offset in range(12):
+            with self.subTest(offset=offset):
+                selected = PdfStructure(data).selected_pdf(data, {1: offset})
+                words = words_and_geometry(selected)
+                self.assertEqual([row for row in words if row[1] in title_words], expected_title)
+                marker, = [row for row in words if row[1] == "KEYMARK"]
+                badge = [row for row in words if len(row) == 6
+                         and row[1] not in title_words
+                         and row[3] < marker[5] and row[5] > marker[3]]
+                self.assertLess(max(row[4] for row in expected_title), min(row[2] for row in badge))
+        other_key, _ = self.compile(source.replace("key={C}", r"key={B\flt m}"),
+                                    multikey=False, label="ordinary-other-key")
+        other_words = words_and_geometry((other_key / "book.pdf").read_bytes())
+        self.assertEqual([row for row in other_words if row[1] in title_words], expected_title)
 
 
 if __name__ == "__main__":

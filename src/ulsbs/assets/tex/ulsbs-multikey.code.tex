@@ -28,6 +28,11 @@
 \tl_new:N \l__ulsbs_multikey_text_tl
 \tl_new:N \l__ulsbs_multikey_original_tl
 \int_new:N \l__ulsbs_multikey_offset_int
+\box_new:N \l__ulsbs_multikey_badge_key_box
+\box_new:N \l__ulsbs_multikey_badge_arrow_box
+\box_new:N \l__ulsbs_multikey_badge_box
+\dim_new:N \l__ulsbs_multikey_badge_key_width_dim
+\dim_new:N \l__ulsbs_multikey_badge_arrow_width_dim
 
 % Load parsed key state only for an active song with a saved supported
 % key. Clearing availability first prevents a previous call's key from leaking.
@@ -192,11 +197,28 @@
     \int_if_zero:nTF {\l__ulsbs_multikey_offset_int}
       {\def\ulsbs@preludekeycolor{ulChordColor}}
       {\def\ulsbs@preludekeycolor{ulTransposedKeyColor}}
-    \ulsbs@mainkeybox[\ulsbs@preludekeycolor]
+    \hbox_set:Nn \l__ulsbs_multikey_badge_key_box
+      {\textbf{\color{\ulsbs@preludekeycolor}#1\ulsbs@vphantommaxtext}}
+    \hbox_set:Nn \l__ulsbs_multikey_badge_arrow_box
       {\int_if_zero:nF {\l__ulsbs_multikey_offset_int}
-         {{\color{\ulsbs@preludekeycolor}\symudarrow}\space}
-       \textit{\ulPreludeTextKey}~
-       \textbf{\color{\ulsbs@preludekeycolor}#1\ulsbs@vphantommaxtext}}
+         {{\color{\ulsbs@preludekeycolor}\symudarrow}\space}}
+    \hbox_set:Nn \l__ulsbs_multikey_badge_box
+      {\ulsbs@mainkeybox[\ulsbs@preludekeycolor]
+        {\box_use:N \l__ulsbs_multikey_badge_arrow_box
+         \textit{\ulPreludeTextKey}~\box_use:N \l__ulsbs_multikey_badge_key_box}}
+    \ifulTitleBadgeOverlap
+      \box_use_drop:N \l__ulsbs_multikey_badge_box
+    \else
+      % Reserve every possible key's envelope in ordinary and layered books
+      % alike. Padding is outside the frame, so visible badge positions stay put.
+      \hbox_to_wd:nn
+        {\box_wd:N \l__ulsbs_multikey_badge_box
+         +\dim_max:nn {0pt}{\dim_max:nn {\l__ulsbs_multikey_badge_key_width_dim}
+           {\box_wd:N \l__ulsbs_multikey_badge_key_box+\l__ulsbs_multikey_badge_arrow_width_dim}
+           -\box_wd:N \l__ulsbs_multikey_badge_key_box
+           -\box_wd:N \l__ulsbs_multikey_badge_arrow_box}}
+        {\hfil\box_use_drop:N \l__ulsbs_multikey_badge_box}
+    \fi
   }
 
 % Invoke inside the key-badge row, after its prelude key-line style.
@@ -206,6 +228,16 @@
   {
     \group_begin:
     \int_zero:N \l__ulsbs_multikey_offset_int
+    \ifulTitleBadgeOverlap\else
+      \hbox_set:Nn \l_tmpa_box {\symudarrow\space}
+      \dim_set:Nn \l__ulsbs_multikey_badge_arrow_width_dim {\box_wd:N \l_tmpa_box}
+      \dim_zero:N \l__ulsbs_multikey_badge_key_width_dim
+      \clist_map_inline:nn {A,B,C,D,E,F,G}
+        {\clist_map_inline:nn {{},{\shrp},{\flt}}
+          {\hbox_set:Nn \l_tmpa_box {\symudarrow\space\textbf{##1####1m}}
+           \dim_set:Nn \l__ulsbs_multikey_badge_key_width_dim
+             {\dim_max:nn {\l__ulsbs_multikey_badge_key_width_dim}{\box_wd:N \l_tmpa_box}}}}
+    \fi
     \ifulsbs@pdfsong
       \ulsbs@pdfrightaligntrue
       \exp_args:NV \__ulsbs_pdf_visual:nnn \ulSongKey {\__ulsbs_multikey_badge:n}{0}

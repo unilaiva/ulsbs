@@ -23,6 +23,297 @@ class LayoutTests(unittest.TestCase):
     compile_source = lifecycle.SongLifecycleTests.compile_source
     pdf_text = lifecycle.SongLifecycleTests.pdf_text
 
+    def test_song_titles_wrap_without_replaying_display_source(self):
+        body = r"""
+\begin{ulSongs}{}
+\beginsong{\TitleEffect Alpha Beta Gamma Delta Epsilon Zeta Eta Theta Iota Kappa Lambda Mu Nu Xi Omicron Pi Rho Sigma Tau Upsilon Phi Chi Psi Omega\\\TitleEffect Alternate heading with several ordinary words}
+\beginverse*
+BODYMARK
+\endverse
+\endsong
+\end{ulSongs}
+\typeout{TITLE-EFFECTS:\the\TitleEffects}
+"""
+        settings = (
+            ("one-column", r"\setlength\textwidth{220pt}"),
+            ("two-columns", r"\ulSongColumns{2}"),
+            ("centered", r"\setlength\textwidth{220pt}\ulPagePreludes"),
+            ("slides", r"\ulSlides{true}"),
+        )
+        for label, setting in settings:
+            with self.subTest(layout=label):
+                preamble = setting + r"""
+\newcount\TitleEffects
+\DeclareRobustCommand\TitleEffect{\global\advance\TitleEffects1\relax}
+\pdfstringdefDisableCommands{\def\TitleEffect{}}
+"""
+                output = self.compile_source(document(body, preamble), label=label)
+                self.assertNotIn("Overfull \\hbox", output)
+                self.assertEqual(re.findall(r"TITLE-EFFECTS:(\d+)", output),
+                                 ["1" if label == "slides" else "2"])
+                words = {text: box for page in self.positioned_words() for text, box in page}
+                self.assertGreater(float(words["Omega"]["yMin"]),
+                                   float(words["Alpha"]["yMin"]))
+                self.assertGreater(float(words["BODYMARK"]["yMin"]),
+                                   float(words["Omega"]["yMax"]))
+
+    def test_title_badges_keep_first_baseline_with_optional_reserved_lane(self):
+        body = r"""
+\begin{ulSongs}{}
+\beginsong{Alpha Beta Gamma Delta}[key={C},gk={Dm},tags={nature},ph={I},by={ATTRIBUTION}]
+\beginverse*
+BODYMARK
+\endverse
+\endsong
+\end{ulSongs}
+"""
+        preamble = r"""
+\ulNoSongNumbers\setlength\textwidth{180pt}
+\ulShowTags{true}\ulShowPhase{true}\ulShowKey{true}\ulShowGoodKeys{true}
+\renewcommand\ulPreludeTextKey{KEYMARK}
+\renewcommand\ulPreludeTextGoodKeysAlone{GOODMARK}
+"""
+        snapshots = {}
+        for mode, setting in (("reserved", ""), ("overlap", r"\ulTitleBadgeOverlap{true}"),
+                              ("hidden", r"\ulShowTags{false}\ulShowPhase{false}\ulShowKey{false}\ulShowGoodKeys{false}")):
+            with self.subTest(mode=mode):
+                output = self.compile_source(document(body, preamble + setting), label=mode)
+                self.assertNotIn("Overfull \\hbox", output)
+                snapshots[mode] = {text: {key: float(value) for key, value in box.items()}
+                                   for page in self.positioned_words() for text, box in page}
+        reserved, overlap, hidden = (snapshots[mode] for mode in ("reserved", "overlap", "hidden"))
+        self.assertGreater(reserved["Delta"]["yMin"], reserved["Alpha"]["yMin"])
+        self.assertEqual(overlap["Delta"]["yMin"], overlap["Alpha"]["yMin"])
+        self.assertEqual(hidden["Delta"]["yMin"], hidden["Alpha"]["yMin"])
+        for word in ("Alpha", "KEYMARK", "GOODMARK"):
+            self.assertEqual(reserved[word], overlap[word])
+        title_right = max(reserved[word]["xMax"] for word in ("Alpha", "Beta", "Gamma", "Delta"))
+        badge_left = min(reserved[word]["xMin"] for word in ("KEYMARK", "GOODMARK", "nature"))
+        self.assertLess(title_right, badge_left)
+        self.assertGreater(reserved["ATTRIBUTION"]["yMin"], reserved["Delta"]["yMax"])
+
+    def test_badge_rows_do_not_push_prelude_text_or_verses_down(self):
+        body = r"""
+\begin{ulSongs}{}
+\beginsong{Short}[key={C},gk={Dm},tags={nature},ph={I},ex={EXMARK}]
+\beginverse*
+BODYMARK
+\endverse
+\endsong
+\end{ulSongs}
+"""
+        preamble = r"""
+\ulNoSongNumbers\setlength\textwidth{230pt}
+\renewcommand\ulPreludeTextGoodKeysAlone{GOODMARK}
+"""
+        snapshots = []
+        modes = (("hidden", False, False, False), ("one-row", False, True, False),
+                 ("two-rows", True, True, False), ("three-rows", True, True, True))
+        for label, tags, key, good in modes:
+            with self.subTest(mode=label):
+                settings = (r"\ulShowTags{" + str(tags).lower() + "}"
+                            + r"\ulShowPhase{" + str(tags).lower() + "}"
+                            + r"\ulShowKey{" + str(key).lower() + "}"
+                            + r"\ulShowGoodKeys{" + str(good).lower() + "}")
+                output = self.compile_source(document(body, preamble + settings), label=label)
+                self.assertNotIn("Overfull \\hbox", output)
+                words = {text: box for page in self.positioned_words() for text, box in page}
+                snapshots.append({word: words[word] for word in ("Short", "EXMARK", "BODYMARK")})
+                if good:
+                    self.assertLess(float(words["EXMARK"]["yMin"]), float(words["GOODMARK"]["yMax"]))
+                    self.assertLess(float(words["EXMARK"]["xMax"]), float(words["GOODMARK"]["xMin"]))
+        for snapshot in snapshots[1:]:
+            self.assertEqual(snapshot, snapshots[0])
+
+    def test_all_prelude_text_uses_left_lane_and_retains_caller_font(self):
+        body = r"""
+\begin{ulSongs}{}
+\beginsong{Short}[key={C},gk={Dm},tags={nature},ph={I},by={AUTHORFIRST several author words across the left lane AUTHORLAST},off={RECIPIENT},ex={EXFIRST extra text across multiple lines in the left lane EXLAST}]
+\beginverse*
+BODYMARK
+\endverse
+\endsong
+\end{ulSongs}
+\typeout{PRELUDE-EFFECTS:\the\TitleFontEffects/\the\PreludeEffects}
+"""
+        preamble = r"""
+\ulNoSongNumbers\setlength\textwidth{200pt}
+\ulShowTags{true}\ulShowPhase{true}\ulShowKey{true}\ulShowGoodKeys{true}
+\renewcommand\ulPreludeTextGoodKeysAlone{GOODMARK}
+\newcount\TitleFontEffects\newcount\PreludeEffects
+\renewcommand\ulSongTitleFont{\sffamily\bfseries\Large\global\advance\TitleFontEffects1\relax}
+\makeatletter
+\let\OriginalMakePrelude\ulMakePrelude
+\renewcommand\ulMakePrelude{\edef\ExpectedPreludeFamily{\f@family}\OriginalMakePrelude}
+\let\OriginalExtendPrelude\ulExtendPrelude
+\renewcommand\ulExtendPrelude{%
+ \ifx\f@family\ExpectedPreludeFamily\else\errmessage{Prelude inherited title font}\fi
+ \ifdim\linewidth=\hsize\else\errmessage{Prelude widths differ}\fi
+ \global\advance\PreludeEffects1\relax\OriginalExtendPrelude}
+\makeatother
+"""
+        output = self.compile_source(document(body, preamble))
+        self.assertNotIn("Overfull \\hbox", output)
+        self.assertEqual(re.findall(r"PRELUDE-EFFECTS:(\d+/\d+)", output), ["1/1"])
+        words = [(text.strip("()"), {key: float(value) for key, value in box.items()})
+                 for page in self.positioned_words() for text, box in page]
+        positions = dict(words)
+        left_edge = positions["GOODMARK"]["xMin"]
+        prelude_words = [box for text, box in words
+                         if box["yMin"] >= positions["AUTHORFIRST"]["yMin"]
+                         and box["yMax"] <= positions["EXLAST"]["yMax"]
+                         and text not in {"GOODMARK", "Dm", "Key:", "C", "nature", "I"}]
+        self.assertTrue(prelude_words)
+        self.assertLess(max(box["xMax"] for box in prelude_words), left_edge)
+        self.assertGreater(positions["AUTHORLAST"]["yMin"], positions["AUTHORFIRST"]["yMin"])
+        self.assertGreater(positions["EXLAST"]["yMin"], positions["EXFIRST"]["yMin"])
+
+    def test_wrapped_title_uses_active_language_hyphenation(self):
+        body = r"""
+\begin{LANGUAGE}
+\hyphenation{EXCEPTION}
+\begin{ulSongs}{}
+\beginsong{interoperability}
+\beginverse*
+x
+\endverse
+\endsong
+\end{ulSongs}
+\end{LANGUAGE}
+"""
+        preamble = r"""
+\ulNoSongNumbers\setlength\textwidth{70pt}
+\renewcommand\ulSongTitleFont{\normalfont\fontsize{14}{18}\selectfont}
+"""
+        for language, exception in (("english", "interoperability"),
+                                    ("finnish", "inter-oper-ability")):
+            with self.subTest(language=language):
+                source = body.replace("LANGUAGE", language).replace("EXCEPTION", exception)
+                output = self.compile_source(document(source, preamble), label=language)
+                if language == "english":
+                    self.assertIn("Overfull \\hbox", output)
+                else:
+                    self.assertNotIn("Overfull \\hbox", output)
+                    self.assertIn("interoper-", self.pdf_text())
+
+    def test_wrapped_alternate_titles_and_attribution_clear_all_heading_ink(self):
+        body = r"""
+\begin{ulSongs}{}
+\beginsong{MAINSTART ordinary words across several lines MAINEND\\ALTSTART another heading across several lines ALTEND\\THIRDSTART more words across several lines \mbox{THIRDEND}}[key={C},gk={Dm},tags={nature},ph={I},by={ATTRIBUTION}]
+\beginverse*
+BODYMARK
+\endverse
+\endsong
+\end{ulSongs}
+"""
+        preamble = r"""
+\ulNoSongNumbers\setlength\textwidth{260pt}
+\renewcommand\ulSongTitleFont{\normalfont\fontsize{16}{23}\selectfont}
+\ulShowTags{true}\ulShowPhase{true}\ulShowKey{true}\ulShowGoodKeys{true}
+"""
+        output = self.compile_source(document(body, preamble))
+        self.assertNotIn("Overfull \\hbox", output)
+        words = {text.strip("()"): box for page in self.positioned_words() for text, box in page}
+        for start, end in (("MAINSTART", "MAINEND"), ("ALTSTART", "ALTEND"),
+                           ("THIRDSTART", "THIRDEND")):
+            self.assertGreater(float(words[end]["yMin"]), float(words[start]["yMin"]))
+        for before, after in (("MAINEND", "ALTSTART"), ("ALTEND", "THIRDSTART"),
+                              ("THIRDEND", "ATTRIBUTION"), ("ATTRIBUTION", "BODYMARK")):
+            self.assertGreater(float(words[after]["yMin"]), float(words[before]["yMax"]))
+
+    def test_exhausted_title_lane_reports_a_diagnostic(self):
+        source = document(r"""
+\begin{ulSongs}{}
+\beginsong{Heading}[key={C}]
+\beginverse*
+x
+\endverse
+\endsong
+\end{ulSongs}
+""", r"""
+\ulNoSongNumbers\setlength\textwidth{80pt}
+\ulShowKey{true}
+\renewcommand\ulPreludeTextKey{An intentionally oversized badge label}
+""")
+        output = self.compile_source(source)
+        self.assertIn("leave no room for the title", " ".join(output.split()))
+        numbered = source.replace(r"\ulNoSongNumbers\setlength\textwidth{80pt}",
+                                  r"\setlength\ulSongNumberWidth{90pt}\setlength\textwidth{80pt}")
+        output = self.compile_source(numbered, label="numbered")
+        self.assertIn("number panel leaves no room", " ".join(output.split()))
+
+    def test_title_wrapping_also_works_with_direct_package_loading(self):
+        source = r"""
+\documentclass{book}
+\usepackage{ulsbs}
+\setlength\textwidth{200pt}
+\begin{document}
+\begin{ulSongs}{}
+\beginsong{A title with enough ordinary words to require multiple lines}
+\beginverse*
+BODYMARK
+\endverse
+\endsong
+\end{ulSongs}
+\end{document}
+"""
+        output = self.compile_source(source)
+        self.assertNotIn("Overfull \\hbox", output)
+        self.assertIn("BODYMARK", self.pdf_text())
+
+    def test_fitting_title_preserves_legacy_geometry(self):
+        body = r"""
+\begin{ulSongs}{}
+\beginsong{Short\\Alternate}[tags={nature},ph={I},by={ATTRIBUTION}]
+\beginverse*
+BODYMARK
+\endverse
+\endsong
+\end{ulSongs}
+"""
+        preamble = r"\ulNoSongNumbers\ulShowTags{true}\ulShowPhase{true}"
+        legacy = r"""
+\ExplSyntaxOn
+\renewcommand\ulMakePrelude{
+ \ulResetTitles
+ \vbox{\raggedright\offinterlineskip\lineskip=1pt
+  {\ulSongTitleFont\raisebox{0pt}[\ulSongTitleDefaultHeight]{\ulSongTitle}
+   \hfill\__ulsbs_song_badges:\par
+   \ulNextTitle\ulForEachTitle{(\ulSongTitle)\par}}
+  \ifdim\prevdepth=0pt\kern1pt\fi
+  \tiny\parskip=1pt\ulExtendPrelude\kern0pt}
+ \ulResetTitles}
+\ExplSyntaxOff
+"""
+        snapshots = []
+        for label, extra in (("legacy", legacy), ("current", "")):
+            self.compile_source(document(body, preamble + extra), label=label)
+            snapshots.append(self.positioned_words())
+        self.assertEqual(*snapshots)
+
+    def test_key_badge_envelope_preserves_legacy_visible_geometry(self):
+        body = r"""
+\begin{ulSongs}{}
+\beginsong{Short}[key={C}]
+\beginverse*
+BODYMARK
+\endverse
+\endsong
+\end{ulSongs}
+"""
+        legacy = r"""
+\makeatletter\ExplSyntaxOn
+\cs_set_protected:Npn \__ulsbs_multikey_badge:n #1
+ {\ulsbs@mainkeybox[ulChordColor]
+   {\textit{\ulPreludeTextKey}~\textbf{\color{ulChordColor}#1\ulsbs@vphantommaxtext}}}
+\ExplSyntaxOff\makeatother
+"""
+        snapshots = []
+        for label, extra in (("legacy", legacy), ("current", "")):
+            self.compile_source(document(body, r"\ulShowKey{true}" + extra), label=label)
+            snapshots.append(self.positioned_words())
+        self.assertEqual(*snapshots)
+
     def test_toc_three_digit_page_numbers_fit(self):
         body = r"""
 \ulToc

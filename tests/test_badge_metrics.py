@@ -218,14 +218,13 @@ A visible tag badge.
   \OriginalPrelude
   \typeout{KEY-HOOKS:\theulSongNumber:\the\MainEffects/\the\GoodEffects/\the\StyleEffects}}
 \ExplSyntaxOn
-\cs_new_eq:NN \OriginalBadges \__ulsbs_song_badges:
-\cs_set_protected:Npn \__ulsbs_song_badges:
-  {\hbox_set:Nn \l_tmpa_box {\OriginalBadges}
+\cs_new_eq:NN \OriginalBadges \__ulsbs_song_prepare_badges:
+\cs_set_protected:Npn \__ulsbs_song_prepare_badges:
+  {\OriginalBadges
    \iow_term:x {KEY-DIMS:\theulSongNumber :
-     \dim_eval:n{\box_wd:N\l_tmpa_box},
-     \dim_eval:n{\box_ht:N\l_tmpa_box},
-     \dim_eval:n{\box_dp:N\l_tmpa_box}}
-   \box_use_drop:N\l_tmpa_box}
+     \dim_eval:n{\box_wd:N\l__ulsbs_song_badges_box},
+     \dim_eval:n{\box_ht:N\l__ulsbs_song_badges_box},
+     \dim_eval:n{\box_dp:N\l__ulsbs_song_badges_box}}}
 \NewDocumentCommand\KeyMetadata{}{
   \iow_term:x {KEY-META:\theulSongNumber :
     \prop_item:Nn\l__ulsbs_song_metadata_prop{key}/
@@ -308,14 +307,13 @@ HiddenBadgeAnchor
 \renewcommand\ulPreludeTextGoodKeysAlone{\errmessage{Hidden good keys executed}}
 \renewcommand\ulPreludeBadgeFont{\errmessage{Hidden badge font executed}}
 \ExplSyntaxOn
-\cs_new_eq:NN \OriginalBadges \__ulsbs_song_badges:
-\cs_set_protected:Npn \__ulsbs_song_badges:
-  {\hbox_set:Nn \l_tmpa_box {\OriginalBadges}
+\cs_new_eq:NN \OriginalBadges \__ulsbs_song_prepare_badges:
+\cs_set_protected:Npn \__ulsbs_song_prepare_badges:
+  {\OriginalBadges
    \iow_term:x {HIDDEN-BADGES:
-     \dim_eval:n{\box_wd:N\l_tmpa_box},
-     \dim_eval:n{\box_ht:N\l_tmpa_box},
-     \dim_eval:n{\box_dp:N\l_tmpa_box}}
-   \box_use_drop:N\l_tmpa_box}
+     \dim_eval:n{\box_wd:N\l__ulsbs_song_badges_box},
+     \dim_eval:n{\box_ht:N\l__ulsbs_song_badges_box},
+     \dim_eval:n{\box_dp:N\l__ulsbs_song_badges_box}}}
 \ExplSyntaxOff
 """)
         for layers in (False, True):
@@ -423,8 +421,8 @@ HiddenBadgeAnchor
   \OriginalPrelude
   \typeout{TAG-PHASE-HOOKS:\theulSongNumber:\the\TagEffects/\the\PhaseEffects}}
 \ExplSyntaxOn
-\cs_new_eq:NN \OriginalBadges \__ulsbs_song_badges:
-\cs_set_protected:Npn \__ulsbs_song_badges:
+\cs_new_eq:NN \OriginalBadges \__ulsbs_song_prepare_badges:
+\cs_set_protected:Npn \__ulsbs_song_prepare_badges:
   {\OriginalBadges
    \iow_term:x {TAG-PHASE-ROWS:\theulSongNumber :
      \int_use:N\l__ulsbs_song_badge_row_int}}
