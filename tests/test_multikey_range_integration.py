@@ -128,11 +128,14 @@ class TypesetRangeIntegrationTests(unittest.TestCase):
                          ["wide-chorded", "medium-chorded"])
         # Pin the normal, non-overfull headers' pre-fix right-edge UI positions.
         # Moving the anchor into the title must not move it to the title's end.
+        # Vertical extent now samples only enabled, nonempty badges, not absent
+        # tag/phase hooks. These key-only anchors move by 0.07 PDF units; ink,
+        # targets and range renderings must still match the ordinary document.
         for song, page, x in zip(songs, (5, 6), (339.32280012, 276.96058908), strict=True):
             self.assertEqual(song["page_index"], page)
             self.assertEqual(song["layer_page_indices"], [page])
             self.assertAlmostEqual(song["anchor"]["x"], x, delta=0.02)
-            self.assertAlmostEqual(song["anchor"]["y"], 549.3159806, delta=0.02)
+            self.assertAlmostEqual(song["anchor"]["y"], 549.24623482, delta=0.02)
 
         ordinary_words = words_and_geometry(ordinary_bytes)
         master_words = words_and_geometry(master_bytes)

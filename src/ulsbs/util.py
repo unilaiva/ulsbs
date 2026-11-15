@@ -651,32 +651,6 @@ def sync_tree(src_root: Path, dst_root: Path) -> int:
     return skipped
 
 
-def regex_documentclass_ulsbs_songbook() -> re.Pattern[str]:
-    r"""
-    Matches a LaTeX \documentclass whose class starts with 'ulsbs-songbook',
-    allowing optional [options], whitespace, newlines, and % EOL comments,
-    but not when the line is commented out.
-    """
-    return re.compile(
-        r"""
-        ^[^\S\n]*(?!%)\\documentclass          # start of line; not commented
-        (?:\s|%[^\n]*)*                        # whitespace or comments
-        (?:                                    # optional [options]
-            \[
-                [^\]]*                         # anything except closing ]
-            \]
-            (?:\s|%[^\n]*)*                    # whitespace or comments
-        )?
-        \{
-            (?:\s|%[^\n]*)*                    # whitespace or comments inside {
-            ulsbs\-songbook[^\s\}%]*           # class name prefix with any suffix
-            (?:\s|%[^\n]*)*                    # whitespace or comments before }
-        \}
-        """,
-        re.VERBOSE | re.MULTILINE,
-    )
-
-
 def deduplicate_paths_preserve_order(paths: Iterable[Path]) -> list[Path]:
     """Return a list of Paths with duplicates removed, preserving order.
 

@@ -4,7 +4,7 @@
 % Public author controls and early initialization.
 % This file is part of the 'ulsbs' package.
 %
-% Loaded by ulsbs.sty after package imports, with @ a letter and ulSongbookType set.
+% Loaded by ulsbs.sty after package imports, with @ a letter.
 % Requires etoolbox plus expl3/xparse; later styling supplies colors/fonts and
 % modules supply deferred dependencies (ulSongPosition, textnote, etc.).
 % Owns initial public flags, counters, font/hooks, lengths and break penalties.
@@ -26,7 +26,7 @@
 
 \ProvidesFile{ulsbs-init.code.tex}[Public initialization]
 
-% === Boolean controls and initial book mode ===
+% === Boolean controls ===
 
 % Keep predicates as real conditionals, including in TeX's skipped branches.
 % Assignment helpers stay private; the public setter follows ordinary grouping.
@@ -40,21 +40,12 @@
         \PackageError{ulsbs}{Invalid boolean value: ##1}{Use true or false.}}}}%
 }
 
-\ulsbs@newbool\ifulChorded\ulsbs@chordedtrue\ulsbs@chordedfalse\ulChorded
-\ulsbs@newbool\ifulLyric\ulsbs@lyrictrue\ulsbs@lyricfalse\ulLyric
 \ulsbs@newbool\ifulSlides\ulsbs@slidestrue\ulsbs@slidesfalse\ulSlides
-\ulsbs@newbool\ifulMeasures\ulsbs@measurestrue\ulsbs@measuresfalse\ulMeasures
 \ulsbs@newbool\ifulTransposeCapos\ulsbs@transcapostrue\ulsbs@transcaposfalse\ulTransposeCapos
 \ulsbs@newbool\ifulNoLyrics\ulsbs@nolyricstrue\ulsbs@nolyricsfalse\ulNoLyrics
 \ulsbs@newbool\ifulSongIndexes\ulsbs@songindexestrue\ulsbs@songindexesfalse\ulSongIndexes\ulsbs@songindexestrue
 \ulsbs@newbool\ifulSeparateIndexes\ulsbs@sepindexestrue\ulsbs@sepindexesfalse\ulSeparateIndexes\ulsbs@sepindexestrue
 \ulsbs@newbool\ifulPagePreludesEnabled\ulsbs@pagepreludestrue\ulsbs@pagepreludesfalse\ulPagePreludesEnabled
-\ifdefstring{\ulSongbookType}{chorded}
-  {\ulsbs@chordedtrue\ulsbs@measurestrue}
-  {\ifdefstring{\ulSongbookType}{lyric}{\ulsbs@lyrictrue}
-    {\PackageError{ulsbs}{Unknown songbook type: \ulSongbookType}
-      {Use chorded or lyric for ulSongbookType.}}}
-
 % === Numbering counters and printers ===
 
 \newcounter{ulSongNumber}
@@ -116,8 +107,8 @@
 
 \newcommand\ulIndexBackgroundColor{ulIndexBackgroundColor}
 
-% {text}: emit a chord-colored note unless the shared lyric-only flag hides it.
-\newcommand\musicnote[1]{\ifulLyricOnly\else\textnote{\color{ulChordColor}#1}\fi}
+% {text}: emit chord-colored musical prose under the shared lazy comment guard.
+\newcommand\musicnote[1]{\ulsbs@musiccomment{\textnote{\color{ulChordColor}#1}}}
 
 % Argument-free index font declarations, applied within display-owned groups.
 \newcommand\ulIndexHeadingFont{\sffamily\bfseries\LARGE}
@@ -162,12 +153,13 @@
 
 % === Layout registers and pre-typography numbering metrics ===
 
-% No arguments; expand to flexible bottom glue used by layout break candidates.
+% No arguments; independent, scoped layout policy for every variant. Finite
+% stretch absorbs unused column space instead of stretching compact lyric lines.
+% Authors may renew it (including to zero); ulSeparateVerses selects flush glue.
 \newcommand\ulColumnBottomGlue{0pt plus .5\textheight}
-\newlength\ulVerseSep
+\newlength\ulsbs@verse@separation
 \newlength\ulAfterPreludeSkip
 \newlength\ulBeforePostludeSkip
-\newlength\ulBaselineAdjustment
 \newlength\ulSongNumberWidth
 \newlength\ulVerseNumberWidth
 \newlength\ulIndexHeadingWidth
@@ -184,7 +176,6 @@
 \newcount\ulSongPenalty
 % These are document defaults, before the shared ULSBS spacing policy is applied.
 \parindent=.25in\relax
-\ifulChorded\else\let\ulColumnBottomGlue\z@skip\fi
 
 % === Flat-size defaults, accidental glyphs and early chord metrics ===
 
@@ -219,15 +210,11 @@
 
 % No arguments; public flat alias used by active accidentals and chord metrics.
 \DeclareDocumentCommand \flt {}{\ulFlatSymbol}
-% Initialize real public chord metrics before the document font policy. Font
-% allocation at this boundary also belongs to published PDF range identities.
+% Preserve this early sample's font allocation/order for PDF range identities.
+% It is not a leading strut: stanza/prose leading uses the current lyric font,
+% and only retained visible annotations contribute additional ink clearance.
 \setbox\@tempboxa\hbox{{\ulPrintChord{ABCDEFG\shrp\flt/j7}}}
 \baselineskip=\f@size pt\relax
-\ifulChorded
-  \advance\baselineskip\ht\@tempboxa
-  \advance\baselineskip 2pt\relax
-\fi
 % Scale a dimension, not font-size text: 11pt classes use the decimal 10.95.
 \advance\baselineskip 0pt~plus~\dim_eval:n {\f@size pt / 10}\relax
-\advance\baselineskip\ulBaselineAdjustment
 \ExplSyntaxOff

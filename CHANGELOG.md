@@ -3,52 +3,66 @@
 ## Unreleased
 
 > [!IMPORTANT]
-> **Source migration required before rebuilding existing books.** Public macro
-> and book-assembly environment names have changed; old names are not runtime
-> aliases. Run `ulsbs-migrate-syntax-v2` on your songbook sources, custom classes
-> and includes. Review changes in version control:
->
-> ```sh
-> ulsbs-migrate-syntax-v2 --diff PATH
-> ulsbs-migrate-syntax-v2 --write PATH
-> ```
->
-> Resolve any review diagnostics before compiling. Migrate separate legacy tag
-> definitions explicitly with `--tags-file FILE`; source-directory scans do not
-> convert them. See [v2 migration instructions](README.md#ulsbs-migrate-syntax-v2).
+> **Existing books require source and configuration migration.** Review the
+> [v2 migration instructions](README.md#ulsbs-migrate-syntax-v2) before rebuilding,
+> including custom classes, shared includes, tag definitions and compiler profiles.
+> The migrator previews safe source changes; configuration changes require manual
+> review. For sources predating the melody-block syntax, run v1 before v2.
 
-- Replaced the vendored `songs` runtime with native ULSBS TeX/Lua modules for
-  song metadata/lifecycle, verses, chords, key-aware transposition, page layout,
-  diagrams, multikey annotations and index display. LuaLaTeX is now the sole
-  supported engine; no backend selection or upstream runtime install is needed.
-  The short song notation remains supported; use v2 migration for the API and
-  metadata cleanup described below.
-- Renamed configuration, book-assembly, font and accessor macros to consistent
-  `\ulCamelCase` names; assembly environments are now `ulSongs` and `ulIndexBlock`.
-  Boolean settings use explicit setters such as `\ulShowTags{false}` and readable
-  predicates such as `\ifulShowTags`. V2 migration updates supported old spellings.
-- Title, author and tag indices are generated automatically inside LuaLaTeX with
-  deterministic Finnish-compatible sorting and actionable input diagnostics.
-  No separate indexing command is needed. Normal builds handle the required passes
-  and convergence checks; manual LuaLaTeX builds must repeat until rerun warnings
-  disappear.
-- Tag definitions now use ordered UTF-8 `tags.txt` files without numeric count
-  lines. Added `\ulTagFile`, renamed tag-index APIs, and extended v2 migration with
-  explicit `--tags-file` conversion and safe file renaming.
-- Removed chorus commands and settings; use verses with explicit repeat regions.
-  V2 migration converts safe chorus notation and flags unsupported cases for review.
-- Removed inherited `sr` metadata, song-reference accessors and three-braced
-  metadata input. V2 migration diagnoses these for review instead of creating
-  runtime aliases or converting scripture references into tags.
-- Require `pikepdf` 10+ for PDF optimization, matching the compiler image.
-  Older host installations must be upgraded before compilation.
-- Documented native module ownership, lifecycle hooks, custom metadata keys,
-  verse/chord token boundaries and manual LuaLaTeX builds. Multikey layer names,
-  effective-original layout, occurrence identity, external range manifests and
-  page-range publication contracts remain unchanged.
-- Updated the `songs` acknowledgement and derivative-work GPL-3.0-or-later
-  account, citing the upstream package and implementation source's
-  GPL-2.0-or-later grant and retaining Kevin W. Hamlen's attribution.
+### Variants and rendering
+
+- Declare available variants in the main document with
+  `variants={default,lyric,charango,bassclef}`. Omission now builds default only,
+  without an implicit lyrics-only companion. Select declared variants with TOML
+  `variants` or CLI `--variants`; explicit subsets do not add default. Quick mode
+  builds only the ordinary default PDF and rejects conflicting selections.
+- Variant presets apply before author preamble overrides. Visibility settings now
+  distinguish preamble book permissions from grouped local requests:
+  `\ulLocalShow` and short on/off commands cannot bypass a book-wide denial.
+  `\ifulShow...` tests effective visibility, `\ulIfVariant` tests the selected
+  variant, and `\ulIfMusical` tests whether chords, pitches or scores are enabled.
+- Chords, melody pitches, beats, measures, scores and musical prose have separate
+  visibility controls. Replay works without visible chords. Line spacing and bar
+  heights follow visible notation; beat-only lines stay compact and hidden
+  annotations leave no extra space. Ordinary verses handle melody hints without
+  a spacing modifier. Existing books may paginate differently.
+- Added scalar verse baseline/separation settings, minimum-gap and bar-height
+  controls, and consistent melody-note sizing through `\ulMelodySize`.
+  Translations, passages and explanations use their fonts' normal line spacing
+  rather than lyric verse spacing.
+- Default and instrument variants support optional multikey editions; lyrics-only
+  does not. Bass-clef scores retain engraved chord names despite hidden inline
+  chords. MIDI/audio exports remain ordinary-default-only unless explicitly
+  enabled for other variants; score display does not control media generation.
+- PDF titles now reflect the selected variant and final preamble metadata;
+  explicit `\hypersetup` metadata takes precedence. Covers and badges keep
+  variant-specific presentation even when visibility settings are customized.
+
+### Source and toolchain upgrade
+
+- ULSBS no longer depends on the `songs` package or a separate indexer; song
+  typesetting and title, author and tag indexing are built in.
+- LuaLaTeX is now the only supported TeX engine. Configuration, book assembly,
+  fonts and metadata accessors use `\ulCamelCase` names; song blocks use `ulSongs`.
+  Boolean setters take explicit values, such as `\ulShowTags{false}`. Short
+  song-content notation remains supported.
+- Title, author and tag indices are generated automatically, with consistent
+  Finnish-compatible sorting. Tag definitions use ordered UTF-8 `tags.txt` files;
+  `\ulTagFile` selects a custom file. The compiler handles the required reruns.
+- The v2 migrator now covers supported naming, variant declarations, local display
+  settings and simple instrument-specific pagination. It also converts explicitly
+  selected tag files. Ambiguous changes require review, and selected TOML configs
+  are diagnostic-only, never rewritten. See the migration guide for removed
+  metadata and chorus forms and their supported replacements.
+
+### Other highlights
+
+- Fixed duplicate transparency groups in imported PDF graphics. PDF optimization
+  now requires `pikepdf` 10+ for host builds; rebuild older compiler images.
+- Updated editor syntax help and snippets for the current public API, and
+  reorganized the installation and author guides.
+- Clarified GPL-3.0-or-later licensing and retained acknowledgement of Kevin W.
+  Hamlen's `songs` package.
 
 ## v0.2.2 - 2026-10-24
 

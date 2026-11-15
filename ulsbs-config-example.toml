@@ -30,7 +30,7 @@
 # --quick builds only the default variant's ordinary PDF, skips extras/deploy,
 # and keeps temporary files.
 # --no-printouts, --no-coverimage, --no-json, --no-midi, and --no-audio omit outputs.
-# --no-lyric and --no-extrainstr omit extra variants.
+# --variants all or --variants default,lyric selects declared variants.
 # --no-multikey omits multikey editions.
 # --no-deploy skips deployment; --no-container uses the host toolchain.
 # Explicit .tex arguments replace the configured songbook selection.
@@ -86,17 +86,16 @@ deploy-common = false        # deploy only the common-deploy-* files below
 
 # Book variants and extra outputs
 # ===============================
-# Each main document always produces its default variant's ordinary PDF.
+# Each main document declares variants={default,...} in its class options.
 # Lyrics-only and instrument variants are peers derived from the same source.
 # Each variant has an ordinary edition; eligible variants can also have a
-# multikey edition (see below). These switches control additional outputs.
+# multikey edition (see below). Omitted availability means default only.
 # Tools and suitable source content must also be available;
 # see README.md for requirements and output locations.
 create-printouts = true      # A5-on-A4 home-printing PDFs for _A5 main documents
 coverimage = true            # extract the first PDF page as a cover PNG
 json = true                  # export songbook metadata as JSON
-extrainstrumentbooks = true  # build variants named in the ULSBS-EXTRA-VARIANTS comment
-lyricbooks = true            # build a lyrics-only variant from the same sources
+variants = "all"             # all declared variants; or e.g. ["default", "lyric"]
 
 
 # MIDI and audio
@@ -261,8 +260,7 @@ no-deploy = true             # same as deploy = false
 # This uses ordinary profile settings; --quick itself is a CLI-only option.
 [profiles.dev]
 inherit-from = "base"
-lyricbooks = false
-extrainstrumentbooks = false
+variants = ["default"]
 multikey-books = false
 coverimage = false
 json = false
@@ -279,7 +277,7 @@ clean-temp = false
 [profiles.prod]
 deploy = true
 create-printouts = true
-lyricbooks = false
+variants = ["default", "charango", "bassclef"]
 merge-keys = ["common-deploy-icons", "common-deploy-metadata"]
 
 common-deploy-icons = [

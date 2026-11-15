@@ -1,12 +1,11 @@
 # SPDX-FileCopyrightText: 2026 Lari Natri <lari.natri@iki.fi>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Public naming inventory and scoped configuration in the runtime."""
+"""Current scoped configuration and migrated repeat-stanza behavior."""
 
 import re
 import unittest
 
-from ulsbs.tools.naming_v2 import BOOLEAN_SETTERS, COMMAND_RENAMES
 from ulsbs.tools.migrate_syntax_v2 import migrate_text
 
 import test_song_lifecycle as lifecycle
@@ -20,28 +19,21 @@ class NamingTests(unittest.TestCase):
     def setUpClass(cls):
         lifecycle.SongLifecycleTests.setUpClass.__func__(cls)
 
-    def test_renamed_public_commands_exist(self):
-        names = sorted(set(COMMAND_RENAMES.values())
-                       | {setter for setter, _ in BOOLEAN_SETTERS.values()})
-        checks = "\n".join(
-            rf"\cs_if_exist:cF {{{name}}}"
-            rf"{{\PackageError{{ulsbs-test}}{{Missing~public~command~{name}}}{{}}}}"
-            for name in names)
-        source = lifecycle.document(
-            "\\begin{ulSongs}{}\n\\beginsong{Naming inventory}[id={naming}]\n"
-            "\\ExplSyntaxOn\n" + checks + "\n\\ExplSyntaxOff\n"
-            "\\beginverse\nNaming inventory.\n\\endverse\n\\endsong\n\\end{ulSongs}")
-        self.compile_source(source)
-
     def test_visibility_setters_and_predicates_restore_at_group_end(self):
-        # Exercise the whole flag inventory, without depending on style defaults.
-        pairs = sorted({(setter, COMMAND_RENAMES["if" + old.removesuffix("true")])
-                        for old, (setter, value) in BOOLEAN_SETTERS.items()
-                        if value == "true"
-                        and "if" + old.removesuffix("true") in COMMAND_RENAMES})
-        self.assertTrue(pairs)
+        # Exercise grouped book configuration in the preamble, including setters
+        # that now freeze at document start, without depending on style defaults.
+        settings = (
+            "ShowChords", "ShowNotes", "ShowBeats", "ShowMeasures", "ShowAltChords",
+            "ShowLilypond", "ShowMusicComments", "ShowAuthors", "ShowOfferedTo",
+            "ShowExtraInfo", "ShowKey", "ShowGoodKeys", "ShowTags", "ShowPhase",
+            "ShowPhaseInToc", "ShowTranslation", "ShowExplanation", "ShowPassage",
+            "ShowFeeler", "ShowImageInChapterName", "ShowImageOnChapterFrontPage",
+            "Slides", "TransposeCapos", "NoLyrics", "SongIndexes", "SeparateIndexes",
+            "PagePreludesEnabled",
+        )
         probe = []
-        for number, (setter, predicate) in enumerate(pairs):
+        for number, name in enumerate(settings):
+            setter, predicate = "ul" + name, "iful" + name
             probe.append(
                 rf"\{setter}{{true}}"
                 rf"\{predicate}\typeout{{NAMING-{number}:outer-true}}\fi"
@@ -50,8 +42,8 @@ class NamingTests(unittest.TestCase):
                 rf"\{predicate}\else\typeout{{NAMING-{number}:inner-false}}\fi"
                 "}"
                 rf"\{predicate}\typeout{{NAMING-{number}:restored-true}}\fi")
-        output = self.compile_source(lifecycle.document("\n".join(probe) + "\nScope."))
-        for number in range(len(pairs)):
+        output = self.compile_source(lifecycle.document("Scope.", "\n".join(probe)))
+        for number in range(len(settings)):
             self.assertEqual(re.findall(rf"NAMING-{number}:([a-z-]+)", output),
                              ["outer-true", "inner-false", "restored-true"])
 

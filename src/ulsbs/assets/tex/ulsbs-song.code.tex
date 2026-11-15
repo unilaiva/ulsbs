@@ -243,8 +243,12 @@
        \vbox_set:Nw \l__ulsbs_song_body_box
         \nointerlineskip\ulLyricFontStyle\relax\__ulsbs_verse_baseline:
       \hypersetup{bookmarksdepth=0}\phantomsection
-      \addcontentsline{toc}{subsection}{\numberline{\theulSongNumber}\ulSongTitle\relax
-        \ifulShowPhaseInToc\hspace{0.15em}\scriptsize\textsuperscript{\rmfamily\tiny\ulPhaseList}\fi}
+       % Choose now: neither shipout nor next-pass TOC reading may query later
+       % local visibility. addcontentsline still retains the write in this box.
+       \legacy_if:nTF {ulShowPhaseInToc}
+         {\addcontentsline{toc}{subsection}{\numberline{\theulSongNumber}\ulSongTitle\relax
+           \hspace{0.15em}\scriptsize\textsuperscript{\rmfamily\tiny\ulPhaseList}}}
+         {\addcontentsline{toc}{subsection}{\numberline{\theulSongNumber}\ulSongTitle\relax}}
       \hypersetup{bookmarksdepth=2}
   }
 
@@ -261,7 +265,7 @@
        \vbox_unpack_drop:N \l__ulsbs_song_anchor_box
        \__ulsbs_layout_prelude_start:
        \vbox_unpack_drop:N \l__ulsbs_song_prefix_box
-       \vbox{\ulMakePrelude}\nobreak\vskip\ulVerseSep\vskip\ulAfterPreludeSkip
+       \vbox{\ulMakePrelude}\nobreak\vskip\ulsbs@verse@separation\vskip\ulAfterPreludeSkip
        \nointerlineskip
        \vbox_unpack_drop:N \l__ulsbs_song_body_box
        \__ulsbs_layout_song_postlude:
@@ -393,7 +397,8 @@
 
 \DeclareDocumentCommand \ulAuthorIgnoreWord {m}{\__ulsbs_song_directive:nnn {author}{ignore}{#1}}
 
-% No arguments. Typeset visible attribution/extra info using shared toggles.
+% No arguments. Lazily typeset effective attribution/extra info, not metadata
+% capture. Hidden fields execute no display source, separators or paragraph hooks.
 % Authors/dedication are composed once in an hbox, then unpacked for paragraph
 % layout rather than evaluating their source again.
 \DeclareDocumentCommand \ulExtendPrelude {}
@@ -401,13 +406,15 @@
     % Retain the leading dedication space even when no author starts the line.
     \hbox_set:Nn \l__ulsbs_song_attribution_box
       {
-        \ifulShowAuthors\tl_if_empty:NF \ulSongAuthors{{\bfseries\sfcode`\.=1000\relax\ulSongAuthors}~}\fi
-        \ifulShowOfferedTo\tl_if_empty:NF \ulOfferedTo
-          {~(\textit{\ulIfLanguage{portuguese}{ofert.~para:}{offered~to:}}~\ulOfferedTo)}\fi
+        \legacy_if:nT {ulShowAuthors}
+          {\tl_if_empty:NF \ulSongAuthors{{\bfseries\sfcode`\.=1000\relax\ulSongAuthors}~}}
+        \legacy_if:nT {ulShowOfferedTo}
+          {\tl_if_empty:NF \ulOfferedTo
+            {~(\textit{\ulIfLanguage{portuguese}{ofert.~para:}{offered~to:}}~\ulOfferedTo)}}
       }
     \dim_compare:nNnT {\box_wd:N \l__ulsbs_song_attribution_box}>{0pt}
       {\hbox_unpack_drop:N \l__ulsbs_song_attribution_box\par}
-    \ifulShowExtraInfo\ulExtraInfo\par\fi
+    \legacy_if:nT {ulShowExtraInfo}{\ulExtraInfo\par}
   }
 
 % No arguments. Build title variants, badges and optional number panel after
@@ -456,7 +463,7 @@
         {{0}{\ulsbs@preludeRTfirstraise}{1}{\ulsbs@preludeRTsecondraise}
          {2}{\ulsbs@preludeRTthirdraise}}{\ulsbs@preludeRTfourthraise}}
     \makebox[0pt][r]{\raisebox{\l__ulsbs_song_badge_raise_dim}[0pt][0pt]
-      {\ifulLyricOnly\tiny\else\scriptsize\fi\normalfont#1}}
+      {\ulPreludeBadgeFont#1}}
     \int_incr:N \l__ulsbs_song_badge_row_int
   }
 
@@ -468,25 +475,24 @@
     \tl_clear:N \l__ulsbs_song_tagline_tl
     % Visibility follows natural width in the title context, not token-list
     % emptiness. These public measurements also initialize the badge fonts.
-    \ifulShowTags\ulsbs@ifnowidth{\ulTagList}{}
+    \legacy_if:nT {ulShowTags}{\ulsbs@ifnowidth{\ulTagList}{}
       {\tl_put_right:Nn \l__ulsbs_song_tagline_tl
-        {\itshape\ulPreludeTagStyle\ulsbs@tagsbox{\ulTagList\ulsbs@vphantommaxtext}}}\fi
-    \ifulShowPhase\ulsbs@ifnowidth{\ulPhaseList}{}
+        {\itshape\ulPreludeTagStyle\ulsbs@tagsbox{\ulTagList\ulsbs@vphantommaxtext}}}}
+    \legacy_if:nT {ulShowPhase}{\ulsbs@ifnowidth{\ulPhaseList}{}
       {\ulsbs@ifnowidth{\l__ulsbs_song_tagline_tl}{}
-         {\tl_put_right:Nn \l__ulsbs_song_tagline_tl {~}}
-       \tl_put_right:Nn \l__ulsbs_song_tagline_tl
-         {\normalfont\rmfamily\ulPreludePhaseStyle\ulsbs@tagsbox{\ulPhaseList\ulsbs@vphantommaxtext}}}\fi
+          {\tl_put_right:Nn \l__ulsbs_song_tagline_tl {~}}
+        \tl_put_right:Nn \l__ulsbs_song_tagline_tl
+          {\normalfont\rmfamily\ulPreludePhaseStyle\ulsbs@tagsbox{\ulPhaseList\ulsbs@vphantommaxtext}}}}
     \ulsbs@ifnowidth{\l__ulsbs_song_tagline_tl}{}
       {\__ulsbs_song_badge:n {\l__ulsbs_song_tagline_tl}}
-    \ifulChorded
-      \ifulShowKey\tl_if_empty:NF \ulSongKey
-        {\__ulsbs_song_badge:n
-           {\ulPreludeKeyLineStyle\__ulsbs_multikey_key_badge:}}\fi
-      \ifulShowGoodKeys\tl_if_empty:NF \ulGoodKeys
-        {\__ulsbs_song_badge:n
-          {\ulPreludeKeyLineStyle\ulsbs@goodkeysbox
-            {\textit{\ulPreludeTextGoodKeysAlone}~\textbf{\ulGoodKeys\ulsbs@vphantommaxtext}}}}\fi
-    \fi
+    % Badge display is independent of inline chords, identity and key capture.
+    \ifulShowKey\tl_if_empty:NF \ulSongKey
+      {\__ulsbs_song_badge:n
+         {\ulPreludeKeyLineStyle\__ulsbs_multikey_key_badge:}}\fi
+    \ifulShowGoodKeys\tl_if_empty:NF \ulGoodKeys
+      {\__ulsbs_song_badge:n
+        {\ulPreludeKeyLineStyle\ulsbs@goodkeysbox
+          {\textit{\ulPreludeTextGoodKeysAlone}~\textbf{\ulGoodKeys\ulsbs@vphantommaxtext}}}}\fi
   }
 
 % No arguments; typeset the public postlude extension in small ragged text.
@@ -494,7 +500,7 @@
   {\raggedright\tiny\ulExtendPostlude}
 
 % #1: chapter/section. Start an unnumbered styled heading via kernel argument
-% scanning; flag its occupied height for the next song when inside songs.
+% scanning; flag its occupied height for the next song when inside ulSongs.
 \cs_new_protected:Npn \__ulsbs_song_heading:n #1
   {\bool_if:NT \g__ulsbs_songs_active_bool
       {\bool_gset_true:N \g__ulsbs_song_heading_pending_bool}

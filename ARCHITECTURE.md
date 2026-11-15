@@ -7,9 +7,11 @@ customization, use [Writing Songbooks](WRITING_SONGBOOKS.md).
 - [Developer Navigation](#developer-navigation)
 - [Song Engine](#song-engine)
   - [Module loading and assets](#module-loading-and-assets)
+  - [Named variants](#named-variants)
   - [Reading and documenting runtime code](#reading-and-documenting-runtime-code)
   - [Song and page lifecycle](#song-and-page-lifecycle)
   - [Annotation scanner contract](#annotation-scanner-contract)
+  - [Retained geometry and spacing](#retained-geometry-and-spacing)
 - [Index Lifecycle](#index-lifecycle)
 - [Fixed Policies and Version Ownership](#fixed-policies-and-version-ownership)
 - [PDF Font Sharing](#pdf-font-sharing)
@@ -28,7 +30,7 @@ customization, use [Writing Songbooks](WRITING_SONGBOOKS.md).
   - [Validation and performance](#validation-and-performance)
 - [Syntax Migration](#syntax-migration)
   - [V1 melody syntax](#v1-melody-syntax)
-  - [V2 naming](#v2-naming)
+  - [V2 naming and semantics](#v2-naming-and-semantics)
 - [Testing](#testing)
 
 ## Developer Navigation
@@ -38,7 +40,7 @@ The main entry points for extending or debugging the engine are:
 | Area | Source |
 |---|---|
 | Document class and author-overridable styles | `src/ulsbs/assets/tex/ulsbs-songbook.cls`, `src/ulsbs/assets/tex/ulsbs.sty` |
-| Instrument-variant post-setup files | `src/ulsbs/assets/tex/` |
+| Variant presets and lifecycle | `src/ulsbs/assets/tex/ulsbs-variant-*.code.tex`, `ulsbs-variants.code.tex` |
 | CLI and public configuration | `src/ulsbs/cli.py`, `src/ulsbs/config.py`, `ulsbs-config-example.toml` |
 | Build orchestration and jobs | `src/ulsbs/pipeline.py`, `src/ulsbs/jobs.py` |
 | Warning parsing and reporting | `src/ulsbs/diagnostics.py`, `src/ulsbs/pipeline.py` |
@@ -46,6 +48,7 @@ The main entry points for extending or debugging the engine are:
 | Family installation and deployment | `src/ulsbs/multikey_publish.py`, `src/ulsbs/deploy.py` |
 | Score alternatives and persistent cache | `src/ulsbs/lilypond_scores.py`, `src/ulsbs/lilypond_score_cache.py` |
 | Shared engine policies | `src/ulsbs/constants.py` |
+| Named-variant registry and literal availability reader | `src/ulsbs/variants.py`, `src/ulsbs/assets/tex/ulsbs-variants.def.tex` |
 
 The executable wrappers are `ulsbs-compile`, `ulsbs-bookmeta`,
 `ulsbs-midi2audio`, `ulsbs-ly2tex`, `ulsbs-migrate-syntax-v1`,
@@ -73,6 +76,8 @@ author packages:
 | Module under `src/ulsbs/assets/tex/` | Responsibility |
 |---|---|
 | `ulsbs-package-defaults.code.tex` | Pre-import paper, margin, header and chord-line defaults |
+| `ulsbs-variants.code.tex`, `ulsbs-variants.def.tex` | Literal main-source availability, immutable active identity, shared registry and automatic preset lifecycle |
+| `ulsbs-variant-*.code.tex` | Selected preset's post-class rendering defaults, never identity setters |
 | `ulsbs-init.code.tex` | Public flags, counters, lengths and initial font defaults |
 | `ulsbs-book-defaults.code.tex` | Visibility switches, early verse indentation and localized book metadata defaults |
 | `ulsbs-style.code.tex` | Final colors, font policy, page headers, boxes and stanza-break styling |
@@ -84,7 +89,7 @@ author packages:
 | `ulsbs-layout.code.tex`, `ulsbs-layout.lua` | Song boxes, page/column positioning, break penalties, bottom glue and prose/block adapters |
 | `ulsbs-verse.code.tex` | Verse modifiers, source newlines, numbering, indentation and lyric baselines |
 | `ulsbs-chords.code.tex` | Token scanning, lyric boxes, chord anchoring, memory/replay and alternate chords |
-| `ulsbs-music.code.tex` | Key-aware source transposition, melody composition, meters, bars and repeats |
+| `ulsbs-music.code.tex`, `ulsbs-music.lua` | Source transposition, melody composition and retained physical-line annotation/bar/repeat geometry |
 | `ulsbs-pdf-layer-setup.code.tex` | Early PDF layer registries, occurrence/key metadata, safe chord splitting and shipout hooks |
 | `ulsbs-multikey.code.tex`, `ulsbs-multikey.lua` | Effective-original/alternate visuals, key spelling, chord fitting, shipped-page tracking and multikey metadata |
 | `ulsbs-diagrams.code.tex` | Guitar diagrams and deferred chord-annotation insets |
@@ -158,8 +163,9 @@ pre-load `\providecommand` defaults accept an earlier `\newcommand`, while
 post-load macro hooks use `\renewcommand`. Use `\setlength` for lengths, integer
 assignment for penalty counts, and explicit boolean setters such as
 `\ulShowTags{false}` with real predicates such as `\ifulShowTags`. A later macro
-change does not retroactively reconfigure an already-loaded package, captured
-dimension or published PDF metadata. Private default files are not consumer
+change does not retroactively reconfigure an already-loaded package or captured
+dimension. Book PDF metadata defaults are finalized after the preamble as described
+below; changing strings in the body does not republish them. Private default files are not consumer
 configuration files to input directly.
 
 Companion `.code.tex` modules load without an extra TeX group. The style owns
@@ -173,9 +179,399 @@ letters need verified weights, diagnostics and sorting tests, not locale fallbac
 `prepare_compile_dir()` stages the TeX tree; `TEXINPUTS` and `LUAINPUTS` resolve
 companions. Setuptools package data and `MANIFEST.in` include `.code.tex` and
 `.lua` assets. `build.lua` installs all top-level `.tex` and `.lua` companions,
-including score layers and edition postsetup files. Installed books must resolve
+including score layers and registered variant presets. Installed books must resolve
 these assets without a source checkout, upstream songs or an external indexer.
 `keyval`, `etoolbox`, `environ`, `expl3` and `xparse` remain used dependencies.
+
+### Named variants
+
+The TeX class accepts literal main-source
+`variants={default,lyric,charango,bassclef}` and a pre-class `\ulBuildVariant`
+launcher selector; omission means default-only availability and default identity.
+The Python queue/compiler discover main-source availability and prepend the
+reserved selector. External score preparation uses registered recipe references;
+the v2 migrator combines naming and bounded semantic source conversion in one
+original-source transaction.
+Cover/imprint and PDF metadata use registered
+presentation policy; inline chords, melody pitches, beats, measures, whole scores,
+alternate sets, main-key/good-key badges, authors/dedications/extra info, music
+comments, tags, prelude/TOC phases, translations, explanations, passages, feelers
+and chapter artwork have book/local/effective visibility.
+
+The registry is one installed TeX asset, not parallel Python/TeX lists or generated
+checkout-relative data. Each literal `\ulsbsVariantRecord` line contains six
+arguments: identifier, TeX preset filename, score recipe, output filename marker,
+presentation-policy reference and supported editions. Python reads these records
+with `importlib.resources`; a TeX consumer supplies the record macro before input.
+Records contain no executable expressions. Python's immutable records describe
+build policy, never duplicate the TeX presets' visibility defaults. Every record
+references an owned `ulsbs-variant-*.code.tex` asset. The default preset deliberately
+leaves the source class's baseline configuration intact, rather than imposing an
+intrinsic musical book type.
+Recipe and presentation references are dispatch keys, not feature predicates.
+
+`validate_variant_names` accepts nonempty comma-separated canonical lowercase
+registered names, with surrounding whitespace but no duplicates or expansion.
+Availability additionally requires `default`. It preserves declaration order;
+selection owns default-first ordering. The canonical key is `lyric`, while
+the output marker deliberately remains `_LYRICS-ONLY`.
+
+`read_documentclass` finds one literal top-level main-source class invocation
+before `\begin{document}`, retaining raw options and source offsets for migration.
+The bounded reader skips comments, grouped definitions/arguments and common
+verbatim, URL, detokenized and literal-environment regions. It balances braces,
+including comma-containing metadata and closing brackets protected by braces.
+`available_variants` reads only the braced `variants={...}` option for classes
+whose names start with `ulsbs-songbook`. Omission and unrelated inputs mean only
+`default`. Repeated options are rejected even if identical; malformed, empty,
+computed, duplicate and unknown list entries fail rather than being ignored.
+Neither helper expands macros, follows inputs/custom classes, evaluates conditional
+execution nor models arbitrary catcodes. Availability must be a literal main-source
+declaration, not something constructed by those mechanisms. Historical migrators
+retain their own existing behavior.
+
+`Config.variants` is `all` (the default) or a validated tuple of canonical names.
+TOML accepts `"all"` or an array of names; `--variants all|NAME,NAME` overrides the
+selected profile. Category booleans and their negative CLI flags are removed,
+not aliases. The queue intersects explicit selection with each main source,
+without adding default; selected default comes first, then declaration order.
+A single input rejects any unavailable requested name. Collections report each
+intersection and skipped names, and reject names matching none of the inputs.
+Omitted availability and unrelated documents have only default; unrelated inputs
+never gain multikey editions. Legacy extra-variant comments grant no availability.
+Planning rejects malformed declarations and output collisions before temporary
+build setup. `--quick` selects ordinary default only and rejects conflicting
+explicit selection. Naming and edition eligibility come from registry records;
+lyric is ordinary-only while bass-clef supports score-based multikey.
+
+`make_variant_tex` revalidates identity/availability/edition before writing, leaves
+the source bytes intact after its pre-load configuration, and adds
+`\def\ulBuildVariant{NAME}` only for non-default jobs. No compiler code injects a
+TeX preset or visibility mutation: the existing outer-class lifecycle owns it.
+The registry's `score_recipe` reference selects a small explicit strategy in
+`_prepare_score_recipe`: default is a no-op (also used by lyric), charango inserts
+the audited tuning assignment, and bassclef copies the bundled bass-clef tails
+over their ordinary filenames. Unknown recipes fail before the generated TeX is
+written, not silently as baseline. Preparation uses only job-local copied assets
+and is idempotent when repeated with the same recipe; retained compilation first
+refreshes those assets from the package. Recipe remapping never changes identity,
+TeX presets, edition support or media permissions. The complete modified bytes
+remain cache inputs, with no new trust normalization or asset-manifest changes.
+LilyPond diagnostics are collected for every variant: lyric still preprocesses
+scores and can author-enable display or opt into media exports, so its printed
+preset denial cannot justify discarding tool warnings or unreadable-log reports.
+
+`ulsbs-variants.code.tex` resolves identity before option processing/package
+imports, snapshots exactly one replacement level of the reserved build selector,
+and validates it against the same installed registry and the main declaration.
+`\ulIfVariant{name}{yes}{no}` validates a literal registered name and tests that
+private immutable snapshot, independently of later selector/visibility changes.
+There is no public identity setter or per-variant mutable boolean. Old book-type
+and variant flags are no longer defined by the runtime; historical source tokens
+remain recognized by migration tooling, not installed as compatibility aliases.
+
+The class marks its entry before loading the owner. Availability reads the kernel's
+`\@raw@classoptionslist`, not inherited class option values, and rejects repeats
+before kvoptions can overwrite evidence. Braced metadata remains opaque. Both
+Python and TeX reject empty/computed/unknown/duplicate names and require default;
+TeX stringifies literal names consistently before sequence membership checks to
+avoid letter-versus-other catcode mismatches. This is token validation, not a
+general static TeX interpreter; arbitrary conditional execution/catcodes remain
+outside the source declaration contract.
+
+Preset application appends directly to the kernel's private
+`\@documentclasshook`, after the complete outer class, its end callbacks and its
+`class/.../after` hook, before the next author preamble statement. This intentional
+private dependency is covered by nested third-party class tests. `AtEndOfClass`
+on the base is too early; generic command hooks on this macro are deferred until
+begin-document and too late. Without the class, package-only use is default-only,
+rejects non-default selectors with a class-declaration diagnostic, and applies its
+default at package completion. Neither entry reapplies presets at begin-document.
+Early font measurements and optional ocgx2 imports stay at their existing load
+sites; the new presets do not retroactively recompute them or change edition setup.
+The visibility owner in `ulsbs-book-defaults.code.tex` keeps independent private
+book permission and grouped local requests for chords, melody pitches, beats,
+measures, whole scores, alternate sets, key badges, music comments, translations,
+explanations, passages, feelers, tags, prelude/TOC phases, prelude
+authors/dedications/extra info and chapter artwork.
+`\ulShowChords{true|false}`, `\ulShowNotes{true|false}`,
+`\ulShowBeats{true|false}`, `\ulShowMeasures{true|false}`,
+`\ulShowLilypond{true|false}`, `\ulShowAltChords{true|false}`,
+`\ulShowTranslation{true|false}`, `\ulShowExplanation{true|false}`,
+`\ulShowPassage{true|false}`, `\ulShowFeeler{true|false}`,
+`\ulShowKey{true|false}`, `\ulShowGoodKeys{true|false}`,
+`\ulShowMusicComments{true|false}`, `\ulShowAuthors{true|false}`,
+`\ulShowOfferedTo{true|false}`, `\ulShowExtraInfo{true|false}`,
+`\ulShowTags{true|false}`, `\ulShowPhase{true|false}`,
+`\ulShowPhaseInToc{true|false}`, `\ulShowImageInChapterName{true|false}` and
+`\ulShowImageOnChapterFrontPage{true|false}` configure permission
+only in the preamble; `begindocument/before` freezes it, including before author
+`\AtBeginDocument` callbacks. Body setters diagnose without changing permission.
+`\ulLocalShow{chords|notes|beats|measures|scores|altchords|translation|explanation|passage|feeler|key|goodkeys|musiccomments|authors|offeredto|extrainfo|tags|phase|phaseintoc|imageinchaptername|imageonchapterfrontpage}{true|false}`,
+`\chordson`/`\chordsoff`,
+`\noteson`/`\notesoff`, `\beatson`/`\beatsoff`, `\measureson`/`\measuresoff`
+and `\translationon`/`\translationoff` change only their feature's request.
+Effective `\ifulShowChords`, `\ifulShowNotes`, `\ifulShowBeats`, `\ifulShowMeasures`,
+`\ifulShowLilypond`, `\ifulShowAltChords`, `\ifulShowTranslation`,
+`\ifulShowExplanation`, `\ifulShowPassage`, `\ifulShowFeeler`, `\ifulShowKey`,
+`\ifulShowGoodKeys`, `\ifulShowMusicComments`, `\ifulShowAuthors`,
+`\ifulShowOfferedTo`, `\ifulShowExtraInfo`, `\ifulShowTags`, `\ifulShowPhase`,
+`\ifulShowPhaseInToc`, `\ifulShowImageInChapterName` and
+`\ifulShowImageOnChapterFrontPage` are assigned the genuine
+`\iftrue`/`\iffalse` primitive meaning,
+never a composite macro.
+TeX grouping restores both request and predicate. The generic local dispatcher
+currently accepts `chords`, `notes`, `beats`, `measures`, `scores`, `altchords`,
+`translation`, `explanation`, `passage`, `feeler`, `key`, `goodkeys`,
+`musiccomments`, `authors`, `offeredto`, `extrainfo`, `tags`, `phase`, `phaseintoc`,
+`imageinchaptername` and `imageonchapterfrontpage`. Non-default presets initialize
+the six notation permissions
+and music-comment permission and reset their initial requests to on after the complete
+custom class; default preserves source baseline settings. None of these switches
+mutate identity, another feature's permission/request, bottom glue or cached font
+allocations.
+
+Chapter-name and chapter-front-page artwork have independent permission AND
+requests, initially true. All presets preserve both authored layers. Name-art
+visibility is chosen at the source `\ulMainChapter` call: its captured short title
+contains artwork or no artwork, never a query to reevaluate in delayed marks,
+TOC writes or the next pass. Front-page art follows its own effective query at
+that call. Hidden image/symbol sources execute no hooks or file reads and leave
+no art separator or front-page art spacing. Existing optional-image, symbol,
+uppercase, color and repeated visible TOC/header rendering semantics remain.
+
+The other on/off controls are configuration, not independently masked content:
+slides (output/leading mode), lyric omission (scanner content mode), capo/alternate
+transposition (source operations), index generation/separation, page-prelude
+positioning, title case, chapter colors/dashed corner marks and chord-character
+typography. Their existing scopes and single purposes remain unchanged. Internal
+parser, rendering, repeat, language-skip and layer scratch flags are not additional
+feature permissions. Rendering and geometry query immutable identity or effective
+features; no mutable book-type state is maintained.
+
+Tags (`tags=`), prelude phase (`ph=`) and phase in the TOC have independent
+permission AND grouped request, initially true. All four presets preserve BOTH
+authored layers. They never contribute to `\ulIfMusical`, change another feature
+or infer policy from identity. There are no short switches or private factory
+setters. Hidden tag/phase display is lazy, including natural-width checks and
+multikey anchor samples: no display hooks or phantom badge rows. Visible badges
+retain their existing title-context natural-width tests, zero-width omission,
+tag/phase separator and style measurements. These visible measurements can execute
+style hooks more than once, as before; they are not once-only metadata evaluation.
+Metadata ingestion, tag indices/export and multikey capture remain independent.
+The zero-size multikey header anchor remains available for other transposable ink.
+
+Prelude badge size and default tint are part of the SAME captured registry
+presentation policy as cover/imprint/title, not feature policy or mutable legacy
+identity. Lyric presentation supplies `\tiny` and gray; default, charango and
+bass-clef supply `\scriptsize` and inherit color. Renewable
+`\ulPreludeBadgeFont` selects that size plus `\normalfont` for visible rows AND
+enabled, nonempty header-anchor samples. The existing `\ulPreludeTagStyle`,
+`\ulPreludeKeyLineStyle` and `\ulPreludePhaseStyle` defaults delegate to the
+captured tint; pre-load definitions, complete-class renewals and author preamble
+renewals remain authoritative. Presets never overwrite those hooks. A style change
+does not grant visibility or alter metadata capture. Hidden rows/samples never
+call the font hook either. Visible title-context width checks and repeated style
+measurements retain their existing semantics; row offsets and early font
+allocation are unchanged.
+
+Phase-in-TOC queries only its own effective state at song start. The selected
+`\addcontentsline` payload contains either the styled phase or no phase, never a
+visibility predicate to reevaluate at shipout or next-pass TOC reading. A later
+local change cannot rewrite an earlier song's TOC policy. Writes remain nodes in
+retained song boxes, so discarded songs do not enter the TOC and selection retains
+its existing shipment semantics. The TOC does not replay prelude badge style hooks;
+ordinary multipass reference/TOC convergence remains required.
+
+Prelude authors (`by=`), dedication (`off=`) and extra info (`ex=`) each have
+independent permission AND request, initially true. All four presets preserve
+both authored layers; none resets requests or infers text policy from identity,
+notation, keys or music comments. These fields never make `\ulIfMusical` true.
+No short commands or private factory setters remain for them. `\ulExtendPrelude`
+lazily guards each complete display operation, including separators and the extra
+paragraph, before touching its stored display value. Hidden fields execute no
+display hooks or reserve text/paragraph space. The visible attribution still
+composes once in a retained horizontal box and unpacks for line wrapping, with
+its existing width test and English/Portuguese dedication separators, including
+the leading dedication space when authors are absent. Extra info remains a
+separate paragraph with authored line breaks. This is not opaque metadata capture:
+song setup, public metadata adapters, author indices/export and multikey capture
+remain independent and may already have consumed those tokens before display.
+
+Main-key and recommended-key badges have independent effective visibility, with
+no chord, musical-aggregate or legacy identity display gate. Lyric denies both
+permissions; the other presets preserve authored permission AND request. All
+presets preserve these requests, including when lyric denies permission, so an
+author's later permission override does not erase scoped suppression. Bass-clef
+therefore retains baseline key information despite denied inline chords, without
+overriding a class's deliberate key suppression. No short key switches or private
+factory setters remain. Hidden badges do not execute display styles/labels or
+allocate rows; the multikey anchor also omits its hidden/absent main-key sample.
+The zero-size anchor itself remains available for other transposable notation.
+Visible multikey anchor samples still measure public style hooks, not source key
+payloads. This is display policy only: song metadata capture, key validation,
+indices/export, effective-key transposition and OCG eligibility remain independent.
+It is not opaque skipping of metadata already consumed by the song/multikey owner.
+
+Music comments are musical prose, not inline pitched `ShowNotes`, chord help or
+an inference from `\ulIfMusical`. `\musicnote`, `\musicnoteforprev`,
+`\musicnotefornext` (including its trailing star) and `\musicnotemiddle` share
+one lazy effective-comment guard in the visibility owner. It suppresses the entire
+display operation: hidden balanced arguments, including unmatched conditional
+tokens and missing inputs, have no body, font, placement, glue, fill or geometry
+effects. Visible helpers delegate once to the same text-note adapters, retaining
+their chord color, prose leading and previous/next/middle attachment behavior.
+The initial `\musicnote` definition is the sole definition, not overwritten by
+shared style. Comments are allowed in charango and bass-clef and denied in lyric;
+these presets reset the initial comment request on after complete class setup.
+Default preserves the class's permission AND request. Later author permission
+overrides preserve requests; local-on cannot bypass denial. No short commands
+are added, and comments alone never make `\ulIfMusical` true. Chord-specific help
+still needs an explicit effective-chord guard at its call site; instrument-specific
+help may additionally need identity. Consumer call-site migration remains separate.
+`\capo` is not a general comment: its non-transposing display tests only effective
+chords, independently of comment permission. Its transposing branch remains a
+source operation even when chords/comments are denied. Diagram rendering itself
+is unchanged.
+
+Translations have no second local mask: the environment queries only effective
+visibility. All presets preserve the source's translation permission AND request;
+this independent prose feature is not reset or inferred from musical identity.
+Authors can override permission after the complete custom class, without erasing
+an inherited local request. The environment retains verbatim's line-oriented
+hidden-source skip, not token-list capture: hidden text may contain unbalanced
+braces/conditionals or missing inputs. Its `\end{translation}` terminator must be
+on its own source line. Hidden entry performs no language/font/block/verse setup,
+end-fill mutation or body evaluation and contributes no geometry. Visible language,
+font, stanza and chord-suppression behavior remains unchanged and scoped by the
+environment. Translation state does not contribute to `\ulIfMusical`.
+
+Explanations share this permission/request model but remain independent of
+translation state and musical identity. All four presets preserve authored
+explanation permission AND request; no short explanation switches are added.
+The environment retains the same raw line-oriented skip for book/local denial
+and `\ulExplanationLanguagesToSkip`, with `\end{explanation}` on its own source
+line. The language-hide decision is environment-local, not a global flag or
+feature-request mutation. Existing substring matching of the language list is
+unchanged. `\ulExplanationOmitLangCodes` only hides displayed codes, never content.
+Hidden explanations have no body/font/language/block/counter/end-fill effects or
+geometry. Visible explanations preserve prose formatting, the first-block spacing,
+the smaller gap for subsequent explanations and song-reset counter behavior.
+Their existing end-fill policy remains false, unlike translations' true policy.
+Neither explanation visibility nor language selection contributes to `\ulIfMusical`.
+
+Passages use the same owner but remain independent prose, inside or outside songs.
+All presets preserve authored passage permission AND request; there are no short
+passage switches. Book/local denial and `\ulPassageLanguagesToSkip` retain the raw
+line-oriented skip, with `\end{passage}` on its own source line. Language hiding
+is environment-local and preserves the existing substring list matching, not a
+feature-policy mutation. `\ulPassageOmitLangCodes` suppresses only displayed codes.
+Hidden passages have no body/title/font/language/fill effects or geometry. Visible
+passages retain their title, alternate starred style, `\obeylines`/`\disobeylines`,
+prose leading, indentation and vertical fill, without changing song end-fill state.
+Passage visibility never contributes to `\ulIfMusical`.
+
+Feelers also retain independent authored permission AND request in all four presets,
+with no short switches or legacy private writable setters. Their effective query
+does not contribute to `\ulIfMusical`. Unlike the three raw-skipping prose environments,
+`feeler` uses LaTeX `+b` capture: braces and environment delimiters must balance,
+but hidden unmatched conditional tokens and missing inputs remain opaque through a
+lazy effective-predicate guard. The old `environ` cleanup scanner exposed such tokens.
+Hidden bodies have no effects, block spacing, end-fill mutation or geometry. Visible
+bodies execute once with the existing small, centered, emphasized prose, block-start
+and song-end-fill behavior, both inside songs and in standalone `intersong` blocks.
+Environment scope restores font and local visibility requests; the existing in-song
+block counter and global end-fill effects intentionally persist until song end.
+
+Alternate-set effective visibility reports only its own permission AND request,
+not inline chord state. Standalone `\altchords` and its ID helper lazily require
+BOTH effective chords and alternate sets before evaluating payloads, ID numbers or
+labels, changing persistent set color, spacing or drawing. Hidden source (including
+unmatched conditional tokens) contributes no geometry or layer requests. The chord
+owner alone implements the standalone collector; the entry only declares its public
+command. Standalone sets stay outside interactive multikey transposition. Inline
+`\ac` is a repetition-specific chord reference, not a standalone set: it still
+requires only effective chords and participates in stanza PDF layers even when
+alternate sets are suppressed. Neither alternate visibility nor its local request
+changes `\ulTransposeAltChords`, which remains independent, grouped configuration.
+Lyric/bass-clef deny alternate sets; charango permits them and resets inherited
+suppression; default preserves class policy and requests. The musical aggregate
+does not query alternate-set visibility.
+
+Measure bars no longer have a separate ink mask or legacy-type initialization:
+`\ifulShowMeasures` controls both rendered bars and future stanza bar catcodes.
+The old `\ulMeasures` / `\ifulMeasures` names are removed, not aliased. The verse
+owner installs a private callback for effective-state changes inside live stanzas;
+group exit restores both predicate and catcodes. Already-tokenized bars, including
+first-token lookahead, still test effective ink. Disabled future bars use ignored
+catcodes to preserve source spaces. `\e` and alternate-set dashes use the same
+predicate. Non-default presets permit measures; default preserves authored permissions
+and requests.
+`\meter{top}{bottom}` globally retains unexpanded pending tokens across inner boxes
+until an enabled bar measures each once, emits the retained boxes and clears them.
+Hidden bars have zero geometry/effects and do not consume pending meter; hidden
+`\mbar` also leaves it untouched. Pending tokens do not acquire a second permission
+or mask. The naming inventory's historical destinations are unchanged; the v2
+semantic planner supersedes supported body assignments in its original-source
+plan and diagnoses unsupported measure uses. Old runtime names are not aliases.
+
+The same visibility owner supplies `\ulIfMusical{yes}{no}`: a call-time OR of
+effective inline chords, inline melody pitches and whole scores. Beats AND measure
+bars are excluded, as are keys, prose, identity and actual score presence. The
+braced query does not cache state or change scope; only the chosen branch executes,
+once. Its lazy branch selection keeps unchosen tokens opaque even with unmatched
+TeX conditionals. Branches may contain paragraphs. Raw `\ifulShow...` predicates
+remain genuine TeX conditionals; this aggregate helper is not an annotation gate.
+Authored mottos should use this feature aggregate, not a legacy binary book type.
+
+`lilywrap` is the whole-score display boundary after LilyPond preprocessing. Its
+LaTeX `+b` body capture and lazy effective-predicate guard keep hidden source opaque,
+including unmatched conditional tokens: no body inputs/side effects, score-system
+inclusions, layer requests, block spacing or end-fill changes occur. Visible bodies
+execute once; retained score-layer boxes preserve effective-original dimensions.
+This replaces `environ` body cleanup, whose conditional scanner was unsafe with
+unmatched hidden conditionals. Bodies still need balanced braces and environment
+delimiters for capture; raw LilyPond still requires preprocessing. Generated
+`\ulScoreSystem` inclusions stay downstream of this wrapper, not a second policy
+gate or a general-purpose image filter. Printed visibility neither regenerates
+scores nor changes recipe clef/tuning/ChordNames, media, cache trust or edition
+eligibility. Bass-clef permits scores independently of denied inline notation.
+
+`ulsbs-frontmatter.code.tex` implements the registry's presentation-policy keys in
+one dispatch table, resolving the captured reference rather than mutable old flags.
+Labels and icon filenames retain public author hooks as unexpanded tokens. Default
+preserves authored variable cover icons with or without a star. Non-default policies
+replace those slots on each unstarred `\ulCoverPage`, and clear them on a starred
+cover; permanent slots and the author's `\ulInsertCoverIcons` output hook are never
+changed. The imprint uses the same selected label and current variable icon slots,
+including when no cover was emitted. Repeated covers deliberately retain the existing
+caller-scope slot mutation contract, not a hidden restore/reset at begin-document.
+
+Shared style applies PDF viewer/color options at load time, but finalizes title,
+author, subject, keywords and custom `DocumentVersion` defaults in
+`begindocument/before`, after author preamble statements and before hyperref publishes
+metadata. Title uses the selected presentation policy: default has no suffix;
+other policies append their localized, author-overridable variant label. Presets
+do not publish metadata and are not reapplied at this boundary. Explicit preamble
+`\hypersetup` keys (including empty values and `pdfinfo` aliases) win per field.
+The implementation observes hyperref's existing private `KV@Hyp@pdf...` handlers;
+it also preserves nonempty metadata supplied before ULSBS loaded. An explicit
+`pdfinfo` `DocumentVersion` wins without discarding unrelated custom fields. These
+private hyperref dependencies are covered by generated-PDF tests. `\AtBeginDocument`
+and later author metadata calls retain their ordinary ordering after this boundary.
+
+Compiler jobs use this same owned-preset lifecycle. Historical book-type and
+mutable variant controls are supported only as migration inputs, not runtime
+aliases. Explicit PDF-layer imports retain their early capability setup,
+independent of identity and effective ink.
+
+`tests/test_variants.py` covers the reader and data contract, including a standalone
+TeX consumer of the same registry, direct/manual/package-only setup, literal errors,
+inherited-option rejection, nested outer-class precedence, rendered cover/imprint
+policies and finalized localized metadata with author overrides.
+`tests/test_modules.py --packaging-smoke` checks source/wheel/sdist byte consistency,
+isolated installed Python discovery and manual TeX initialization from installed
+assets without checkout-relative runtime access.
 
 ### Reading and documenting runtime code
 
@@ -218,8 +614,9 @@ For the LaTeX identification and loading interfaces, see the
 
 ### Song and page lifecycle
 
-`ulSongs`, `song`, `\beginsong` and `\endsong` use the same semantic lifecycle,
-including the three-braced metadata form. Each `ulSongs` block starts printed
+`ulSongs`, `song`, `\beginsong` and `\endsong` use the same semantic lifecycle.
+The inherited three-braced metadata form is removed and migration diagnoses it.
+Each `ulSongs` block starts printed
 numbering at 1; chapter headings do not reset it. Counter overrides and
 `\theulSongNumber` formatting are independent of persistent IDs and occurrences.
 Metadata resets execute once before option parsing. Public metadata remains
@@ -251,6 +648,17 @@ continuations remain distinct from ordinary prose, even after the first page
 ships. Empty-page lookahead retains even/odd spread reservations. Song clears use
 the saved kernel clear locally, independent of an author's temporary include-clear
 override; standard kernel column output stays untouched.
+
+`\ulColumnBottomGlue` is independent scoped layout policy, initially
+`0pt plus .5\textheight` for every named variant and package-only default. It
+absorbs unused column space instead of stretching compact lyric lines; visibility
+requests never mutate it. Authored renewals (including zero and
+infinite-order glue) remain authoritative. `\ulSeparateVerses` locally selects
+flush glue and forced stanza breaks. Real break candidates emit positive bottom
+glue, the penalty, its separate negative inverse and the retained prior skip.
+Combining the latter two in glue arithmetic loses lower orders and can fail to
+negate a higher-order stretch. Lua lookahead already models a separate inverse;
+both paths now preserve the same authored glue and cancellation contract.
 
 Column settings preserve grouping. Selection-time shaping must not change the
 physical page mode; retained boxes submit under restored settings, and environment
@@ -291,9 +699,10 @@ The retained lyric box supplies fitting, syllable-extension and wrapping metrics
 measurement never typesets the source again. Adjacent annotations concatenate.
 Each visible annotation immediately followed by literal whitespace independently
 gets the configured minimum advance; hidden or zero-advance melody must not gain
-that width. Disabling chords or measures uses ignored catcodes for the relevant
-replay/bar characters. Invisible active macros are not equivalent: they separate
-source spaces. Echo arguments rescan once while retaining active physical
+that width. Replay stays active and consumes memory even with hidden ink; an empty
+hidden anchor consumes following source whitespace without splitting the preceding
+interword glue. Disabled measure bars use ignored catcodes. Echo arguments rescan
+once while retaining active physical
 newlines. A leading explicit bar already tokenized by stanza lookahead retains
 the pending meter even in a true-lyrics edition; later toggles update scoped ink
 state. Explicit `\par` has ordinary paragraph costs, distinct from the source
@@ -309,12 +718,103 @@ exhausted replay are errors. A leading `^` inside an annotation excludes it
 while recording; while replaying, it consumes the next saved annotation inside
 the same box without another lyric scan. Saved melody takes precedence over a
 new prefix; extra chord-tail tokens remain unexpanded until rendering.
+Hidden chord tails (including inline/standalone alternate chord payloads) never
+execute, even when pitches or beats remain visible. Stored raw annotations can
+therefore replay later under a different local request without losing synchronization.
+Hidden pitch voices execute no symbol/tag hooks and contribute no retained boxes.
+Hidden beats neither draw their measurement sample nor retain a beat layer; their
+extent and drawing both use the effective predicate, not a separate suppression mask.
+The renderer measures neutral slots from the base circle dimensions and padding,
+without drawing a sample pitch or executing its author hooks. Slots remain nonzero
+when pitches are suppressed, so beats after hidden pitches or empty slots keep their
+horizontal position. Symbol/tag appearance hooks do not redefine this neutral grid.
+The existing circle cache remains font-size keyed; visibility setters do not
+recapture early font metrics or alter import allocation. Melody `@` dimensions stay
+unexpanded until a visible pitch or beat needs them, then evaluate once per
+annotation, never per multikey alternative. Chord ink alone does not activate a
+hidden melody's dimension. The raw melody grammar is still validated while hidden.
 
 Source transposition and interactive offsets are separate. `key=` describes the
 effective printed original; `t00` preserves that notation and alone supplies
 dimensions. Eleven alternatives add visual ink with zero advance. Authored brace
 groups remain opaque to transposition. Shared notation-side effects execute once,
 not once per layer. Full-score transposition stays in Python/LilyPond.
+
+### Retained geometry and spacing
+
+TeX renders lyric and musical source once. `ulsbs-music.lua`, loaded by the music
+module, operates on retained nodes marked with TeX-allocated attributes. Its
+paragraph callback resolves physical-line geometry; `finish_verse` applies
+stanza-wide minima and repairs interline glue. Interned configuration snapshots
+preserve the policy active at collection even after local TeX groups have ended.
+Zero-sized multikey overlays do not contribute geometry.
+
+Empty annotation runs emit lyrics directly. Beat-only runs use actual ink extents
+and the collision gap rather than a full annotation row. Chord/pitch runs keep
+their configured annotation baseline and actual box clearance. `\ulChordLineParams`
+is the renewable stacking policy; no enabled-but-unused voice or blanket chord
+sample reserves height. Hidden melody offsets add no width. The verse `+`
+modifier is consumed but has no layout effect, including on `\e`.
+
+Annotation stacks sharing a lyric baseline on a physical line are lifted to the
+largest required annotation clearance on that line. This changes annotation rows
+only: lyric baselines, horizontal advances and offsets stay fixed. Explicitly
+raised/lowered horizontal wrappers form independent baseline groups; vertical
+boxes and raw no-lyrics runs retain their own placement. Alignment is idempotent
+and never evaluates source or appearance hooks again.
+
+`\ulMelodySize` selects the font size for both neutral note slots and rendered
+circles. `\ulMelodySymbolStyle` and tag hooks are drawing-only; they are not called
+for measurement or hidden pitches. Shared sizing keeps hidden voices, rests and
+beats on the same horizontal grid. Circle metrics remain font-size cached.
+
+Measure and spanning-repeat policies select by logical occupied level: lyrics or
+beats (0), chords or low hints (1), normal melody (2), high melody (3). Hidden
+pitches/rests do not create higher levels. `\ulMeasureBarTop{level}{reference}{scale}`
+and `\ulRepeatBarTop` choose a reference and scalar for each level. References use
+lyric A (0), chord-font A at its annotation baseline (1), or a melody circle's
+bottom and diameter (2/3); target top is `reference bottom + base * scale`.
+Missing selected melody references use nominal lane positions and retained circle
+metrics, not another rendering. `\altchords` bars use level-zero policy.
+
+`\ulUseVerseAnnotationMinimum` can promote zero-level lines of an annotated verse
+to a one-level minimum without inventing absent upper rows. Entirely zero-level
+verses remain compact. `\ulRepeatBarBottomScale` sets depth in lyric A units.
+`\ulRepeatBarMinimumGap` separates completed same-column repeat strokes; it excludes
+nested or continuing segments, and zero disables it. `\prep` uses the highest
+occupied reference bottom with its authored fallback. Retained meter boxes are
+consumed once; geometry repair never re-renders their tokens.
+
+Inline `\lrep`/`\rrep` signs remain music-owned. Lyric-row dots/bars always print;
+only effective chords add upper dots at `\ulChordLineBaselineSkip`. The common
+height helper uses the current baseline plus the WithChords adjustment when chords
+are effective, lyric A height plus NoChords otherwise. Authored width/depth and
+adjustments remain authoritative. Repeat signs do not evaluate neighbors or join
+transposable alternatives.
+
+`\ulVerseBaseline{natural}{stretch}{shrink}` and `\ulVerseSeparation` evaluate scalar
+expressions in the configured lyric font and cache the resulting glue in capital-A
+units. Configure them after font customization; presets and later author calls
+select policy. Setters validate all arguments before changing state and respect
+grouping. Read-only `\ulVerseSpacingScale{baseline|separation}{natural|stretch|shrink}`
+supports relative settings. `\ulVerseMinimumGap{length}` supplies minimum ink clearance
+and an additional inter-verse boundary gap, not a forced baseline. Implicit final
+lines finish before stanza scope restores, so they keep their captured policy.
+
+Translation stanza entry restores `\normalbaselineskip` before stanza hooks;
+its small-font selection and `\ulTranslationFont` then select final font leading.
+Explanation, passage and starred passage restore normal leading after selecting
+their font, then apply their existing multipliers without baseline stretch/shrink.
+The alternate passage style is `\begin{passage}*[LANG]{title} ... \end{passage}`.
+These blocks do not install the cached verse baseline. Their language, raw-newline,
+wrapping, hook and minimum-gap behavior remains separate from nominal leading.
+
+Early initialization retains its pre-typography chord sample solely for font
+allocation and PDF range identities, not as a leading strut. Number/title
+measurements, early verse indent and later passage `em` captures retain their
+respective font contexts. Feature switches do not reallocate fonts or recapture
+unrelated dimensions. Live defaults belong in `ulsbs.sty` and the selected presets,
+not duplicated numeric tables here.
 
 ## Index Lifecycle
 
@@ -550,11 +1050,11 @@ warnings that must not trigger retries.
 
 `Job.variant` identifies the default, lyrics-only, or instrument variant;
 `Job.multikey` is a separate boolean selecting the multikey edition. Each
-selected variant has an ordinary job. Currently, only default and instrument
-variants also get a multikey job when `multikey-books` is enabled. Lyrics-only
-variants remain ordinary-only; this is a generation restriction, not a different
-level in the variant hierarchy.
-The existing `ULSBS-EXTRA-VARIANTS` comment selects instrument variants.
+selected variant has an ordinary job. Registry edition support controls companion
+jobs when `multikey-books` is enabled: default and instrument variants support
+multikey; lyric remains ordinary-only. This is a generation restriction, not a
+different level in the variant hierarchy. Main-source availability and generic
+selection determine the identities, independently of TeX feature visibility.
 
 Ordinary and multikey compilations run independently in the same bounded
 worker pool, including for a single book. `compile_one_job` returns a
@@ -613,6 +1113,9 @@ index, never the old `multikey_file`, and omits it when multikey is disabled.
 Generated ordinary `book_info.multikey_json_file` is result-root-relative
 (`multikey/Book_A5_MULTIKEY_RANGES.json`); website catalog variant values remain
 basenames resolved against the site's multikey directory.
+Consumer catalog variant identifiers use canonical `lyric`, not `lyrics`;
+ordinary song/database `lyrics` fields, consumer view IDs and labels, and the
+deliberate `_LYRICS-ONLY` output marker are distinct and need no blanket rename.
 Multikey jobs never generate printouts, MIDI, audio, or cover images.
 
 `multikey-max-pages-per-range` defaults to `50` and
@@ -719,15 +1222,25 @@ job-local MIDI include is suppressed under the conditions above.
 
 The pipeline defines `\ulPdfTranspositionLayers`, `\ulPdfTranspositionLayerUi`,
 and `\ulPdfTranspositionRequireSongIds` before loading the class/package.
-Layers are `true` only for multikey jobs and `false` for ordinary and lyrics
+Layers are `true` only for supported multikey jobs and `false` for ordinary
 jobs. Manual LaTeX compilation defaults to layers `false` and UI `native`.
 Manual builds may define `\newcommand{\ulPdfTranspositionLayers}{true}` before
 class/package loading; pipeline-driven sources must not duplicate its definitions.
 
-A companion candidate whose source initializes lyric-only mode or does not load
-the renderer explicitly reports disabled capability. It is skipped without
-publishing an ordinary PDF under a multikey name. This is different from an
-enabled renderer whose valid songs currently hide every annotation.
+The explicit load-time value alone enables the renderer and its early `ocgx2`
+import, independently of legacy identity, named presets and effective inline or
+score visibility. Imports stay before phase-two layer state and font allocation
+stays in its existing order. Later preamble/local visibility changes cannot revoke
+or retroactively enable this capability. Manual class and package-only default
+entry paths share this low-level option; it is not a compiler edition selector or
+publication authorization, even with a named lyric preset. Registered edition
+eligibility remains the compiler's responsibility: lyric multikey jobs are rejected.
+
+A companion candidate whose source explicitly sets layers `false` before loading
+the renderer, or does not load the renderer, reports disabled capability. It is
+skipped without publishing an ordinary PDF under a multikey name. An enabled
+renderer whose valid songs currently hide all transposable ink instead reports an
+enabled manifest with no transposable content; it need not allocate any OCGs.
 
 ### PDF passes and resources
 
@@ -794,8 +1307,9 @@ and PDF rewriting could not safely renumber those embedded references. A clean
 
 ### Opt-in score layers
 
-`multikey-lilypond-scores` defaults to `false` and only affects multikey,
-non-lyrics jobs. Originals still use the normal LilyPond pipeline. The focused
+`multikey-lilypond-scores` defaults to `false` and only affects supported multikey
+jobs. Eligibility is registry-owned, not inferred from inline chord visibility.
+Originals still use the normal LilyPond pipeline. The focused
 `lilypond_scores.py` module wraps generated per-system graphics inclusions with
 snippet identities while preserving their existing inter-system break tokens.
 Repeated references to the same system retain their original placements.
@@ -1091,9 +1605,9 @@ charango tunings, bass clef, tablature retries, and fresh-directory cache reuse.
 Layers transpose verse chords, inline `\ac` references, pitched melody hints and
 the declared `key=` badge. Recommended singing keys (`gk=`), standalone
 `\altchords`, prose and chord diagrams do not switch. LilyPond notation switches
-only with the separate score opt-in. The stock bass-clef setup hides transposable
-annotations, so its companion has no visible switching effect unless annotations
-or score transposition are enabled. Original notation determines layout and
+only with the separate score opt-in. The stock bass-clef setup hides inline
+chords and pitches; enabled key badges or opted-in scores can still supply
+transposable ink. Original notation determines layout and
 default viewing/printing; hidden notation may still appear in search, copy/paste
 or accessibility output. The ordinary PDF is the conventional printing fallback.
 
@@ -1353,10 +1867,11 @@ scores remain outside interactive transposition by default; the opt-in score
 layers described above reuse the same occurrence-specific OCGs. Standalone
 alternate chord sets retain their existing authoring/transposition API.
 
-The stock bass-clef post-setup disables chords and pitched hints, which also
-hides the key badge. Without opt-in score layers or reenabled annotations, its
-occurrences generate no transposable boxes, allocate no OCG families, and are
-omitted from `songs`. More generally, discarded boxes can allocate unused OCGs
+The bass-clef preset disables inline chords and pitches but preserves authored
+key-badge policy and permits whole scores. Visible key badges or opt-in score
+layers can therefore supply transposable ink without inline annotations. An
+occurrence with no transposable ink allocates no OCG family and is omitted from
+`songs`. More generally, discarded boxes can allocate unused OCGs
 without creating manifest entries. Do not confuse such unused declarations with
 dangling resource references.
 
@@ -1549,10 +2064,11 @@ produces a diagnostic instead of being hoisted across the chord. Malformed
 arguments, compound pitches, incompatible offsets, and ambiguous secondary
 placement also require author review rather than speculative conversion.
 
-### V2 naming
+### V2 naming and semantics
 
 The [v2 migration instructions](README.md#ulsbs-migrate-syntax-v2) describe the
-current naming upgrade. `src/ulsbs/tools/naming_v2.py` is the authoritative
+combined v2 upgrade.
+`src/ulsbs/tools/naming_v2.py` is the authoritative naming
 inventory: `COMMAND_RENAMES` maps bare control words, `BOOLEAN_SETTERS` maps old
 true/false commands to explicit setter/value pairs, and `NAME_ARGUMENT_RENAMES`
 maps literal counter, color and environment names only in their argument
@@ -1583,7 +2099,9 @@ hook paths and serialized metadata. Ordinary source migration preserves filename
 the explicit tag-file migration described below renames its selected file.
 Configuration, assembly, fonts and accessors use `ulCamelCase`; initialisms follow
 the same casing (`ulToc`).
-Boolean setters preserve defaults and scoped assignments; readable predicates
+Visibility permissions are preamble-only and freeze at `begindocument/before`;
+proved direct body assignments become grouped local requests. Other supported
+boolean settings retain their own scope. Readable effective predicates
 remain real TeX conditionals, for example `\ifulShowTags ... \else ... \fi`.
 Generated true/false helpers are private. No old runtime aliases are installed.
 
@@ -1616,6 +2134,60 @@ accessors diagnose for review without partially rewriting the file. No automatic
 scripture-to-tag conversion is provided. Explicit tag-index reference values with
 numeric suffixes still need manual review: the migrator does not infer whether a
 suffix is an old reference or part of a legitimate tag name.
+
+The semantic planner in `migrate_syntax_v2.py` composes naming, availability,
+scope and identity proposals against the ORIGINAL source. `_EditPlan` retains
+source offsets; `migrate_text` invokes `_apply_edit_plans` once, after all proposals
+and diagnostics. No intermediate renamed source is semantically rescanned.
+Conflicts or any review diagnostic reject the whole file, preserving original
+file/line/column coordinates and suppressing partial diffs/writes. Other safe
+inputs may proceed. Already-v2 inputs use the same transaction and validation.
+
+Bounded semantic conversions are:
+
+- One leading standalone literal `ULSBS-EXTRA-VARIANTS` marker before a proved
+  direct main class without existing availability becomes a literal declaration.
+  It preserves historical `default,lyric` plus the listed supported instruments;
+  `none` removes instruments only. Absence of a marker does not infer companions.
+- Direct literal body display setters, in either naming generation, become local
+  requests for all 21 canonical visibility features. Execution and body phase need
+  positive proof; recognized arguments are consumed according to their supported
+  grammar. Closing a group does not repair proof lost to unknown macro arity or
+  mutation. Valid current preamble policy setters are not blanket-rejected.
+- Supported literal removed body measure assignments become measure requests.
+  Removed queries and unsupported preamble assignments remain review-only.
+- Balanced instrument-only raw conditional pagination trees become braced
+  `\ulIfVariant` calls. Branches may contain only supported zero-argument page
+  boundaries, nested instrument tests, whitespace and comments. The planner
+  preserves whitespace swallowing with `\relax`, without adding execution groups.
+
+Mutable identity, ambiguous chorded/lyric-only capability tests, broad historical
+`\chordsoff`, conflicting/nonleading markers, computed declarations, unsupported
+hooks/references/definitions, unknown phase/arity and arbitrary conditional payloads
+remain diagnostic-only. Naming's safe reference/definition conversions remain
+supported where applicable. This is not arbitrary TeX interpretation: expansion,
+custom catcodes and unseen includer/custom-class behavior remain outside the
+proof boundary. Manual review must select identity or effective feature semantics.
+
+Repeatable explicit `--config-file FILE` is diagnostic-only in ALL modes, including
+`--write`. It reviews root/every-profile selectors, normalized key collisions and
+profile composition, with original coordinates; it emits no conversion counts,
+partial config diff or writes. Selected config bytes, inode, mtime and mode remain
+unchanged, including cross-role aliases with source/tag inputs. It neither follows
+book paths nor discovers configs or shell commands. Removed category settings need
+manual migration to `variants` after source-availability review; do not guess a
+global selector from old booleans.
+
+CLI requires exactly one of `--check`, `--diff`, `--write` and explicit input(s).
+Check fails for pending edits or review/I/O failures; diff/write fail for review/I/O
+failures. Traversal failures are reported rather than silently skipped. Directory
+scans prune generated/VCS paths and structurally recognized nested engine roots;
+explicit files/subdirectories are intentional scopes. Source/tag writes preserve
+permissions and newlines and use per-file atomic replacement, not a project
+transaction. Symlink components and nonregular leaves are refused; nonblocking
+opens plus descriptor regularity checks reject substituted FIFOs. These checks
+are not a descriptor-anchored filesystem sandbox: hostile concurrent ancestor
+replacement remains outside the bounded contract.
 
 ## Testing
 
@@ -1664,6 +2236,9 @@ images. When checking dimensions, set the relevant
 styling explicitly or compare engine variants within the same run (for example,
 layers on/off), rather than pinning the default typography or pagination. New
 default styling should not require updating historical reference PDFs.
+Tests target the current implementation, not an old backend or the absence of
+nonexistent legacy macros. Historical syntax remains test input where it is part
+of a migration tool's supported behavior.
 
 For focused Python work without the wrapper:
 

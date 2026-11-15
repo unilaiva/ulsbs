@@ -33,6 +33,43 @@
 \bool_new:N \l__ulsbs_music_sharps_bool
 \bool_set_false:N \l__ulsbs_music_sharps_bool
 \bool_new:N \l__ulsbs_music_lowercase_bool
+\box_new:N \l__ulsbs_music_note_circle_box
+\dim_new:N \l__ulsbs_music_note_circle_shift_dim
+\newattribute\__ulsbs_music_note_center_attribute
+\int_const:Nn \c__ulsbs_music_note_center_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_music_note_radius_attribute
+\int_const:Nn \c__ulsbs_music_note_radius_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_music_note_level_attribute
+\int_const:Nn \c__ulsbs_music_note_level_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_music_note_raise_attribute
+\int_const:Nn \c__ulsbs_music_note_raise_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_music_normal_raise_attribute
+\int_const:Nn \c__ulsbs_music_normal_raise_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_music_high_raise_attribute
+\int_const:Nn \c__ulsbs_music_high_raise_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_music_chord_a_attribute
+\int_const:Nn \c__ulsbs_music_chord_a_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_music_lyric_a_attribute
+\int_const:Nn \c__ulsbs_music_lyric_a_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_music_prep_attribute
+\int_const:Nn \c__ulsbs_music_prep_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_music_end_fragment_attribute
+\int_const:Nn \c__ulsbs_music_end_fragment_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_music_config_attribute
+\int_const:Nn \c__ulsbs_music_config_attribute_int {\allocationnumber}
+\dim_new:N \l__ulsbs_music_note_padding_dim
+\dim_new:N \l__ulsbs_music_note_raise_dim
+\dim_new:N \l__ulsbs_music_lyric_a_dim
+\box_new:N \l__ulsbs_music_measure_box
+\cs_new_protected:Npn \__ulsbs_music_lyric_metrics:
+  {\tex_attribute:D \c__ulsbs_music_lyric_a_attribute_int=\number\fontcharht\font`A\relax}
+\cs_new_protected:Npn \__ulsbs_music_context:
+  {\tex_attribute:D\c__ulsbs_music_config_attribute_int=
+    \directlua{tex.sprint(ulsbs_music.capture_config())}\relax}
+\cs_new_protected:Npn \__ulsbs_music_lyric_a:
+  {\int_compare:nNnTF {\tex_attribute:D\c__ulsbs_music_lyric_a_attribute_int}>{0}
+     {\dim_set:Nn \l__ulsbs_music_lyric_a_dim {\tex_attribute:D\c__ulsbs_music_lyric_a_attribute_int sp}}
+     {\dim_set:Nn \l__ulsbs_music_lyric_a_dim {\fontcharht\font`A}}}
 \tl_new:N \l__ulsbs_music_result_tl
 \tl_new:N \l__ulsbs_music_pending_tl
 \tl_new:N \l__ulsbs_music_effective_tl
@@ -305,6 +342,7 @@
 % the chord owner performs those operations afterward.
 \cs_new_protected:Npn \__ulsbs_music_annotation:n #1
   {\ulsbs@annotationvisiblefalse\ulsbs@annotationminimumdisabledfalse
+   \ulsbs@annotationfullclearancefalse
    \__ulsbs_music_annotation_dispatch:w #1\q__ulsbs_music_end}
 
 % Peek without expansion: only a literal leading < selects the melody reader.
@@ -312,16 +350,21 @@
   {\peek_charcode:NTF < {\__ulsbs_music_annotation_melody:w}
     {\__ulsbs_music_annotation_chord:w}}
 
-% #1 is the chord tail. Empty ordinary tails have no ink; excluded/replay tails
-% still enter printchord. Adjacent visible labels receive a small inter-label kern.
+% #1 is the raw chord tail. Test permission before evaluating any payload, even
+% shared multikey effects. Empty tails have no ink, including excluded/replay
+% annotations. Adjacent visible labels receive a small inter-label kern.
 \cs_new_protected:Npn \__ulsbs_music_annotation_chord:w #1\q__ulsbs_music_end
   {\hbox_set:Nn \l__ulsbs_chord_box
-    {\bool_if:nT {!\tl_if_empty_p:n {#1} || \l__ulsbs_chord_excluded_bool}
-       {\ulsbs@pdfchordtrue\ulPrintChord{
+    {\legacy_if:nT {ulShowChords}
+     {\tl_if_empty:nF {#1}
+        {\ulsbs@pdfchordtrue\ulPrintChord{
+          \tex_attribute:D\c__ulsbs_music_chord_a_attribute_int=\number\fontcharht\font`A\relax
          \bool_if:NT \l__ulsbs_chord_adjacent_bool {\kern.15em}
-         \vphantom{/}\transposehere{#1}\kern.2em}}}
+         \vphantom{/}\transposehere{#1}\kern.2em}}}}
    \dim_compare:nNnT {\box_wd:N \l__ulsbs_chord_box}>{0pt}
-     {\ulsbs@annotationvisibletrue}}
+      {\ulsbs@annotationvisibletrue\ulsbs@annotationfullclearancetrue
+       \directlua{node.set_attribute(tex.box[\number\l__ulsbs_chord_box],
+         \int_use:N\c__ulsbs_chord_row_attribute_int,1)}}}
 
 % #1 is the single leading melody block, #2 chord tail. Reject another block in
 % the tail; compose the chord first, then overlay the parsed melody and beats.
@@ -345,13 +388,20 @@
 \cs_new_protected:Npn \__ulsbs_music_parse_content:w #1\q__ulsbs_music_end
   {\__ulsbs_melody_parse:n {#1}}
 
-% Measure a neutral slot without PDF layers, render each voice once through its
-% visual seam, and calculate beat extent separately. Overlay retained voice/beat
+% Measure a neutral slot with \ulMelodySize, not author symbol/tag hooks.
+% Render each voice once through its visual seam and calculate beats separately.
+% Overlay retained voice/beat
 % boxes on the chord; only visible extents affect advance unless ! opts out.
 % In that case disable the scanner's whitespace minimum as well.
 \cs_new_protected:Npn \__ulsbs_music_melody:
-  {\sbox\ulsbs@melodylayerbox{{\ulsbs@pdfsongfalse\ulChordFont\ulsbs@melodystyle{primary}\ulsbs@note{C}}}
+  {\sbox\ulsbs@melodylayerbox{{\ulChordFont\ulMelodySize\mdseries\ulSansHeavyFont
+      \ulsbs@circledCircleGetDims
+      \hspace{\ulCircledHorizontalPadding}\kern\ulsbs@circledCircleDiameter
+      \hspace{\ulCircledHorizontalPadding}}}
    \ulsbs@melodyslotwidth=\wd\ulsbs@melodylayerbox\relax
+   % Track melody ink separately until offsets are resolved. The full-clearance
+   % flag retains any chord ink and is restored into the common visible flag below.
+   \ulsbs@annotationvisiblefalse
    \ifulsbs@melodyprimarylow
      \def\ulsbs@primaryheight{\dimexpr\ulMelodyLowHeightFactor ex\relax}
      \ifulsbs@melodysecondarybelow
@@ -367,57 +417,103 @@
        \let\ulsbs@secondaryheight\ulsbs@primaryheight
      \else\def\ulsbs@secondaryheight{\dimexpr\ulMelodyHighHeightFactor ex\relax}\fi\fi
    \fi
-   \sbox\ulsbs@melodyprimarybox{\ulsbs@pdfchordtrue\ulChordFont
-     \__ulsbs_melody_sequence:Nnn \l__ulsbs_melody_primary_seq {\ulsbs@melodystyle{primary}}{\ulsbs@primaryheight}}
-   \sbox\ulsbs@melodysecondarybox{\ulsbs@pdfchordtrue\ulChordFont
-     \__ulsbs_melody_sequence:Nnn \l__ulsbs_melody_secondary_seq {\ulsbs@melodystyle{secondary}}{\ulsbs@secondaryheight}}
-   \ifulShowNotes\ifdefined\ulsbs@melodynotesdisabled\else
+    \sbox\ulsbs@melodyprimarybox{\ulsbs@pdfchordtrue\ulChordFont
+      \tex_attribute:D\c__ulsbs_music_note_level_attribute_int=
+        \ifulsbs@melodyprimarylow1\else2\fi\relax
+     \legacy_if:nT {ulShowNotes}
+       {\__ulsbs_melody_sequence:Nnn \l__ulsbs_melody_primary_seq {\ulsbs@melodystyle{primary}}{\ulsbs@primaryheight}}}
+    \sbox\ulsbs@melodysecondarybox{\ulsbs@pdfchordtrue\ulChordFont
+      \tex_attribute:D\c__ulsbs_music_note_level_attribute_int=
+        \ifulsbs@melodysecondarybelow1\else
+          \ifulsbs@melodysecondarysame\ifulsbs@melodyprimarylow1\else2\fi
+          \else\ifulsbs@melodyprimarylow2\else3\fi\fi\fi\relax
+     \legacy_if:nT {ulShowNotes}
+       {\__ulsbs_melody_sequence:Nnn \l__ulsbs_melody_secondary_seq {\ulsbs@melodystyle{secondary}}{\ulsbs@secondaryheight}}}
+   \ifulShowNotes
      \__ulsbs_melody_mark_note_visible:N \l__ulsbs_melody_primary_seq
      \__ulsbs_melody_mark_note_visible:N \l__ulsbs_melody_secondary_seq
-   \fi\fi
-   \sbox\ulsbs@melodylayerbox{\ulsbs@bmdraw}
+   \fi
+   \ifulsbs@annotationvisible\ulsbs@annotationfullclearancetrue\fi
+   % Suppressed beats neither draw a measurement sample nor retain a beat layer.
+   \sbox\ulsbs@melodylayerbox{\legacy_if:nT {ulShowBeats}{\ulsbs@bmdraw}}
    \ulsbs@melodybeatwidth=\wd\ulsbs@melodylayerbox\relax
    \ulsbs@melodybeatextent=0pt\relax
-   \ifulShowBeats\ifdefined\ulsbs@beatsdisabled\else
+   \ifulShowBeats
      \__ulsbs_melody_beat_extent:N \l__ulsbs_melody_primary_seq
      \__ulsbs_melody_beat_extent:N \l__ulsbs_melody_secondary_seq
      \ifdim\ulsbs@melodybeatextent>0pt\relax\ulsbs@annotationvisibletrue\fi
-   \fi\fi
-   \sbox\ulsbs@melodybeatbox{\rlap{\__ulsbs_melody_beats:N \l__ulsbs_melody_primary_seq}
-     \rlap{\__ulsbs_melody_beats:N \l__ulsbs_melody_secondary_seq}}
+   \fi
+   \sbox\ulsbs@melodybeatbox{\legacy_if:nT {ulShowBeats}
+     {\rlap{\__ulsbs_melody_beats:N \l__ulsbs_melody_primary_seq}
+      \rlap{\__ulsbs_melody_beats:N \l__ulsbs_melody_secondary_seq}}}
+   % Chord ink alone must not evaluate a hidden melody's authored dimension.
+   \legacy_if:nT {ulsbs@annotationvisible}
+     {\tl_if_empty:NF \l__ulsbs_melody_offset_tl
+       {\ulsbs@melodyoffset=\dimexpr\l__ulsbs_melody_offset_tl\relax}}
+   \ifulsbs@annotationfullclearance\ulsbs@annotationvisibletrue\fi
    \dim_set:Nn \l_tmpa_dim {\box_wd:N \l__ulsbs_chord_box}
    \ifulsbs@melodyzeroadvance\ulsbs@annotationminimumdisabledtrue
    \else
-     \dim_set:Nn \l_tmpa_dim {\dim_max:nn {\l_tmpa_dim}
-       {\dim_max:nn {\wd\ulsbs@melodyprimarybox}
-         {\dim_max:nn {\wd\ulsbs@melodysecondarybox}{\ulsbs@melodybeatextent}}
-         +\dim_max:nn {0pt}{\ulsbs@melodyoffset}}}
+      \dim_set:Nn \l_tmpb_dim {\dim_max:nn {\wd\ulsbs@melodyprimarybox}
+        {\dim_max:nn {\wd\ulsbs@melodysecondarybox}{\ulsbs@melodybeatextent}}}
+      % Hidden voices do not acquire advance merely from an authored offset.
+      \dim_compare:nNnT {\l_tmpb_dim}>{0pt}
+        {\dim_set:Nn \l_tmpa_dim {\dim_max:nn {\l_tmpa_dim}
+          {\l_tmpb_dim+\dim_max:nn {0pt}{\ulsbs@melodyoffset}}}}
    \fi
-   \hbox_set:Nn \l__ulsbs_chord_box
-    {\rlap{\box_use:N \l__ulsbs_chord_box}
+     % Distinguish actual chord ink from melody-only anchors without another render.
+     \bool_set:Nn \l_tmpb_bool {\dim_compare_p:nNn {\box_ht:N \l__ulsbs_chord_box}>{0pt}}
+    \hbox_set:Nn \l__ulsbs_chord_box
+     {\rlap{\box_use:N \l__ulsbs_chord_box}
      \rlap{\kern\ulsbs@melodyoffset\copy\ulsbs@melodyprimarybox}
      \rlap{\kern\ulsbs@melodyoffset\copy\ulsbs@melodysecondarybox}
-     \rlap{\kern\ulsbs@melodyoffset\copy\ulsbs@melodybeatbox}\kern\l_tmpa_dim}}
+      \rlap{\kern\ulsbs@melodyoffset\copy\ulsbs@melodybeatbox}\kern\l_tmpa_dim}
+      \legacy_if:nT {ulsbs@annotationfullclearance}
+        {\directlua{node.set_attribute(tex.box[\number\l__ulsbs_chord_box],
+          \int_use:N\c__ulsbs_chord_row_attribute_int,
+          \bool_if:NTF\l_tmpb_bool{1}{-1})}}}
 
 % Pure visual renderer for pitch tokens #1; circle/tag geometry stays shared.
 \cs_new_protected:Npn \__ulsbs_music_circle:n #1
-  {\makebox[0pt][l]{\ulsbs@mntag}\circled{\__ulsbs_music_print:n {#1}}}
+  {\makebox[0pt][l]{\ulsbs@mntag}
+   \group_begin:
+   \dim_set:Nn \l__ulsbs_music_note_circle_shift_dim {\ulCircledCircleVerticalShift}
+   \dim_set:Nn \l__ulsbs_music_note_padding_dim {\ulCircledHorizontalPadding}
+   \cs_set:Npx \ulCircledCircleVerticalShift {\dim_use:N \l__ulsbs_music_note_circle_shift_dim}
+   \cs_set:Npx \ulCircledHorizontalPadding {\dim_use:N \l__ulsbs_music_note_padding_dim}
+   \hbox_set:Nn \l__ulsbs_music_note_circle_box {\circled{\__ulsbs_music_print:n {#1}}}
+   % TikZ's T.center is the midpoint of this retained box; the circle alone has
+   % the authored vertical shift. Do not include the separate melody tag's ink.
+   \directlua{
+     local~box=tex.box[\number\l__ulsbs_music_note_circle_box]
+     node.set_attribute(box,\int_use:N\c__ulsbs_music_note_center_attribute_int,
+       math.floor((box.height-box.depth)/2+\number\l__ulsbs_music_note_circle_shift_dim+.5))
+     node.set_attribute(box,\int_use:N\c__ulsbs_music_note_radius_attribute_int,
+       math.floor((box.width-2*\number\l__ulsbs_music_note_padding_dim)/2+.5))}
+   \box_use_drop:N \l__ulsbs_music_note_circle_box
+   \group_end:}
 
 % [#1] is raise height, #2 pitch text or unpitched /. Honor visibility before
 % rendering; pitched tokens transpose once before entering the multikey seam.
 \RenewDocumentCommand \ulsbs@note {O{\dimexpr\ulMelodyNormalHeightFactor ex\relax} m}
-  {\ifulShowNotes\ifdefined\ulsbs@melodynotesdisabled\else
+  {\legacy_if:nT {ulShowNotes}
+    {
     \group_begin:
     \bool_set_true:N \l__ulsbs_music_lowercase_bool
     \renewcommand{\ulSharpSymbol}{\ulsbs@mnsharpsymbol}
-    \renewcommand{\ulFlatSymbol}{\ulsbs@mnflatsymbol}
-    \raisebox{#1}{\ulsbs@mnsymbolstyle
+     \renewcommand{\ulFlatSymbol}{\ulsbs@mnflatsymbol}
+     \dim_set:Nn \l__ulsbs_music_note_raise_dim {#1}
+     \tex_attribute:D\c__ulsbs_music_note_raise_attribute_int=\number\l__ulsbs_music_note_raise_dim\relax
+     \tex_attribute:D\c__ulsbs_music_chord_a_attribute_int=\number\fontcharht\font`A\relax
+     \tex_attribute:D\c__ulsbs_music_normal_raise_attribute_int=\number\dimexpr\ulMelodyNormalHeightFactor ex\relax\relax
+     \tex_attribute:D\c__ulsbs_music_high_raise_attribute_int=\number\dimexpr\ulMelodyHighHeightFactor ex\relax\relax
+     \raisebox{\l__ulsbs_music_note_raise_dim}{\ulsbs@mnsymbolstyle
       \str_if_eq:nnTF {#2}{/}{\__ulsbs_music_circle:n {/}}
        {\__ulsbs_music_transpose:nN {#2}\l__ulsbs_music_effective_tl
         \exp_args:NV \__ulsbs_music_visual:nn \l__ulsbs_music_effective_tl
           {\__ulsbs_music_circle:n}}}
     \group_end:
-   \fi\fi}
+    }}
 
 % These rule primitives and the shipout coalescer are already owned ULSBS ink.
 % Paragraph hooks supply previous line count and invoke this prefix.
@@ -438,37 +534,47 @@
   {\mode_if_horizontal:T {\par}
    \int_compare:nNnTF {\ulsbs@rep@level}>{0}
     {\ifnum\ulsbs@prevparlines>1\relax
-       \advance\ulsbs@prevparlines by -1\relax\nointerlineskip
-        \hbox to 0pt{\kern\l__ulsbs_verse_indent_dim\ulsbs@rep@drawbars}
+        \advance\ulsbs@prevparlines by -1\relax
+        \dim_set:Nn \l_tmpa_dim {\prevdepth}\nointerlineskip
+          \hbox~attr~\c__ulsbs_music_end_fragment_attribute_int~\number\l_tmpa_dim~to~0pt{\kern\l__ulsbs_verse_indent_dim
+           \raisebox{\l_tmpa_dim}[0pt][0pt]{\ulsbs@rep@drawbars}}
      \fi
      \ulsbs@rep@endmarker\ulBoolSetFalse{g__ulsbs_repeat_cont_prop}{\the\ulsbs@rep@level}
      \global\advance\ulsbs@rep@level -1\relax}
     {\PackageWarning{ulsbs}{Unmatched~\string\endrep:~ignored}}
    \ignorespaces}
 
-% Inline left/right repeat signs share common bar-height metrics and add an
-% upper colon in chorded mode. They do not change repeat nesting state.
+% Inline left/right signs always retain lyric dots/bars and authored bar metrics.
+% Only effective chords add chord-row dots at the authored baseline. Pitches and
+% beats own their retained ink clearance; neither requests a second repeat row.
+% This is the sole lrep/rrep owner; it never changes repeat nesting or replays ink.
 \cs_set_protected:Npn \lrep
   {{\color{ulRepetitionSignColor}\ulsbs@rep@setbarhtbase
     \vrule width1.618034\ulRepeatBarWidth height\ulsbs@tmp@rep@barhtbase depth\ulRepeatBarDepth
-    \ifulChorded\rlap{\raisebox{\ulChordLineBaselineSkip}{:}}\fi :\kern.25ex}}
+    \ifulShowChords\rlap{\raisebox{\ulChordLineBaselineSkip}{:}}\fi :\kern.25ex}}
 
 \cs_set_protected:Npn \rrep
   {{\color{ulRepetitionSignColor}\ulsbs@rep@setbarhtbase\kern.25ex
-    \ifulChorded\rlap{\raisebox{\ulChordLineBaselineSkip}{:}}\fi :
+    \ifulShowChords\rlap{\raisebox{\ulChordLineBaselineSkip}{:}}\fi :
     \vrule width1.618034\ulRepeatBarWidth height\ulsbs@tmp@rep@barhtbase depth\ulRepeatBarDepth}}
 
-% #1 is repeat-count text; prep raises the same mark using baseline policy.
+% #1 is repeat-count text. The retained marker follows its line's actual levels.
 \cs_set_protected:Npn \rep #1 {{\color{ulRepetitionSignColor}(\texttimes#1)}}
 
 \cs_set_protected:Npn \prep #1
-  {\raisebox{\ifulsbs@baselineincreased 2ex\else 1ex\fi}
-     {{\color{ulRepetitionSignColor}\rep{#1}:}}}
+  {\mode_leave_vertical:
+   \raise1ex\hbox~attr~\c__ulsbs_music_prep_attribute_int~\number\dimexpr1ex\relax~
+     {{\color{ulRepetitionSignColor}#1×:}}}
+% Initial line fragments use the font reference only; the physical-line policy
+% resolves their final levels after breaking. Inline lrep/rrep retain old knobs.
+\cs_new_protected:cpn {ulsbs@rep@setlinebase}
+  {\__ulsbs_music_lyric_a:
+   \ulsbs@tmp@rep@barhtbase=\directlua{tex.sprint(ulsbs_music.initial_height('repetition',
+     \number\l__ulsbs_music_lyric_a_dim))}sp\relax
+   \ulRepeatBarDepth=\directlua{tex.sprint(ulsbs_music.initial_depth(
+     \number\l__ulsbs_music_lyric_a_dim))}sp\relax}
 \tl_new:N \l__ulsbs_music_meter_top_tl
 \tl_new:N \l__ulsbs_music_meter_bottom_tl
-% Initial lyric-only first-token bars retain common initialization's enabled ink.
-\bool_new:N \l__ulsbs_music_measure_enabled_bool
-\bool_set_true:N \l__ulsbs_music_measure_enabled_bool
 \box_new:N \l__ulsbs_music_meter_top_box
 \box_new:N \l__ulsbs_music_meter_bottom_box
 \newattribute\__ulsbs_music_measure_attribute
@@ -485,7 +591,7 @@
 % replay state. Preserve surrounding glue; consecutive bar nodes get 1em spacing.
 % Measure meter tokens once into retained boxes, then consume them in the vbox.
 \cs_set_protected:Npn \measurebar
-  {\bool_if:NT \l__ulsbs_music_measure_enabled_bool
+  {\legacy_if:nT {ulShowMeasures}
    {
     \ifhmode
       \skip_set:Nn \l_tmpa_skip {\lastskip}\unskip
@@ -493,7 +599,7 @@
       \ifnum\directlua{
         local~n=tex.nest.top.tail;
         tex.sprint(n~and~n.id==node.id('vlist')~and~node.has_attribute(n,
-          \int_use:N\c__ulsbs_music_measure_attribute_int)==1~and~1~or~0)
+           \int_use:N\c__ulsbs_music_measure_attribute_int)~and~1~or~0)
       }=1\relax
         \penalty100\hskip1em\relax
       \else\penalty100\hskip\l_tmpa_skip\relax\fi
@@ -506,28 +612,57 @@
     \dim_set:Nn \l_tmpa_dim {\dim_max:nn {.5pt}
       {\dim_max:nn {\box_wd:N \l__ulsbs_music_meter_top_box}
         {\box_wd:N \l__ulsbs_music_meter_bottom_box}}}
+    \__ulsbs_music_lyric_a:
     \dim_set:Nn \l_tmpb_dim {\dim_max:nn {0pt}
-      {\baselineskip-2pt-\box_ht:N \l__ulsbs_music_meter_top_box
+      {\directlua{tex.sprint(ulsbs_music.initial_height('measure',\number\l__ulsbs_music_lyric_a_dim))}sp
+       -\box_ht:N \l__ulsbs_music_meter_top_box
        -\box_dp:N \l__ulsbs_music_meter_top_box
        -\box_ht:N \l__ulsbs_music_meter_bottom_box
        -\box_dp:N \l__ulsbs_music_meter_bottom_box
        -\tl_if_empty:NTF \l__ulsbs_music_meter_top_tl
          {\tl_if_empty:NTF \l__ulsbs_music_meter_bottom_tl {0pt}{.75pt}}{.75pt}}}
-    \vbox~attr~\c__ulsbs_music_measure_attribute_int~1~{\offinterlineskip
+    \setbox\l__ulsbs_music_measure_box=\vbox~attr~\c__ulsbs_music_measure_attribute_int~
+      \bool_if:NTF \l__ulsbs_chord_in_altchords_bool {2}{1}~{\offinterlineskip
       \hbox to\l_tmpa_dim{\hfil\box_use_drop:N \l__ulsbs_music_meter_top_box\hfil}
       \hbox to\l_tmpa_dim{\hfil\box_use_drop:N \l__ulsbs_music_meter_bottom_box\hfil}
       \tl_if_empty:NTF \l__ulsbs_music_meter_top_tl
         {\tl_if_empty:NF \l__ulsbs_music_meter_bottom_tl {\kern.75pt}}
         {\kern.75pt}
       \hbox to\l_tmpa_dim{\hfil\color{ulMeasureBarColor}
-        \vrule width.5pt height\l_tmpb_dim\hfil}}
+         \vrule width.5pt height\l_tmpb_dim\hfil}}
+    \directlua{ulsbs_music.tag_measure(\number\l__ulsbs_music_measure_box)}
+    \box_use_drop:N\l__ulsbs_music_measure_box
     \meter{}{}
    }}
 
 % #1/#2 set and consume meter only when bar ink is enabled; disabled use leaves
 % the existing pending meter untouched.
 \cs_set_protected:Npn \mbar #1#2
-  {\bool_if:NT \l__ulsbs_music_measure_enabled_bool
+  {\legacy_if:nT {ulShowMeasures}
      {\meter{#1}{#2}\measurebar}}
 \ExplSyntaxOff
+% The Lua module owns retained node geometry.
+\directlua{
+  ulsbs_music = dofile(kpse.find_file('ulsbs-music.lua'));
+  ulsbs_music.setup{
+    annotation = \number\csname c__ulsbs_chord_annotation_attribute_int\endcsname,
+    row = \number\csname c__ulsbs_chord_row_attribute_int\endcsname,
+    note_center = \number\csname c__ulsbs_music_note_center_attribute_int\endcsname,
+    note_radius = \number\csname c__ulsbs_music_note_radius_attribute_int\endcsname,
+    note_level = \number\csname c__ulsbs_music_note_level_attribute_int\endcsname,
+    note_raise = \number\csname c__ulsbs_music_note_raise_attribute_int\endcsname,
+    normal_raise = \number\csname c__ulsbs_music_normal_raise_attribute_int\endcsname,
+    high_raise = \number\csname c__ulsbs_music_high_raise_attribute_int\endcsname,
+    chord_a = \number\csname c__ulsbs_music_chord_a_attribute_int\endcsname,
+    lyric_a = \number\csname c__ulsbs_music_lyric_a_attribute_int\endcsname,
+    prep = \number\csname c__ulsbs_music_prep_attribute_int\endcsname,
+    end_fragment = \number\csname c__ulsbs_music_end_fragment_attribute_int\endcsname,
+    config = \number\csname c__ulsbs_music_config_attribute_int\endcsname,
+    measure = \number\csname c__ulsbs_music_measure_attribute_int\endcsname,
+    repetition = \ulsbs@rep@attribute,
+    repetition_start = \ulsbs@rep@startattribute,
+    normal_height = \ulsbs@rep@heightattribute,
+    repeat_gap = \ulsbs@rep@gapattribute
+  }
+}
 \makeatother

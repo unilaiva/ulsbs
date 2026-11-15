@@ -61,8 +61,6 @@ class DiagramTests(unittest.TestCase):
         cls.work = Path(cls.temporary.name)
         cls.cache = cls.work / "cache"
         cls.cache.mkdir()
-        cls.assets = cls.work / "vendor-absent-tex"
-        shutil.copytree(TEX_ASSETS, cls.assets, ignore=shutil.ignore_patterns("songs"))
         cls.diagnostics = ROOT / "build/diagrams"
         cls.diagnostics.mkdir(parents=True, exist_ok=True)
 
@@ -71,35 +69,31 @@ class DiagramTests(unittest.TestCase):
 
     def compile_checked(self, body, preamble="", *, lyric=False, multikey=False, offsets=(None,), effects=None):
         target = self.diagnostics / self._testMethodName
-        source = (r"\documentclass[oneside,openany,maintitle={Guitar diagrams}]{ulsbs-songbook}"
+        source = (r"\documentclass[variants={default,lyric},oneside,openany,maintitle={Guitar diagrams}]{ulsbs-songbook}"
                   + "\n" + r"\ulShowTags{false}\ulShowPhase{false}" + "\n" + preamble
                   + "\n" + r"\begin{document}" + "\n" + body
                   + "\n" + r"\typeout{DIAGRAM-COUNTERS:\arabic{ulSongNumber}:\arabic{ulVerseNumber}:\the\ulMinFrets}"
                   + "\n" + r"\end{document}" + "\n")
         work = self.work / self._testMethodName
         work.mkdir(parents=True)
-        options = r"\def\ulSongbookType{lyric}" + "\n" if lyric else ""
+        options = r"\def\ulBuildVariant{lyric}" + "\n" if lyric else ""
         if multikey:
             options += (r"\def\ulPdfTranspositionLayers{true}" + "\n"
                         + r"\def\ulPdfTranspositionLayerUi{hidden}" + "\n")
         (work / "book.tex").write_text(options + source)
-        env = dict(os.environ, TEXINPUTS=f"{self.assets}//{os.pathsep}",
-                   LUAINPUTS=f"{self.assets}//{os.pathsep}", TEXMFVAR=str(self.cache),
+        env = dict(os.environ, TEXINPUTS=f"{TEX_ASSETS}//{os.pathsep}",
+                   LUAINPUTS=f"{TEX_ASSETS}//{os.pathsep}", TEXMFVAR=str(self.cache),
                    TEXMFCACHE=str(self.cache))
         output = []
         try:
             for _ in range(2):
                 result = subprocess.run(
-                    ["lualatex", "-interaction=nonstopmode", "-halt-on-error", "-recorder", "book.tex"],
+                    ["lualatex", "-interaction=nonstopmode", "-halt-on-error", "book.tex"],
                     cwd=work, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, timeout=120)
                 output.append(result.stdout)
                 (work / "compile.stdout").write_text("\n".join(output))
                 self.assertEqual(result.returncode, 0, result.stdout)
-            inputs = (work / "book.fls").read_text()
-            self.assertNotIn("songs.sty", inputs)
-            self.assertFalse(list(work.glob("*.sxd")))
-            self.assertFalse(list(work.glob("*.sxc")))
         finally:
             shutil.copytree(work, target, dirs_exist_ok=True)
         pdf = (work / "book.pdf").read_bytes()
@@ -217,7 +211,7 @@ class DiagramTests(unittest.TestCase):
 Hidden chords: \[C]still lyrics.
 \endverse
 \chordson
-\ifulChorded\musicnote{\gtab{Am6}{X02212:002314} \gtab{A\symdim7}{X01212:001324}}\fi
+\ifulShowChords\musicnote{\gtab{Am6}{X02212:002314} \gtab{A\symdim7}{X01212:001324}}\fi
 \endsong
 \end{ulSongs}
 \typeout{DIAGRAM-EFFECTS:\the\DiagramEffects}

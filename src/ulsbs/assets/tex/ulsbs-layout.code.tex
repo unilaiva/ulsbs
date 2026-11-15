@@ -203,7 +203,10 @@
     \nobreak
     \int_compare:nNnTF {#1}<{10000}
       {\vskip\ulColumnBottomGlue\relax\penalty#1\relax
-       \vskip\glueexpr\l__ulsbs_layout_previous_skip-\l__ulsbs_layout_bottom_skip\relax}
+        % Keep the inverse separate: glue arithmetic can discard lower orders
+        % (and subtraction from zero does not negate a higher-order stretch).
+        \vskip-\l__ulsbs_layout_bottom_skip\relax
+        \vskip\l__ulsbs_layout_previous_skip}
       {\vskip\l__ulsbs_layout_previous_skip}
   }
 
@@ -328,7 +331,7 @@
 % No arguments; append nonbreaking postlude spacing, rights text and end rule.
 \cs_new_protected:Npn \__ulsbs_layout_song_postlude:
   {
-    \nobreak\vskip\ulVerseSep\vskip\ulBeforePostludeSkip
+    \nobreak\vskip\ulsbs@verse@separation\vskip\ulBeforePostludeSkip
     \nointerlineskip\vbox{\ulMakePostlude}
     \dim_compare:nNnT {\ulSongBarHeight}>{0pt}
       {\nobreak\vskip2pt plus1pt\nointerlineskip
@@ -556,19 +559,6 @@
   {\__ulsbs_layout_image_begin:\imager[#1]{#2}
    \bool_if:NT \g__ulsbs_song_active_bool {\ulEndSongVfill{false}}}
 
-% No arguments; switch scoped chord/lyric flags and refresh an active stanza's
-% baseline. Before document start also replace the default column-bottom glue.
-\DeclareDocumentCommand \chordsoff {}
-  {\ulsbs@chordedfalse\ulsbs@lyrictrue
-   \bool_if:NF \g__ulsbs_layout_document_bool
-     {\cs_set:Npn \ulColumnBottomGlue {0pt~plus~.5\textheight}}
-    \bool_if:NT \g__ulsbs_stanza_active_bool {\__ulsbs_verse_baseline:}}
-
-\DeclareDocumentCommand \chordson {}
-  {\ulsbs@chordedtrue\ulsbs@lyricfalse
-   \bool_if:NF \g__ulsbs_layout_document_bool {\cs_set:Npn \ulColumnBottomGlue {0pt}}
-    \bool_if:NT \g__ulsbs_stanza_active_bool {\__ulsbs_verse_baseline:}}
-
 % #1: note content. Compose it once into an hbox under prose newline rules;
 % unpack for wrapping only if wider than available width, then emit a colorbox.
 \cs_new_protected:Npn \__ulsbs_layout_prose:n #1
@@ -593,17 +583,17 @@
 % and delegate visible placement to the public placenote adapter.
 \cs_new_protected:Npn \__ulsbs_layout_note:n #1
   {\group_begin:\everypar{}
-   \ifulChorded\ulsbs@chordedfalse\__ulsbs_verse_baseline:\ulsbs@chordedtrue\fi
+   \__ulsbs_verse_baseline:
    \placenote{\__ulsbs_layout_prose:n {#1}}\group_end:}
 
 % {text}: emit a note with stanza-aware leading/trailing nonbreaking spacing.
 \DeclareDocumentCommand \textnote {m}
   {\par\bool_if:NTF \g__ulsbs_stanza_active_bool
      {\bool_if:NF \g__ulsbs_verse_first_line_bool {\vskip2pt}}
-     {\bool_if:NT \g__ulsbs_verse_seen_bool {\nobreak\vskip\ulVerseSep}}
+     {\bool_if:NT \g__ulsbs_verse_seen_bool {\nobreak\vskip\ulsbs@verse@separation}}
    \__ulsbs_layout_note:n {#1}
    \nobreak\bool_if:NTF \g__ulsbs_stanza_active_bool
-     {\vskip2pt}{\bool_if:NF \g__ulsbs_verse_seen_bool {\vskip\ulVerseSep}}}
+     {\vskip2pt}{\bool_if:NF \g__ulsbs_verse_seen_bool {\vskip\ulsbs@verse@separation}}}
 
 % Optional star removes 2ex above {text}; emit styled passage prose with the
 % configured right skip, confined to a local paragraph-formatting group.

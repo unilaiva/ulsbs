@@ -28,7 +28,7 @@ class MultikeyAnchorTests(unittest.TestCase):
         cls.addClassCleanup(cls.temporary.cleanup)
         cls.root = Path(cls.temporary.name)
         cls.assets = cls.root / "tex"
-        shutil.copytree(TEX_ASSETS, cls.assets, ignore=shutil.ignore_patterns("songs"))
+        shutil.copytree(TEX_ASSETS, cls.assets)
         cls.diagnostics = ROOT / "build/multikey-anchors"
         cls.diagnostics.mkdir(parents=True, exist_ok=True)
 
@@ -52,7 +52,6 @@ class MultikeyAnchorTests(unittest.TestCase):
                 output.append(result.stdout)
                 (work / "compile.stdout").write_text("\n".join(output))
                 self.assertEqual(result.returncode, 0, result.stdout)
-            self.assertNotIn("ext_packages/songs/", (work / "book.fls").read_text())
             self.assertFalse(list(work.glob("*.sxd")))
             self.assertFalse(list(work.glob("*.sxc")))
         finally:

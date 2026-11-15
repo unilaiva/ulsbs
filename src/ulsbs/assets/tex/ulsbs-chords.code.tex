@@ -49,47 +49,20 @@
 \bool_new:N \l__ulsbs_chord_broken_bool
 \bool_new:N \l__ulsbs_chord_adjacent_bool
 \bool_new:N \l__ulsbs_chord_excluded_bool
-\bool_new:N \l__ulsbs_chord_measures_explicit_bool
+\bool_new:N \l__ulsbs_chord_full_clearance_bool
+\bool_new:N \l__ulsbs_chord_empty_anchor_bool
 \int_new:N \l__ulsbs_chord_hyphens_int
 \int_new:N \g__ulsbs_chord_spacefactor_int
 \dim_new:N \l__ulsbs_chord_width_dim
+\newattribute\__ulsbs_chord_annotation_attribute
+\int_const:Nn \c__ulsbs_chord_annotation_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_chord_row_attribute
+\int_const:Nn \c__ulsbs_chord_row_attribute_int {\allocationnumber}
 \msg_new:nnn {ulsbs-chords}{state}{Invalid~chord~state:~#1.}
 
 % #1 is diagnostic detail; malformed lifecycle/register use is fatal.
 \cs_new_protected:Npn \__ulsbs_chord_fail:n #1
   {\msg_fatal:nnn {ulsbs-chords}{state}{#1}}
-
-% Explicit measure toggles override the default coupled to chord visibility.
-% Update both ink policy and future source-token catcodes inside a live stanza;
-% already tokenized bars cannot be retokenized by these changes.
-\DeclareDocumentCommand \measureson {}
-  {\bool_set_true:N \l__ulsbs_chord_measures_explicit_bool\ulsbs@measurestrue
-   \bool_set_true:N \l__ulsbs_music_measure_enabled_bool
-   \bool_if:NT \g__ulsbs_stanza_active_bool {\__ulsbs_verse_notation_catcodes:}}
-
-\DeclareDocumentCommand \measuresoff {}
-  {\bool_set_true:N \l__ulsbs_chord_measures_explicit_bool\ulsbs@measuresfalse
-   \bool_set_false:N \l__ulsbs_music_measure_enabled_bool
-   \bool_if:NT \g__ulsbs_stanza_active_bool {\__ulsbs_verse_notation_catcodes:}}
-
-% Chord visibility also chooses default measures, column bottom glue outside
-% document layout, and verse baseline metrics. An explicit measure choice wins.
-\DeclareDocumentCommand \chordson {}
-  {\ulsbs@chordedtrue\ulsbs@lyricfalse
-   \bool_if:NF \l__ulsbs_chord_measures_explicit_bool {\ulsbs@measurestrue}
-    \bool_if:NF \g__ulsbs_layout_document_bool {\cs_set:Npn \ulColumnBottomGlue {0pt}}
-    \bool_set:Nn \l__ulsbs_music_measure_enabled_bool {\legacy_if_p:n {ulMeasures}}
-    \bool_if:NT \g__ulsbs_stanza_active_bool {\__ulsbs_verse_notation_catcodes:}
-   \__ulsbs_verse_baseline:}
-
-\DeclareDocumentCommand \chordsoff {}
-  {\ulsbs@chordedfalse\ulsbs@lyrictrue
-   \bool_if:NF \l__ulsbs_chord_measures_explicit_bool {\ulsbs@measuresfalse}
-   \bool_if:NF \g__ulsbs_layout_document_bool
-      {\cs_set:Npn \ulColumnBottomGlue {0pt~plus~.5\textheight}}
-    \bool_set:Nn \l__ulsbs_music_measure_enabled_bool {\legacy_if_p:n {ulMeasures}}
-    \bool_if:NT \g__ulsbs_stanza_active_bool {\__ulsbs_verse_notation_catcodes:}
-   \__ulsbs_verse_baseline:}
 
 % #1 names a global raw-token register; the empty default register exists above.
 % Declaring an existing name is an error, rather than silently losing its memory.
@@ -142,12 +115,10 @@
      {\__ulsbs_chord_fail:n {replayed~chord~has~no~matching~memorized~chord}}
    \seq_gpop_left:NN \g__ulsbs_chord_replay_seq #1}
 
-% Active source ^ enters here. Disabled chords neither consume nor render it.
+% Replay always consumes raw memory, even when all annotation ink is hidden.
 \cs_new_protected:Npn \__ulsbs_chord_replay:
-  {\legacy_if:nT {ulChorded}{
-     \__ulsbs_chord_pop:N \l__ulsbs_chord_raw_tl
-     \exp_args:NV \__ulsbs_chord_begin:n \l__ulsbs_chord_raw_tl
-   }}
+  {\__ulsbs_chord_pop:N \l__ulsbs_chord_raw_tl
+   \exp_args:NV \__ulsbs_chord_begin:n \l__ulsbs_chord_raw_tl}
 
 % Read annotation source only after installing notation catcodes and chordlocals.
 % The delimited reader stops at the first ungrouped ]; braces protect inner ].
@@ -158,10 +129,10 @@
    \char_set_catcode_other:n {58}\ulChordLocals
    \__ulsbs_chord_read:w}
 
-% #1 is the captured payload. Even hidden annotations must consume their entire
-% source form, but they skip ink/memory/lyric scanning and ignore following spaces.
+% #1 is captured raw source. Memory and lyric scanning are independent of ink;
+% the music renderer must suppress hidden payloads without evaluating them.
 \cs_new_protected:Npn \__ulsbs_chord_read:w #1]
-  {\group_end:\legacy_if:nTF {ulChorded}{\__ulsbs_chord_begin:n {#1}}{\ignorespaces}}
+  {\group_end:\__ulsbs_chord_begin:n {#1}}
 
 % #1 is one raw annotation. Start an independent lyric anchor, clear run state,
 % and require an active song/stanza before any ink or lyric scanning occurs.
@@ -170,6 +141,7 @@
    \bool_if:NF \g__ulsbs_stanza_active_bool
      {\__ulsbs_chord_fail:n {annotation~outside~a~stanza}}
    \box_clear:N \l__ulsbs_chord_run_box
+   \bool_set_false:N \l__ulsbs_chord_full_clearance_bool
    \tl_clear:N \l__ulsbs_chord_lyric_tl
    \int_zero:N \l__ulsbs_chord_hyphens_int
    \bool_set_false:N \l__ulsbs_chord_adjacent_bool
@@ -234,7 +206,14 @@
 % Move the new box into the run, preserving already-typeset nodes, then look
 % ahead without expanding or consuming the next lyric/control token.
 \cs_new_protected:Npn \__ulsbs_chord_append:
-  {\hbox_set:Nn \l__ulsbs_chord_run_box
+   {\ifulsbs@annotationfullclearance
+      \bool_set_true:N \l__ulsbs_chord_full_clearance_bool\fi
+    % Tag retained ink too: no-lyrics output can unpack the run without a stack.
+    \directlua{
+      local~box=tex.box[\number\l__ulsbs_chord_box]
+      local~attribute=\int_use:N\c__ulsbs_chord_annotation_attribute_int
+      node.set_attribute(box,attribute,1)}
+   \hbox_set:Nn \l__ulsbs_chord_run_box
      {\hbox_unpack_drop:N \l__ulsbs_chord_run_box\box_use_drop:N \l__ulsbs_chord_box}
    \bool_set_true:N \l__ulsbs_chord_adjacent_bool
    \__ulsbs_chord_scan:}
@@ -369,9 +348,13 @@
      {\bool_set_true:N \l__ulsbs_chord_word_end_bool}
    \int_compare:nNnT {\l__ulsbs_chord_hyphens_int}={1}
      {\tl_set_eq:NN \l__ulsbs_chord_lyric_tl \l__ulsbs_chord_before_hyphen_tl}
-   \hbox_set:Nn \l__ulsbs_chord_lyric_box
-     {\tl_use:N \l__ulsbs_chord_lyric_tl
-      \int_gset:Nn \g__ulsbs_chord_spacefactor_int {\spacefactor}}
+    \hbox_set:Nn \l__ulsbs_chord_lyric_box
+      {\tl_use:N \l__ulsbs_chord_lyric_tl
+       \int_gset:Nn \g__ulsbs_chord_spacefactor_int {\spacefactor}}
+   \bool_set:Nn \l__ulsbs_chord_empty_anchor_bool
+     {\dim_compare_p:nNn
+       {\box_wd:N \l__ulsbs_chord_run_box+\box_ht:N \l__ulsbs_chord_run_box
+         +\box_dp:N \l__ulsbs_chord_run_box+\box_wd:N \l__ulsbs_chord_lyric_box}={0pt}}
    \ifulsbs@pdflayers
      \directlua{ulsbs_multikey.fit_chords(\number\l__ulsbs_chord_run_box,
        \number\wd\l__ulsbs_chord_lyric_box,\ulPdfTranspositionMinimumScale)}
@@ -386,24 +369,44 @@
      {\int_compare:nNnT {\l__ulsbs_chord_hyphens_int}>{1}
        {\bool_set_false:N \l__ulsbs_chord_broken_bool}}
    \leavevmode
-   \legacy_if:nTF {ulNoLyrics}
-     {\dim_compare:nNnTF {\box_wd:N \l__ulsbs_chord_lyric_box}={0pt}
-       {\hbox_unpack_drop:N \l__ulsbs_chord_run_box}
+    \legacy_if:nTF {ulNoLyrics}
+      {\dim_compare:nNnTF {\box_wd:N \l__ulsbs_chord_lyric_box}={0pt}
+        {% Keep beat-only ink in its lane without changing chord-only rows.
+         \bool_if:NTF \l__ulsbs_chord_full_clearance_bool
+          {\hbox_unpack_drop:N \l__ulsbs_chord_run_box}
+          {\__ulsbs_chord_stack:}}
        {\__ulsbs_chord_stack:}}
      {\__ulsbs_chord_stack:}
    \bool_if:NF \l__ulsbs_chord_word_end_bool
      {\int_compare:nNnTF {\l__ulsbs_chord_hyphens_int}>{0}
        {\penalty\exhyphenpenalty}
        {\bool_if:NTF \l__ulsbs_chord_broken_bool {\penalty\hyphenpenalty}{\nobreak}}
-      \spacefactor=\g__ulsbs_chord_spacefactor_int\relax}}
+       \spacefactor=\g__ulsbs_chord_spacefactor_int\relax}
+    % Collapse two source spaces across hidden ink, but preserve a sole following
+    % space (including after an empty group or an active measure bar).
+    \bool_if:NT \l__ulsbs_chord_empty_anchor_bool
+      {\int_compare:nNnT {\tex_lastnodetype:D}={11}{\ignorespaces}}}
 
 % Consume run/lyric boxes into a two-line stack. A broken syllable reserves the
 % wider line plus extension space and uses the current font's hyphen character.
 % An empty lyric anchor preserves preceding glue but adds a modest break cost.
 \cs_new_protected:Npn \__ulsbs_chord_stack:
-  {\dim_compare:nNnT {\box_wd:N \l__ulsbs_chord_lyric_box}={0pt}
+  {\dim_compare:nNnTF
+     {\box_wd:N \l__ulsbs_chord_run_box+\box_ht:N \l__ulsbs_chord_run_box
+       +\box_dp:N \l__ulsbs_chord_run_box}={0pt}
+     {\hbox_unpack_drop:N \l__ulsbs_chord_lyric_box
+      \int_compare:nNnT {\l__ulsbs_chord_hyphens_int}={1}{-}}
+     {\__ulsbs_chord_stack_visible:}}
+
+% Visible retained extents alone require a stack; an empty run must not reserve
+% the nominal annotation-to-lyric baseline or a blank first hbox.
+\cs_new_protected:Npn \__ulsbs_chord_stack_visible:
+   {\dim_compare:nNnT {\box_wd:N \l__ulsbs_chord_lyric_box}={0pt}
      {\skip_set:Nn \l_tmpa_skip {\tex_lastskip:D}\unskip\penalty200\hskip\l_tmpa_skip}
-   \vbox{\ulChordLineParams
+    \vbox~attr~\c__ulsbs_chord_annotation_attribute_int~1~
+     {\bool_if:NTF \l__ulsbs_chord_full_clearance_bool
+       {\ulsbs@annotationfullclearancetrue}{\ulsbs@annotationfullclearancefalse}
+     \ulChordLineParams
      \bool_if:NTF \l__ulsbs_chord_broken_bool
        {\dim_set:Nn \l__ulsbs_chord_width_dim
           {\dim_max:nn {\box_wd:N \l__ulsbs_chord_run_box}{\box_wd:N \l__ulsbs_chord_lyric_box}+.5em}
@@ -416,8 +419,9 @@
 
 % #1 is alternate-set number, #2 chord text. Inline stanza references participate
 % in PDF layers; standalone alternate sets use their independent source policy.
+% Inline repetition references are not standalone sets: altchords-off keeps them.
 \RenewDocumentCommand \ac {m m}
-  {\group_begin:
+  {\legacy_if:nT {ulShowChords}{\group_begin:
    \str_if_eq:nnTF {#1}{1}{\colorlet{ulsbs@accolor}{.}}
      {\bool_if:NTF \l__ulsbs_chord_in_altchords_bool
        {\colorlet{ulsbs@accolor}{.!50!ulAltInlineChordColor}}
@@ -427,7 +431,7 @@
       {\color{ulsbs@accolor}\ulsbs@transposealtchord{#2}}
       {\bool_if:NT \g__ulsbs_stanza_active_bool {\ulsbs@pdfchordtrue}
        \ulChordFont\color{ulsbs@accolor}\transposehere{#2}}
-   \group_end:}
+    \group_end:}}
 
 % #1 transposes only on opt-in; suppress song-key spelling for standalone sets.
 \cs_set_protected:Npn \ulsbs@transposealtchord #1
@@ -444,15 +448,16 @@
 % adapt common formatting; disable PDF chord/key policy for this standalone set.
 \cs_new_protected:Npn \__ulsbs_chord_alternates:n #1
   {\group_end:
-   \ifulChorded\ifulShowAltChords\group_begin:
+   \bool_if:nT {\legacy_if_p:n {ulShowChords} && \legacy_if_p:n {ulShowAltChords}}
+   {\group_begin:
      \bool_set_true:N \l__ulsbs_chord_in_altchords_bool\ulsbs@pdfchordfalse\ulsbs@keytransposefalse
      \cs_set_protected:Npn \id {\@ifnextchar[\__ulsbs_chord_alt_id:w
        {\__ulsbs_chord_alt_id:w [1]}}
      \cs_set:Npn \ulMeterFont {\color{ulChordColor}\normalfont\tiny\sffamily\upshape}
-     \cs_set:Npn \e {\ifulMeasures-\fi}
+      \cs_set:Npn \e {\ifulShowMeasures-\fi}
      \vspaceifnotinverse{.618034\baselineskip}\hfill
      \ulPrintChord{\raisebox{.5ex}{\ulAltChordsStyle\color{ulsbs@currentaltchordcolor}\ulsbs@transposealtchord{#1}}}
-   \group_end:\fi\fi}
+    \group_end:}}
 
 % [#1] is an alternate-set identifier and #2 its chord; reuse common ID styling.
 \cs_new_protected:Npn \__ulsbs_chord_alt_id:w [#1]#2

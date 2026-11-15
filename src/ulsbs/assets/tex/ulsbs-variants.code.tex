@@ -1,0 +1,125 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Named-variant availability, immutable identity and preset lifecycle.
+% Loaded once, before class option processing or package imports, with expl3
+% available. The class marks its entry path; package-only use is default-only.
+% This owner reads the main class's RAW options, never inherited class defaults.
+
+\ExplSyntaxOn
+\msg_new:nnn {ulsbs} {variant} {#1}
+\prop_new:N \g__ulsbs_variant_presets_prop
+\prop_new:N \g__ulsbs_variant_presentations_prop
+% Consume the same installed literal records as Python; ignore build-only fields.
+\cs_new_protected:Npn \ulsbsVariantRecord #1#2#3#4#5#6
+  {
+    \prop_gput:Nnn \g__ulsbs_variant_presets_prop {#1} {#2}
+    \prop_gput:Nnn \g__ulsbs_variant_presentations_prop {#1} {#5}
+  }
+\file_input:n {ulsbs-variants.def.tex}
+\cs_undefine:N \ulsbsVariantRecord
+
+\seq_new:N \l__ulsbs_variant_options_seq
+\seq_new:N \l__ulsbs_variant_parts_seq
+\seq_new:N \l__ulsbs_variant_match_seq
+\seq_new:N \l__ulsbs_variant_available_seq
+\seq_new:N \l__ulsbs_variant_names_seq
+\tl_new:N \l__ulsbs_variant_option_tl
+\tl_new:N \l__ulsbs_variant_key_tl
+\tl_new:N \l__ulsbs_variant_name_tl
+\tl_new:N \l__ulsbs_variant_selected_tl
+\bool_new:N \l__ulsbs_variant_declared_bool
+\str_const:Nn \c__ulsbs_variant_default_str {default}
+\cs_generate_variant:Nn \regex_match:nnTF {nV}
+\cs_generate_variant:Nn \regex_extract_once:nnNTF {nV}
+
+% Validate without expanding author tokens (including macros that spell a name).
+\cs_new_protected:Npn \__ulsbs_variant_validate:n #1
+  {
+    \tl_set:Nx \l__ulsbs_variant_name_tl {\tl_to_str:n {#1}}
+    \regex_match:nVTF {\A [a-z][a-z0-9-]* \Z} \l__ulsbs_variant_name_tl
+      {
+        \prop_if_in:NVF \g__ulsbs_variant_presets_prop \l__ulsbs_variant_name_tl
+          {\msg_fatal:nnn {ulsbs} {variant} {Unknown~variant:~#1}}
+      }
+      {\msg_fatal:nnn {ulsbs} {variant} {Invalid~literal~variant~identifier}}
+  }
+
+% Parse only the literal main-source option. Splitting respects braced metadata;
+% stringification preserves braces and rejects computed values before kvoptions
+% can expand them or overwrite evidence of repeated declarations.
+\cs_if_exist:NT \ulsbs@classpath
+  {
+    \seq_set_split:NnV \l__ulsbs_variant_options_seq {,} \@raw@classoptionslist
+    \seq_map_inline:Nn \l__ulsbs_variant_options_seq
+      {
+        \tl_set:Nx \l__ulsbs_variant_option_tl {\tl_to_str:n {#1}}
+        \seq_set_split:NnV \l__ulsbs_variant_parts_seq {=} \l__ulsbs_variant_option_tl
+        \seq_pop_left:NN \l__ulsbs_variant_parts_seq \l__ulsbs_variant_key_tl
+        \tl_trim_spaces:N \l__ulsbs_variant_key_tl
+        \str_if_eq:VnT \l__ulsbs_variant_key_tl {variants}
+          {
+            \bool_if:NT \l__ulsbs_variant_declared_bool
+              {\msg_fatal:nnn {ulsbs} {variant} {Multiple~variants~declarations}}
+            \bool_set_true:N \l__ulsbs_variant_declared_bool
+            \regex_extract_once:nVNTF
+              {\A \s* variants \s* = \s* \{ ([^{}]*) \} \s* \Z}
+              \l__ulsbs_variant_option_tl \l__ulsbs_variant_match_seq
+              {
+                \seq_pop_right:NN \l__ulsbs_variant_match_seq \l__ulsbs_variant_option_tl
+                \seq_set_split:NnV \l__ulsbs_variant_names_seq {,} \l__ulsbs_variant_option_tl
+                \seq_map_inline:Nn \l__ulsbs_variant_names_seq
+                  {
+                    \__ulsbs_variant_validate:n {##1}
+                    \seq_if_in:NVTF \l__ulsbs_variant_available_seq \l__ulsbs_variant_name_tl
+                      {\msg_fatal:nnn {ulsbs} {variant} {Duplicate~variant~identifiers}}
+                      {\seq_put_right:NV \l__ulsbs_variant_available_seq \l__ulsbs_variant_name_tl}
+                  }
+                \seq_if_in:NVF \l__ulsbs_variant_available_seq \c__ulsbs_variant_default_str
+                  {\msg_fatal:nnn {ulsbs} {variant} {Available~variants~must~include~default}}
+              }
+              {\msg_fatal:nnn {ulsbs} {variant} {variants~requires~a~braced~literal~list}}
+          }
+      }
+  }
+\bool_if:NF \l__ulsbs_variant_declared_bool
+  {\seq_put_right:NV \l__ulsbs_variant_available_seq \c__ulsbs_variant_default_str}
+
+% Snapshot exactly one replacement level of the reserved launcher selector.
+% Later redefinitions of the launcher macro cannot change the active identity.
+\cs_if_exist:NTF \ulBuildVariant
+  {\tl_set:No \l__ulsbs_variant_selected_tl {\ulBuildVariant}}
+  {\tl_set:Nn \l__ulsbs_variant_selected_tl {default}}
+\exp_args:NV \__ulsbs_variant_validate:n \l__ulsbs_variant_selected_tl
+\tl_set_eq:NN \l__ulsbs_variant_selected_tl \l__ulsbs_variant_name_tl
+\cs_if_exist:NF \ulsbs@classpath
+  {
+    \str_if_eq:VnF \l__ulsbs_variant_selected_tl {default}
+      {\msg_fatal:nnn {ulsbs} {variant}
+        {Non-default~variants~require~a~class-based~main-source~declaration}}
+  }
+\seq_if_in:NVF \l__ulsbs_variant_available_seq \l__ulsbs_variant_selected_tl
+  {\msg_fatal:nnn {ulsbs} {variant} {Selected~variant~is~not~available~in~this~book}}
+\tl_const:Nx \c__ulsbs_variant_tl {\exp_not:V \l__ulsbs_variant_selected_tl}
+\prop_get:NVN \g__ulsbs_variant_presets_prop \c__ulsbs_variant_tl \l_tmpa_tl
+\tl_const:Nx \c__ulsbs_variant_preset_tl {\exp_not:V \l_tmpa_tl}
+\prop_get:NVN \g__ulsbs_variant_presentations_prop \c__ulsbs_variant_tl \l_tmpa_tl
+\tl_const:Nx \c__ulsbs_variant_presentation_tl {\exp_not:V \l_tmpa_tl}
+
+% Public identity query: literal registered name and two unexpanded branches.
+% Visibility setters and the launcher macro have no write path to this identity.
+\NewDocumentCommand \ulIfVariant {m m m}
+  {
+    \__ulsbs_variant_validate:n {#1}
+    \str_if_eq:VnTF \c__ulsbs_variant_tl {#1} {#2} {#3}
+  }
+
+% Called once after the COMPLETE custom class, or at package completion when
+% loaded without the class. Do not reapply at begin-document: authors override
+% presets in the intervening preamble. This deliberately depends on the kernel's
+% private immediate documentclass completion macro, not deferred command hooks.
+\cs_new_protected:Npn \ulsbs@applyvariant
+  {\exp_args:NV \file_input:n \c__ulsbs_variant_preset_tl}
+\cs_if_exist:NT \ulsbs@classpath
+  {\g@addto@macro\@documentclasshook{\ulsbs@applyvariant}}
+\ExplSyntaxOff

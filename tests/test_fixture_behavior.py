@@ -24,7 +24,7 @@ class FixtureBehaviorTests(unittest.TestCase):
                 cls.builds[lyrics, multikey] = compile_fixture(
                     "source-effects", preamble=preamble, multikey=multikey, passes=3)
         cls.lyric_editions = {
-            multikey: compile_fixture("source-effects", preamble="\\def\\ulSongbookType{lyric}\n",
+            multikey: compile_fixture("source-effects", preamble="\\def\\ulBuildVariant{lyric}\n",
                                       multikey=multikey, passes=3)
             for multikey in (False, True)
         }
@@ -54,7 +54,7 @@ class FixtureBehaviorTests(unittest.TestCase):
                         (first[0], "CG", first[2], first[3], second[4], second[5])]
                 self.assertEqual(expected, actual)
 
-    def test_twelve_offsets_per_chorded_song_and_no_chordsoff_layers(self):
+    def test_twelve_offsets_per_musical_song_and_no_hidden_notation_layers(self):
         self.assertFalse(PdfStructure(self.builds[False, False][1]).layers)
         layered = PdfStructure(self.builds[False, True][1])
         expected = {f"ulsbs:transpose:v1:id:source-effects-{song}:t{offset:02d}"

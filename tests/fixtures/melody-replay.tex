@@ -3,9 +3,9 @@
 \newcount\ULtestbeatdraws
 \let\ULtestoriginalbeatdraw\ulsbs@melodybeatdraw
 \def\ulsbs@melodybeatdraw{%
-  \ifulShowBeats\ifdefined\ulsbs@beatsdisabled\else
+  \ifulShowBeats
     \global\advance\ULtestbeatdraws by 1\relax
-  \fi\fi
+  \fi
   \ULtestoriginalbeatdraw
 }
 \makeatother

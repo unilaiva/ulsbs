@@ -21,7 +21,7 @@ from .constants import CONFIG_FILENAME
 from .deploy import deploy_results
 from .container import run_self_in_container
 from .engine_assets import EngineAssets
-from .jobs import build_job_queue, build_job_basename
+from .jobs import Job, build_job_queue, build_job_basename
 from .paths import ProjectPaths
 from .pipeline import require_tools, run_jobs_parallel
 from .tempdir import setup_temp_dir, clear_temp_dir_if_no_locks
@@ -39,7 +39,7 @@ def build_arg_parser(ui: UI) -> argparse.ArgumentParser:
         epilog=(
             f"{ui.colorize('examples:', ui.C_LBLUE)}\n"
             "  ./ulsbs-compile *.tex\n"
-            "  ./ulsbs-compile --no-deploy --no-extrainstr mybook.tex\n"
+            "  ./ulsbs-compile --no-deploy --variants default mybook.tex\n"
             "  ./ulsbs-compile --profile myprofile --no-audio --no-midi\n"
         ),
         formatter_class=ArgFormatter,
@@ -60,6 +60,8 @@ def build_arg_parser(ui: UI) -> argparse.ArgumentParser:
     p.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
 
     p.add_argument("-p", "--profile", default="default", help=f"Choose profile defined in {CONFIG_FILENAME} to use")
+    p.add_argument("--variants", default=None, metavar="all|NAME,...",
+                   help="Select all declared variants or a comma-separated list (overrides profile; default: all)")
 
     p.add_argument(
         "--container-engine",
@@ -89,8 +91,6 @@ def build_arg_parser(ui: UI) -> argparse.ArgumentParser:
     prestr.add_argument("--no-json", action="store_true", help="Do not produce JSON metadata files")
     prestr.add_argument("--no-midi", action="store_true", help="Do not export MIDI files (audio may still need intermediate MIDI)")
     prestr.add_argument("--no-audio", action="store_true", help="Do not produce MP3 audio files")
-    prestr.add_argument("--no-lyric", action="store_true", help="Do not produce lyrics-only variant")
-    prestr.add_argument("--no-extrainstr", action="store_true", help="Do not produce variants for extra instruments")
     prestr.add_argument("--fast-audio-encode", dest="fast_audio_encode", action="store_true", help="Use faster audio encoding (limiter instead of loudnorm)")
     prestr.add_argument("--midifiles-allow-for-optional-variants", action="store_true", help="Allow MIDI export for optional variants")
     prestr.add_argument("--audiofiles-allow-for-optional-variants", action="store_true", help="Allow audio file generation for optional variants")
@@ -133,8 +133,8 @@ def print_plan_summary(
     ui.plain(f"  - Parallel compilation: {_yn(cfg.max_parallel > 1)}" + ui.colorize(f" ({cfg.max_parallel} workers)" if cfg.max_parallel > 1 else "", ui.C_BLUE))
     ui.plain(f"  - Using system's /tmp for temp: {_yn(cfg.use_system_tmp)}")
     ui.plain(f"  - Clean up temp after successful compilation: {_yn(cfg.clean_temp)}")
-    ui.plain(f"  - Additional lyrics only variants: {_yn(cfg.lyricbooks)}")
-    ui.plain(f"  - Additional extra instrument variants: {_yn(cfg.extrainstrumentbooks)}")
+    variants = cfg.variants if isinstance(cfg.variants, str) else ", ".join(cfg.variants)
+    ui.plain(f"  - Variants: {ui.colorize(variants, ui.C_LBLUE)}")
     ui.plain(f"  - Create printouts: {_yn(cfg.create_printouts)}")
     ui.plain(f"  - Create multikey books: {_yn(cfg.multikey_books)}")
     if cfg.multikey_books:
@@ -157,6 +157,17 @@ def print_plan_summary(
         )
     )
     ui.plain("")
+
+
+def print_variant_selections(ui: UI, cfg: Config, jobs: list[Job]) -> None:
+    """Report each source intersection, including collection inputs with no jobs."""
+    for doc in cfg.songbooks:
+        selected = [job.variant for job in jobs if job.doc_tex_abs == doc and not job.multikey]
+        skipped = [] if cfg.variants == "all" else [
+            name for name in cfg.variants if name not in selected
+        ]
+        ui.info_line(f"{doc.name}: selected {', '.join(selected) or '<none>'}"
+                     + (f"; skipped {', '.join(skipped)} (unavailable)" if skipped else ""))
 
 
 def print_run_summary(ui, cfg, result, jobs_count):
@@ -378,6 +389,15 @@ def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
             check=True,
         )
 
+    # Validate the complete plan before temp cleanup, container startup or output
+    # generation. Shell mode has no compilation plan to validate.
+    if not cfg.shell:
+        try:
+            jobs = build_job_queue(cfg=cfg)
+        except ValueError as ex:
+            ui.error_line(f"Compilation plan error: {ex}")
+            return 1
+
     # Host-only temp dir setup
     if not cfg.runtime.in_container:
         setup_temp_dir(ui, cfg)
@@ -431,12 +451,6 @@ def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
         threads = str(cfg.runtime.system_info.cpu_threads or '?')
         ui.info_line(f"SYSTEM - cpu threads: {threads}, free memory: {free_mem}, total memory: {total_mem}")
 
-    try:
-        jobs = build_job_queue(cfg=cfg)
-    except ValueError as ex:
-        ui.error_line(f"Compilation plan error: {ex}")
-        return 1
-
     # Range extraction needs qpdf only for multikey builds; ordinary builds keep
     # their existing tool requirements.
     require_tools(multikey=cfg.multikey_books)
@@ -460,6 +474,7 @@ def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
     resultlist.write_header()
 
     print_plan_summary(ui=ui, cfg=cfg, jobs_count=len(jobs))
+    print_variant_selections(ui=ui, cfg=cfg, jobs=jobs)
 
     try:
         ui.start_spinner(ui.colorize("", ui.C_DGRAY))

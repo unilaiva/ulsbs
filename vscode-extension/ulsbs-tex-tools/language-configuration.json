@@ -12,7 +12,6 @@
     ["\\beginverse*+", "\\endverse"],
     ["\\beginrep", "\\endrep"],
     ["\\begin{translation}", "\\end{translation}"],
-    ["\\begintranslation", "\\endtranslation"],
     ["\\begin{lilypond}", "\\end{lilypond}"],
     ["\\begin{ulSongs}", "\\end{ulSongs}"]
   ],
@@ -32,26 +31,26 @@
 
   "folding": {
     "markers": {
-      "start": "^(?:(?:[^%\\\\]|\\\\.|%(?=\\\\))*?)(\\\\beginsong\\b|\\\\beginverse(?:\\*\\+|[+*])?(?:\\[[^\\]]*\\])?(?![A-Za-z*+\\[])|\\\\beginrep\\b|\\\\begin\\{translation\\}|\\\\begintranslation(?:\\[[^\\]]*\\])?|\\\\begin\\{lilypond\\}|\\\\begin\\{ulSongs\\}|\\\\begin\\{explanation\\}|\\\\begin\\{feeler\\}|\\\\begin\\{passage\\}|\\\\begin\\{intersong\\})",
-      "end": "^(?:(?:[^%\\\\]|\\\\.|%(?=\\\\))*?)(\\\\endsong\\b|\\\\endverse\\b|\\\\endrep\\b|\\\\end\\{translation\\}|\\\\endtranslation\\b|\\\\end\\{lilypond\\}|\\\\end\\{ulSongs\\}|\\\\end\\{explanation\\}|\\\\end\\{feeler\\}|\\\\end\\{passage\\}|\\\\end\\{intersong\\})"
+      "start": "^(?:(?:[^%\\\\]|\\\\.|%(?=\\\\))*?)(\\\\beginsong\\b|\\\\beginverse(?:\\*\\+|[+*])?(?:\\[[^\\]]*\\])?(?![A-Za-z*+\\[])|\\\\beginrep\\b|\\\\begin\\{translation\\}|\\\\begin\\{lilypond\\}|\\\\begin\\{ulSongs\\}|\\\\begin\\{explanation\\}|\\\\begin\\{feeler\\}|\\\\begin\\{passage\\}\\*?|\\\\begin\\{intersong\\})",
+      "end": "^(?:(?:[^%\\\\]|\\\\.|%(?=\\\\))*?)(\\\\endsong\\b|\\\\endverse\\b|\\\\endrep\\b|\\\\end\\{translation\\}|\\\\end\\{lilypond\\}|\\\\end\\{ulSongs\\}|\\\\end\\{explanation\\}|\\\\end\\{feeler\\}|\\\\end\\{passage\\}|\\\\end\\{intersong\\})"
     }
   },
 
   "indentationRules": {
-    "increaseIndentPattern": "^(?:(?:[^%\\\\]|\\\\.|%(?=\\\\))*?)(\\\\beginsong\\b|\\\\beginverse(?:\\*\\+|[+*])?(?:\\[[^\\]]*\\])?(?![A-Za-z*+\\[])|\\\\beginrep\\b|\\\\begin\\{translation\\}|\\\\begintranslation(?:\\[[^\\]]*\\])?|\\\\begin\\{lilypond\\}|\\\\begin\\{ulSongs\\}).*$",
-    "decreaseIndentPattern": "^(?:(?:[^%\\\\]|\\\\.|%(?=\\\\))*?)(\\\\endsong\\b|\\\\endverse\\b|\\\\endrep\\b|\\\\end\\{translation\\}|\\\\endtranslation\\b|\\\\end\\{lilypond\\}|\\\\end\\{ulSongs\\}).*$"
+    "increaseIndentPattern": "^(?:(?:[^%\\\\]|\\\\.|%(?=\\\\))*?)(\\\\beginsong\\b|\\\\beginverse(?:\\*\\+|[+*])?(?:\\[[^\\]]*\\])?(?![A-Za-z*+\\[])|\\\\beginrep\\b|\\\\begin\\{translation\\}|\\\\begin\\{lilypond\\}|\\\\begin\\{ulSongs\\}).*$",
+    "decreaseIndentPattern": "^(?:(?:[^%\\\\]|\\\\.|%(?=\\\\))*?)(\\\\endsong\\b|\\\\endverse\\b|\\\\endrep\\b|\\\\end\\{translation\\}|\\\\end\\{lilypond\\}|\\\\end\\{ulSongs\\}).*$"
   },
 
   "onEnterRules": [
     {
-      "beforeText": "^(?:(?:[^%\\\\]|\\\\.|%(?=\\\\))*?)(\\\\beginsong\\b|\\\\beginverse(?:\\*\\+|[+*])?(?:\\[[^\\]]*\\])?(?![A-Za-z*+\\[])|\\\\beginrep\\b|\\\\begin\\{translation\\}|\\\\begintranslation(?:\\[[^\\]]*\\])?|\\\\begin\\{lilypond\\}|\\\\begin\\{ulSongs\\}).*$",
+      "beforeText": "^(?:(?:[^%\\\\]|\\\\.|%(?=\\\\))*?)(\\\\beginsong\\b|\\\\beginverse(?:\\*\\+|[+*])?(?:\\[[^\\]]*\\])?(?![A-Za-z*+\\[])|\\\\beginrep\\b|\\\\begin\\{translation\\}|\\\\begin\\{lilypond\\}|\\\\begin\\{ulSongs\\}).*$",
       "action": {
         "indent": "indent"
       }
     },
     {
-      "beforeText": "^(?:(?:[^%\\\\]|\\\\.|%(?=\\\\))*?)(\\\\beginsong\\b|\\\\beginverse(?:\\*\\+|[+*])?(?:\\[[^\\]]*\\])?(?![A-Za-z*+\\[])|\\\\beginrep\\b|\\\\begin\\{translation\\}|\\\\begintranslation(?:\\[[^\\]]*\\])?|\\\\begin\\{lilypond\\}|\\\\begin\\{ulSongs\\}).*$",
-      "afterText": "^(?:(?:[^%\\\\]|\\\\.|%(?=\\\\))*?)(\\\\endsong\\b|\\\\endverse\\b|\\\\endrep\\b|\\\\end\\{translation\\}|\\\\endtranslation\\b|\\\\end\\{lilypond\\}|\\\\end\\{ulSongs\\}).*$",
+      "beforeText": "^(?:(?:[^%\\\\]|\\\\.|%(?=\\\\))*?)(\\\\beginsong\\b|\\\\beginverse(?:\\*\\+|[+*])?(?:\\[[^\\]]*\\])?(?![A-Za-z*+\\[])|\\\\beginrep\\b|\\\\begin\\{translation\\}|\\\\begin\\{lilypond\\}|\\\\begin\\{ulSongs\\}).*$",
+      "afterText": "^(?:(?:[^%\\\\]|\\\\.|%(?=\\\\))*?)(\\\\endsong\\b|\\\\endverse\\b|\\\\endrep\\b|\\\\end\\{translation\\}|\\\\end\\{lilypond\\}|\\\\end\\{ulSongs\\}).*$",
       "action": {
         "indent": "indentOutdent"
       }

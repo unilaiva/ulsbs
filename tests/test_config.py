@@ -5,15 +5,17 @@
 
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from argparse import Namespace
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from ulsbs.cli import build_arg_parser, print_plan_summary
+from ulsbs.cli import _run_cli, build_arg_parser, print_plan_summary
 from ulsbs.config import Config, build_config
 from ulsbs.jobs import Job, build_job_basename
 from ulsbs.pipeline import make_variant_tex
@@ -43,6 +45,9 @@ class MultikeyConfigTests(unittest.TestCase):
 
     def test_defaults(self) -> None:
         cfg = self.build("")
+        self.assertEqual(cfg.variants, "all")
+        self.assertEqual(Config().variants, "all")
+        self.assertIsNone(build_arg_parser(UI(use_colors=False)).parse_args([]).variants)
         self.assertFalse(cfg.multikey_books)
         self.assertFalse(Config().multikey_books)
         self.assertEqual(cfg.multikey_max_pages_per_range, 50)
@@ -381,14 +386,14 @@ class MultikeyConfigTests(unittest.TestCase):
 
     def test_definitions_precede_class_and_package_for_all_variants(self) -> None:
         source = (
-            "% source comment\n\\documentclass{ulsbs-songbook}\n"
+            "% source comment\n\\documentclass[variants={default,lyric,charango,bassclef}]{ulsbs-songbook}\n"
             "\\usepackage{ulsbs}\n\\begin{document}\nWords\n\\end{document}\n"
         )
         doc = self.root / "book_A5.tex"
         doc.write_text(source, encoding="utf-8")
         for enabled in (True, False):
             for ui in ("native", "hidden"):
-                for variant in ("default", "lyrics", "charango", "bassclef"):
+                for variant in ("default", "lyric", "charango", "bassclef"):
                     for multikey in (False, True):
                         with self.subTest(
                             enabled=enabled, ui=ui, variant=variant, multikey=multikey
@@ -399,11 +404,15 @@ class MultikeyConfigTests(unittest.TestCase):
                                 Config(), multikey_books=enabled, multikey_layer_ui=ui
                             )
                             job = Job(doc, doc.stem, variant, compile_dir, multikey=multikey)
+                            if variant == "lyric" and multikey:
+                                with self.assertRaises(ValueError):
+                                    make_variant_tex(job, cfg)
+                                continue
                             result_path = make_variant_tex(job, cfg)
                             self.assertEqual(result_path.name, build_job_basename(job) + ".tex")
                             result = result_path.read_text(encoding="utf-8")
                             value = (
-                                "true" if enabled and multikey and variant != "lyrics"
+                                "true" if enabled and multikey
                                 else "false"
                             )
                             definitions = (
@@ -414,6 +423,8 @@ class MultikeyConfigTests(unittest.TestCase):
                                   "\\newcommand{\\ulMultikeyLilypondScores}{false}\n"
                             )
                             self.assertTrue(result.startswith(definitions))
+                            self.assertNotIn("postsetup", result)
+                            self.assertNotIn("\\input{ulsbs-variant-", result)
                             self.assertLess(
                                 result.index("\\ulPdfTranspositionLayers"),
                                 result.index("\\documentclass"),
@@ -423,10 +434,10 @@ class MultikeyConfigTests(unittest.TestCase):
                                 result.index("\\usepackage"),
                             )
                             if variant != "default":
-                                suffix = "lyric" if variant == "lyrics" else variant
-                                postsetup = f"ulsbs-internal-{suffix}book-postsetup.tex"
-                                self.assertIn(f"\\input{{{postsetup}}}", result)
+                                self.assertIn(f"\\def\\ulBuildVariant{{{variant}}}\n", result)
+                                self.assertLess(result.index("\\ulBuildVariant"), result.index("\\documentclass"))
                             else:
+                                self.assertNotIn("\\ulBuildVariant", result)
                                 if value == "true":
                                     self.assertTrue(result.endswith(source))
                                     self.assertIn("\\AtBeginDocument", result)
@@ -436,18 +447,142 @@ class MultikeyConfigTests(unittest.TestCase):
 
     def test_chordname_scale_is_supplied_before_the_document_class(self) -> None:
         doc = self.root / "scale_A5.tex"
-        doc.write_text("\\documentclass{ulsbs-songbook}\n", encoding="utf-8")
+        doc.write_text("\\documentclass[variants={default,lyric,charango,bassclef}]{ulsbs-songbook}\n", encoding="utf-8")
         for scale in (0.5, 0.85, 1):
             cfg = replace(Config(), multikey_books=True, multikey_min_chordname_scale=scale)
-            for variant in ("default", "lyrics", "charango", "bassclef"):
+            for variant in ("default", "lyric", "charango", "bassclef"):
                 for multikey in (False, True):
                     with self.subTest(scale=scale, variant=variant, multikey=multikey):
                         directory = self.root / f"{scale}-{variant}-{multikey}"
                         directory.mkdir()
                         job = Job(doc, doc.stem, variant, directory, multikey=multikey)
+                        if variant == "lyric" and multikey:
+                            with self.assertRaises(ValueError):
+                                make_variant_tex(job, cfg)
+                            continue
                         text = make_variant_tex(job, cfg).read_text(encoding="utf-8")
                         macro = f"\\newcommand{{\\ulPdfTranspositionMinimumScale}}{{{scale}}}"
                         self.assertLess(text.index(macro), text.index("\\documentclass"))
+
+    def test_variant_selection_profile_and_cli_precedence(self) -> None:
+        parser = build_arg_parser(UI(use_colors=False))
+        text = ('variants = ["default", "lyric"]\n'
+                '[profiles.base]\nvariants = ["charango"]\n'
+                '[profiles.child]\ninherit-from = "base"\n')
+        self.assertEqual(self.build(text).variants, ("default", "lyric"))
+        self.assertEqual(self.build(text, "child").variants, ("charango",))
+        for value, expected in (("all", "all"), ("bassclef,default", ("bassclef", "default"))):
+            with self.subTest(value=value):
+                args = parser.parse_args(["--variants", value])
+                self.assertEqual(self.build(text, "child", args).variants, expected)
+
+    def test_variants_reject_invalid_file_values_even_when_overridden(self) -> None:
+        args = build_arg_parser(UI(use_colors=False)).parse_args(["--variants", "default"])
+        for value in ('"default"', '"ALL"', '""', "true", "1", "{}", "[]",
+                      '["default", 1]', '["default", "default"]', '["lyrics"]',
+                      '["unknown"]', '["all"]', '["default,lyric"]', '[" lyric"]'):
+            for text in (f"variants = {value}\n",
+                         f'variants = {value}\n[profiles.default]\nvariants = "all"\n',
+                         f'[profiles.base]\nvariants = {value}\n'
+                         '[profiles.default]\ninherit-from = "base"\nvariants = "all"\n'):
+                with self.subTest(value=value, text=text):
+                    with self.assertRaises(ValueError):
+                        self.build(text, args_ns=args)
+
+    def test_variants_reject_invalid_cli_selectors(self) -> None:
+        parser = build_arg_parser(UI(use_colors=False))
+        for value in ("", "ALL", "lyrics", "unknown", "all,default", "default,", ",default",
+                      "default,default", "Default", "\\default"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    self.build('variants = "all"\n', args_ns=parser.parse_args(["--variants", value]))
+
+    def test_removed_variant_options_have_no_aliases(self) -> None:
+        parser = build_arg_parser(UI(use_colors=False))
+        for flag in ("--no-lyric", "--no-extrainstr"):
+            with self.subTest(flag=flag), patch("sys.stderr"):
+                with self.assertRaises(SystemExit):
+                    parser.parse_args([flag])
+        for name in ("lyricbooks", "extrainstrumentbooks", "no-lyricbooks", "no-extrainstrumentbooks"):
+            for value in ("true", "false"):
+                for prefix in ("", "[profiles.default]\n"):
+                    with self.subTest(name=name, value=value, prefix=prefix):
+                        with self.assertRaisesRegex(ValueError, "Unknown keys"):
+                            self.build(prefix + f"{name} = {value}\n")
+
+    def test_quick_variant_selection_and_conflicts(self) -> None:
+        parser = build_arg_parser(UI(use_colors=False))
+        for setting in ("", 'variants = "all"\n', 'variants = ["default"]\n'):
+            for selector in ([], ["--variants", "default"]):
+                with self.subTest(setting=setting, selector=selector):
+                    cfg = self.build(setting, args_ns=parser.parse_args(["--quick", *selector]))
+                    self.assertEqual(cfg.variants, ("default",))
+                    self.assertFalse(cfg.multikey_books)
+        for value in ("all", "lyric", "default,lyric", "bassclef"):
+            with self.subTest(cli=value):
+                with self.assertRaisesRegex(ValueError, "quick conflicts"):
+                    self.build("", args_ns=parser.parse_args(["--quick", "--variants", value]))
+        with self.assertRaisesRegex(ValueError, "quick conflicts"):
+            self.build('[profiles.default]\nvariants = ["lyric"]\n',
+                       args_ns=parser.parse_args(["--quick"]))
+        cfg = self.build('[profiles.default]\nvariants = ["lyric"]\n',
+                         args_ns=parser.parse_args(["--quick", "--variants", "default"]))
+        self.assertEqual(cfg.variants, ("default",))
+
+    def test_plan_summary_uses_generic_variant_selection(self) -> None:
+        ui = UI(use_colors=False)
+        cfg = self.build('variants = ["default", "lyric"]\n')
+        cfg.runtime.project_paths.host_project_root = self.root
+        with patch.object(ui, "plain") as plain:
+            print_plan_summary(ui, cfg, jobs_count=2)
+        output = "\n".join(call.args[0] for call in plain.call_args_list)
+        self.assertIn("Variants: default, lyric", output)
+        self.assertNotIn("Additional lyrics", output)
+        self.assertNotIn("extra instrument", output)
+
+    def test_plan_errors_precede_setup_container_and_artifact_generation(self) -> None:
+        (self.root / "ulsbs-config.toml").write_text("", encoding="utf-8")
+        for flags in ([], ["--no-container"]):
+            with self.subTest(flags=flags), ExitStack() as stack:
+                stack.enter_context(redirect_stdout(io.StringIO()))
+                errors = stack.enter_context(redirect_stderr(io.StringIO()))
+                stack.enter_context(patch.dict("os.environ", {}, clear=True))
+                queue = stack.enter_context(patch("ulsbs.cli.build_job_queue", side_effect=ValueError("bad selector")))
+                effects = [stack.enter_context(patch("ulsbs.cli." + name)) for name in (
+                    "setup_temp_dir", "run_self_in_container", "require_tools", "ensure_dir",
+                    "resultlist.initialize", "resultlist.write_header", "run_jobs_parallel",
+                )]
+                rc = _run_cli(UI(use_colors=False), SimpleNamespace(), [*flags, str(self.root)])
+                self.assertEqual(rc, 1)
+                self.assertIn("Compilation plan error: bad selector", errors.getvalue())
+                queue.assert_called_once()
+                for effect in effects:
+                    effect.assert_not_called()
+        self.assertEqual(sorted(path.name for path in self.root.iterdir()), ["ulsbs-config.toml"])
+
+    def test_invalid_selectors_leave_no_build_artifacts(self) -> None:
+        (self.root / "ulsbs-config.toml").write_text('songbooks = ["book.tex"]\n', encoding="utf-8")
+        (self.root / "book.tex").write_text("\\documentclass{ulsbs-songbook}\n", encoding="utf-8")
+        for selector, heading, message in (
+            ("unknown", "Configuration error!", "Unknown variant: 'unknown'"),
+            ("lyric", "Compilation plan error:", "unavailable variants: lyric"),
+            ("default,default", "Configuration error!", "Duplicate variant identifiers"),
+        ):
+            with self.subTest(selector=selector), ExitStack() as stack:
+                stack.enter_context(redirect_stdout(io.StringIO()))
+                errors = stack.enter_context(redirect_stderr(io.StringIO()))
+                stack.enter_context(patch.dict("os.environ", {}, clear=True))
+                setup = stack.enter_context(patch("ulsbs.cli.setup_temp_dir"))
+                container = stack.enter_context(patch("ulsbs.cli.run_self_in_container"))
+                rc = _run_cli(UI(use_colors=False), SimpleNamespace(),
+                              ["--variants", selector, str(self.root)])
+                self.assertEqual(rc, 1)
+                self.assertIn(heading, errors.getvalue())
+                self.assertIn(message, errors.getvalue())
+                setup.assert_not_called()
+                container.assert_not_called()
+        self.assertEqual(sorted(path.name for path in self.root.iterdir()),
+                         ["book.tex", "ulsbs-config.toml"])
 
     def test_strict_id_policy_is_supplied_before_the_document_class(self) -> None:
         doc = self.root / "strict_A5.tex"

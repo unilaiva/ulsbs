@@ -35,7 +35,6 @@
 \box_new:N \l__ulsbs_verse_number_box
 \box_new:N \l__ulsbs_verse_metrics_box
 \dim_new:N \l__ulsbs_verse_indent_dim
-\dim_new:N \l__ulsbs_verse_font_size_dim
 \skip_new:N \l__ulsbs_verse_line_skip
 \int_new:N \l__ulsbs_verse_line_penalty_int
 \msg_new:nnn {ulsbs-verse}{state}{Invalid~stanza~lifecycle:~#1.}
@@ -85,14 +84,18 @@
     \char_set_catcode_active:n {94}\char_set_active_eq:nN {94}\__ulsbs_chord_replay:
      \char_set_catcode_active:n {124}\char_set_active_eq:nN {124}\measurebar}
 
-% Disabled replay/bar characters must be ignored by the tokenizer, not expanded
-% to empty macros: an invisible active token would still separate source spaces.
-% Only future characters change; lookahead may already have tokenized the first.
+% Replay remains active even with hidden ink, to keep raw memory synchronized.
+% Disabled bars are ignored by the tokenizer, not expanded to empty macros that
+% would split source spaces. Only future characters change after lookahead.
 \cs_new_protected:Npn \__ulsbs_verse_notation_catcodes:
-  {\ifulChorded\char_set_catcode_active:n {94}
-     \else\char_set_catcode_ignore:n {94}\fi
-   \ifulMeasures\char_set_catcode_active:n {124}
-     \else\char_set_catcode_ignore:n {124}\fi}
+  {\char_set_catcode_active:n {94}
+   \ifulShowMeasures\char_set_catcode_active:n {124}
+      \else\char_set_catcode_ignore:n {124}\fi}
+
+% Effective-state changes update only future source tokens in a live stanza.
+% Already-tokenized bars still query the same effective predicate at rendering.
+\cs_set_protected:Npn \ulsbs@measurecatcodes
+  {\bool_if:NT \g__ulsbs_stanza_active_bool {\__ulsbs_verse_notation_catcodes:}}
 
 % Activate before optional-argument lookahead: no first lyric token is read
 % with a different meaning. Modifier whitespace retains ordinary TeX scanning;
@@ -102,37 +105,17 @@
    \__ulsbs_verse_require_closed:
    \group_begin:\__ulsbs_verse_catcodes:\__ulsbs_verse_options:}
 
-% #1 is * (unnumbered), #2 is + (extra melody clearance), #3 indentation units.
-% Parse modifiers before enabling source-newline semantics; + only changes the
-% baseline when pitched notes can actually be shown in chorded mode.
+% Keep consuming + in existing source, but automatic retained geometry now owns
+% clearance. The former explicit melody-spacing effect is intentionally disabled.
 \NewDocumentCommand \__ulsbs_verse_options: {s t+ O{0}}
   {\IfBooleanTF{#1}{\ulsbs@vnumberedfalse}{\ulsbs@vnumberedtrue}
    \dim_set:Nn \l__ulsbs_verse_indent_dim {#3\ulVerseIndentWidth}
-   \IfBooleanT{#2}{\ifulChorded\ifulShowNotes
-      \ifdefined\ulsbs@melodynotesdisabled\else
-        \ulBaselineAdjustment=.5em\relax\ulsbs@baselineincreasedtrue\fi\fi\fi}
    \__ulsbs_verse_start:}
 
-% Recompute baseline from current lyric size, a neutral chord-font sample,
-% edition stretch policy, and baselineadj. Chord toggles also call this routine;
-% it measures generated sample ink, never authored lyric source.
+% Scalar policy supplies total nominal leading; retained ink may require more
+% collision clearance. No public additive register competes with this policy.
 \cs_new_protected:Npn \__ulsbs_verse_baseline:
-  {\dim_set:Nn \l__ulsbs_verse_font_size_dim {\f@size pt}
-   \skip_set:Nn \l__ulsbs_verse_line_skip {\l__ulsbs_verse_font_size_dim}
-   \ifulChorded
-     \hbox_set:Nn \l__ulsbs_verse_metrics_box
-       {{\ulPrintChord{ABCDEFG\shrp\flt/j7}}}
-     \skip_add:Nn \l__ulsbs_verse_line_skip
-       {\box_ht:N \l__ulsbs_verse_metrics_box+2pt}
-   \fi
-   \ifulSlides
-     \skip_add:Nn \l__ulsbs_verse_line_skip
-       {.2\l__ulsbs_verse_font_size_dim~plus~.5\l__ulsbs_verse_font_size_dim
-        ~minus~.2\l__ulsbs_verse_font_size_dim}
-   \else
-     \skip_add:Nn \l__ulsbs_verse_line_skip {0pt~plus~.1\l__ulsbs_verse_font_size_dim}
-   \fi
-   \skip_add:Nn \l__ulsbs_verse_line_skip {\ulBaselineAdjustment}
+  {\skip_set_eq:NN \l__ulsbs_verse_line_skip \l__ulsbs_verse_nominal_skip
    \skip_set_eq:NN \baselineskip \l__ulsbs_verse_line_skip}
 
 % Commit stanza state, consume a real preceding boundary, and open the retained
@@ -144,8 +127,9 @@
    \bool_if:NT \g__ulsbs_verse_seen_bool
      {\bool_if:NTF \g__ulsbs_verse_glued_bool
         {\__ulsbs_layout_break:n {\ulGluePenalty}}
-         {\__ulsbs_layout_break:n {\ulVerseVersePenalty}\vskip\ulVerseSep}
-       \bool_gset_false:N \g__ulsbs_verse_glued_bool}
+          {\__ulsbs_layout_break:n {\ulVerseVersePenalty}\vskip\ulsbs@verse@separation}
+        \bool_gset_false:N \g__ulsbs_verse_glued_bool
+         \vskip\csname ulsbs@verse@minimumgap\endcsname sp\relax}
    \bool_gset_true:N \g__ulsbs_stanza_active_bool
     \bool_gset_true:N \g__ulsbs_verse_first_line_bool
     \global\ulsbs@rep@level=0\relax\global\ulsbs@prevparlines=0\relax
@@ -154,21 +138,25 @@
     \vbox_set:Nw \l__ulsbs_verse_box
      \group_begin:
     \parskip=0pt\relax
-    \ulVerseFont\relax\__ulsbs_verse_baseline:\ulVerseJustify
+     \ulVerseFont\relax\__ulsbs_music_lyric_metrics:
+     % Translations retain stanza semantics, but use font leading, not lyric policy.
+     \ifulsbs@intranslation
+       \skip_set_eq:NN \baselineskip \normalbaselineskip
+     \else\__ulsbs_verse_baseline:\fi
+     \ulVerseJustify
     \__ulsbs_verse_notation_catcodes:
    \legacy_if:nT {ulsbs@vnumbered}
      {\protected@edef\@currentlabel{\p@ulVerseNumber\theulVerseNumber}}
    \everypar{\__ulsbs_verse_everypar:}
    \cs_set_eq:NN \obeyedline \__ulsbs_verse_line:
-   \UseHook{ulsbs/stanza/start}\ulEveryVerse\relax}
+     \UseHook{ulsbs/stanza/start}\ulEveryVerse\relax\__ulsbs_music_context:}
 
-% First paragraph alone gets the number and chord-height strut. Every paragraph
+% First paragraph alone gets the number. Every paragraph
 % receives stanza indent plus either repeat bars or ordinary content indentation.
 % A wrapped source line is still one paragraph and does not repeat this prefix.
 \cs_new_protected:Npn \__ulsbs_verse_everypar:
   {\bool_if:NT \g__ulsbs_verse_first_line_bool
      {\bool_gset_false:N \g__ulsbs_verse_first_line_bool
-      \ifulChorded\vrule height\baselineskip width0pt depth0pt\relax\fi
       \legacy_if:nT {ulsbs@vnumbered}
         {\hbox_set:Nn \l__ulsbs_verse_number_box {\ulPrintVerseNumber{\theulVerseNumber}}
          \dim_compare:nNnT {\box_wd:N \l__ulsbs_verse_number_box}<{\ulVerseNumberWidth}
@@ -189,8 +177,8 @@
      \interlinepenalty=\l__ulsbs_verse_line_penalty_int\relax
      \penalty\interlinepenalty}}
 
-% Finish hooks still run in the inner paragraph scope. Closing that group and
-% the vbox finalizes any unterminated last paragraph before unpacking real nodes.
+% Finish hooks still run in the inner paragraph scope. Close an unterminated last
+% paragraph before leaving that scope so its leading and wrap policy stay intact.
 % Pad a shallow final depth to lyric descent, advance only numbered verses, and
 % restore the outer catcode/options group after publishing lifecycle flags.
 \cs_new_protected:Npn \__ulsbs_verse_end:
@@ -199,11 +187,11 @@
      {\__ulsbs_verse_fail:n {endverse~without~beginverse}}
     \unpenalty
      \UseHook{ulsbs/stanza/finish}
-     % An unterminated final source line closes with the surrounding paragraph
-     % settings; physical newlines have already closed their own paragraphs.
-     \group_end:
-     \vbox_set_end:
-    \dim_set:Nn \l_tmpa_dim {\box_dp:N \l__ulsbs_verse_box}
+      \mode_if_horizontal:T {\__ulsbs_verse_line:\unpenalty}
+      \group_end:
+      \vbox_set_end:
+     \directlua{ulsbs_music.finish_verse(\number\l__ulsbs_verse_box)}
+     \dim_set:Nn \l_tmpa_dim {\box_dp:N \l__ulsbs_verse_box}
     \hbox_set:Nn \l__ulsbs_verse_metrics_box {{\ulLyricFontStyle p}}
     \vbox_unpack_drop:N \l__ulsbs_verse_box
     \dim_compare:nNnT {\l_tmpa_dim}<{\box_dp:N \l__ulsbs_verse_metrics_box}

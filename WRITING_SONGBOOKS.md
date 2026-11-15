@@ -7,7 +7,8 @@ belong in [Architecture](ARCHITECTURE.md).
 
 Song-content notation uses short lowercase commands; configuration, book assembly,
 fonts and metadata accessors use `ulCamelCase` names. Public boolean settings take
-an explicit `{true}` or `{false}` argument and respect TeX grouping. Use the
+an explicit `{true}` or `{false}` argument. Visibility policy is preamble-only;
+local requests respect TeX grouping. Use the
 commands documented here when writing new sources; see
 [syntax migration](README.md#ulsbs-migrate-syntax-v2) when upgrading existing ones.
 
@@ -31,6 +32,7 @@ commands documented here when writing new sources; see
 - [Full melodies with LilyPond](#full-melodies-with-lilypond)
   - [Converting LilyPond lyrics](#converting-lilypond-lyrics)
 - [Book organization](#book-organization)
+- [Variants and visibility](#variants-and-visibility)
 - [Tags and indices](#tags-and-indices)
   - [Author names](#author-names)
   - [Defining your own tags](#defining-your-own-tags)
@@ -39,6 +41,7 @@ commands documented here when writing new sources; see
 - [Layout and style reference](#layout-and-style-reference)
   - [`ulsbs-songbook` document class options](#ulsbs-songbook-document-class-options)
   - [Preamble configuration after loading the class](#preamble-configuration-after-loading-the-class)
+  - [Optional spacing and bar styling](#optional-spacing-and-bar-styling)
 - [Extension points](#extension-points)
 
 ## Your first song
@@ -96,19 +99,18 @@ Compile the main document, not the included song file:
 
 ## Verses
 
-Start a verse with `\beginverse` and close it with `\endverse`. The supported
-forms are `\beginverse`, `\beginverse[n]`, `\beginverse*`,
-`\beginverse*[n]`, `\beginverse+`, `\beginverse+[n]`, `\beginverse*+`,
-and `\beginverse*+[n]`. Combined modifiers must appear in the order
-`*`, then `+`, then `[n]`.
+Start a numbered verse with `\beginverse` and close it with `\endverse`.
+Use `\beginverse*` for an unnumbered verse. Either form accepts an optional
+indentation factor: `\beginverse[n]` or `\beginverse*[n]`.
 
 - `*` makes the verse unnumbered.
 - `[n]` indents the whole verse by `n` times `\ulVerseIndentWidth` (default `1em`).
-- `+` increases lyric-line spacing for melody notes beyond the first line when
-  chords and melody notes are visible. Normal spacing returns at `\endverse`.
+
+Visible chords and melody hints determine their required line clearance
+automatically; no special verse form is needed for melody hints.
 
 ```tex
-\beginverse*+[2]
+\beginverse*[2]
   |\[<C>Am]First line with a melody note.
   |\[<D>G]Second line with a melody note.
 \endverse
@@ -138,8 +140,8 @@ Use `\ac{<repetition>}{<chord>}` for repetition-specific alternatives:
 \[\ac{1}{Em} \ac{2}{E}]Same lyric, different ending.
 ```
 
-The alternatives have superscript repetition numbers. Balanced brace arguments
-are required; the former `\ac<1>{Em}` form is not supported.
+The alternatives have superscript repetition numbers. Use balanced brace
+arguments for both the number and chord.
 
 ULSBS can memorize and replay chord sequences with `^` in later
 verses, including melody/beat annotations; see
@@ -174,6 +176,10 @@ follow source `\transpose` by default. Enable source transposition explicitly
 with `\ulTransposeAltChords{true}`; restore the default with
 `\ulTransposeAltChords{false}`.
 
+Displaying a standalone set requires both `chords` and `altchords` visibility.
+Hiding `altchords` alone does not hide repetition-specific `\ac` chords inside
+ordinary inline annotations.
+
 When enabled, plain chords and chord-like content inside `\id` and `\ac` follow
 the current interval. Write accidentals as `#` and `&`; `\shrp` and `\flt` are
 not part of the supported transposable `\altchords` syntax. Protect content that
@@ -196,7 +202,8 @@ and replay rather than forming a standalone set.
 Use `|` at the **beginning** of each measure, not the end. A line ending does
 not itself mean the end of a measure. Use one bar marker per measure.
 
-For a measure with no lyrics at that spot, use `\e`:
+For a measure with no lyrics at that spot, use `\e`, a plain end dash unrelated
+to vertical spacing:
 
 ```tex
 \beginverse
@@ -204,7 +211,9 @@ For a measure with no lyrics at that spot, use `\e`:
 \endverse
 ```
 
-To hide measure bars in the output, use `\measuresoff`.
+To hide measure bars locally, use `\measuresoff`; `\measureson` restores them
+where book policy permits. To hide them throughout the book, put
+`\ulShowMeasures{false}` in the preamble. Chord visibility does not control bars.
 
 ## Repeats
 
@@ -241,7 +250,11 @@ They can be nested:
 \endsong
 ```
 
-`\prep{<n>}` puts a repeat count on its own line after `\beginrep`.
+`\prep{<n>}` is a raised repeat-count marker used after `\beginrep`. Put it on the
+same source line as the lyrics when it should follow their annotation height.
+Its position follows the highest occupied reference on its physical line, with
+a fallback when no higher reference exists. A marker on its own source line uses
+that fallback rather than looking ahead to the next lyric line.
 `\goto{Beginning words of the verse}` marks a jump target by text.
 
 Use verses for all lyric stanzas and explicit repeat regions within them for
@@ -398,9 +411,10 @@ handles its own verse layout; use `\nextverse` between translated verses:
 
 The optional language code is uppercase. `EN`, `PT`, and `FI` have explicit
 English, Portuguese, and Finnish handling. Omit the code when no language
-annotation is needed. `\ulShowTranslation{false}` hides all translations;
+annotation is needed. Preamble `\ulShowTranslation{false}` hides all translations;
 `\translationoff` / `\translationon` controls them within a song, subject to
-the global switch.
+the book permission. Local requests follow grouping, not an independent global
+translation switch.
 
 Use an explanation block for prose associated with a song:
 
@@ -419,7 +433,7 @@ Use a passage for a titled prose section, such as material between songs:
 ```
 
 Use `\begin{passage}*{Title}` (with the same `\end{passage}`) for the alternate,
-note-like style. `\ulShowExplanation{false}` and
+note-like style. Preamble `\ulShowExplanation{false}` and
 `\ulShowPassage{false}` hide their respective environments. The `feeler` environment
 provides another short, styled text block inside a song:
 
@@ -432,9 +446,17 @@ provides another short, styled text block inside a song:
 For a note attached to a stanza boundary, use
 `\attachednote[<skip before>][<skip after>]{Text}`. Both skips default to zero.
 A leading star attaches it to preceding material; without that star it attaches
-to following material. A trailing star suppresses the usual inter-verse glue
-for an unstarred note. This is distinct from the shorter `\textnote{Text}`
-command, not an alias for it.
+to following material. Normally a forward-attached note removes the next verse's
+usual separating space. A trailing star keeps that space instead, for example
+`\attachednote{Before the first verse}*`. Inside a verse, the note uses small
+surrounding gaps rather than these attachment skips. This is distinct from the
+shorter `\textnote{Text}` command, not an alias for it.
+
+Use `\musicnote{Text}`, `\musicnoteforprev{Text}`, `\musicnotefornext{Text}`,
+or `\musicnotemiddle{Text}` for general musical instructions. Their independent
+`\ulShowMusicComments` permission
+is not pitched-note visibility. Chord-specific help should additionally test
+`\ifulShowChords`; instrument-specific help can test `\ulIfVariant`.
 
 ## Melody hints and beat marks
 
@@ -526,14 +548,16 @@ Set styles independently with `\ulMelodyStyleMapping{normal}` (primary uses the
 normal style) or `\ulMelodyStyleMapping{swapped}` (primary uses the alternate
 style). Neither setting changes which sequence is primary.
 
-`\ulShowNotes{false}` and `\notesoff` hide notes; `\ulShowBeats{false}` and
-`\beatsoff` hide beats. `\noteson` and `\beatson` restore them. Use
-`\beginverse+` for looser spacing when melody hints occur throughout a verse;
-ordinary `\beginverse` is suitable when they occur only on its first line.
+Preamble `\ulShowNotes{false}` denies inline pitches; `\ulShowBeats{false}`
+denies beats. Local `\notesoff` and `\beatsoff` suppress their respective features;
+`\noteson` and `\beatson` restore requests only within book permission. Neither
+depends on chords: `\chordsoff` hides chord symbols alone. Ordinary
+`\beginverse` handles melody hints on any line.
 
-Legacy `\mn*`, `\ma*`, `\bm*`, and `\usealtmnstyle...` authoring commands
-are removed. Use the [migration utility](README.md#ulsbs-migrate-syntax-v1) for
-older sources, not for new songs.
+Annotation spacing follows visible ink: beats-only lines use compact clearance,
+and fully hidden annotations reserve no phantom width or height. Visible pitches
+and authored offsets still get their required clearance. Replay stays synchronized
+across local visibility changes. Recheck pagination after changing visible features.
 
 ## Full melodies with LilyPond
 
@@ -592,6 +616,13 @@ for variant and multikey behavior. With multikey score transposition enabled,
 unsupported score structures or unsafe alternatives retain the original score
 with a warning.
 
+`\ulShowLilypond` controls display of whole scores, not their generation or media
+export. `\ulShowChords` controls only inline TeX chord symbols: it cannot remove
+`ChordNames` already engraved in a score. Compiler score recipes independently
+select tuning, clef and tablature; bass-clef scores retain chord names even though
+their preset hides inline chords. Use the compiler to build instrument variants
+with their matching scores.
+
 ### Converting LilyPond lyrics
 
 The [`ulsbs-ly2tex` utility](README.md#ulsbs-ly2tex) helps convert ULSBS-style
@@ -645,6 +676,97 @@ PDF. `\ulMainChapter{Title}{color}` starts a chapter with its colored symbol.
 The source input order determines the ordinary book's song order. You may put
 multiple songs in one file or use one file per song. Files named `songs_*.tex`
 are a useful convention, not a requirement.
+
+## Variants and visibility
+
+Declare supported presets literally in the main source, not in an input, macro
+or derived class:
+
+```tex
+\documentclass[
+  variants={default,lyric,charango,bassclef},
+  maintitle={My Songbook}
+]{ulsbs-songbook}
+\ulShowMeasures{false} % Hide bars even in presets that normally show them.
+```
+
+Omission means `{default}` only. The list must include `default`; names are
+lowercase, unique and known, with no repeated declaration or computed values.
+Availability is not selection: see [compiler selection](README.md#variants-and-editions)
+for `variants = "all"`, TOML lists and CLI subsets. Keep the canonical source
+free of build selectors. Choose the variant with the compiler; the selected
+identity stays fixed throughout that build.
+
+The selected preset applies after the class's settings and before your explicit
+preamble configuration. Your preamble can override preset defaults.
+`default` preserves the source baseline rather than imposing a musical type.
+The standard baseline permits all features below. The non-default presets supply
+these notation defaults:
+
+| Feature | `lyric` | `charango` | `bassclef` |
+|---|---|---|---|
+| Inline chords, pitches and beats | Off | On | Off |
+| Measure bars | On | On | On |
+| Whole scores | Off | On | On |
+| Alternate chord sets | Off | On | Off |
+| Music comments | Off | On | On |
+
+Lyric also denies main/recommended key badges; other presets preserve authored
+key policy. All presets preserve independent prose, tags, phases, attribution and
+chapter artwork. Editions and media permissions are separate from these display
+defaults; enabling a feature does not change identity or edition eligibility.
+
+**Book policy and local requests.** Set `\ulShow...{true|false}` in the preamble
+after class loading. Policy freezes at document start, before `\AtBeginDocument`
+callbacks; body setters are errors, not local overrides. In songs or verses use
+`\ulLocalShow{feature}{true|false}`, or the short pairs `\chordsoff`/`\chordson`,
+`\notesoff`/`\noteson`, `\beatsoff`/`\beatson`, `\measuresoff`/`\measureson` and
+`\translationoff`/`\translationon`. Each changes only its own request.
+
+Effective visibility is **book permission AND local request**. Local `true`
+cannot defeat book `false`; for example, a song's `\noteson` cannot leak pitches
+into a lyric variant whose preamble still denies notes. Requests last until the
+enclosing group ends; song and verse groups restore enclosing state. Use an
+explicit group for a narrower scope:
+
+```tex
+{\chordsoff
+ \ulLocalShow{translation}{false}
+ % This scope can still show permitted pitches, beats, measures and scores.
+}
+```
+
+Set a local request before the material it controls. For example, put a grouped
+`\ulLocalShow{authors}{false}` before `\beginsong` to hide that song's author
+badge, not after its prelude has already been printed. Likewise set chapter
+artwork requests before `\ulMainChapter`. Hiding badges does not remove their
+metadata from exports or indices.
+
+Canonical feature keys are `chords`, `notes`, `beats`, `measures`, `scores`,
+`altchords`, `key`, `goodkeys`, `musiccomments`, `translation`, `explanation`,
+`passage`, `feeler`, `authors`, `offeredto`, `extrainfo`, `tags`, `phase`,
+`phaseintoc`, `imageinchaptername` and `imageonchapterfrontpage`. Unknown keys or
+nonliteral boolean values are errors. `scores` corresponds to `\ulShowLilypond`;
+the other keys correspond to the preamble setters in the
+[settings table](#preamble-configuration-after-loading-the-class).
+
+**Feature and identity tests.** `\ifulShowChords`, `\ifulShowNotes`,
+`\ifulShowLilypond` and the other `\ifulShow...` predicates query effective
+visibility in the current scope. They are genuine TeX conditionals, including
+inside skipped branches; do not assign or redefine them:
+
+```tex
+\ifulShowChords Chord-specific playing help.\else Other guidance.\fi
+\ulIfMusical{Musical-information motto}{Words-only motto}
+\ulIfVariant{bassclef}{\sclearpage}{}
+```
+
+`\ulIfMusical{yes}{no}` tests effective **inline chords OR inline pitches OR
+whole scores**, at the time of the call. Beats, measures, keys and music comments
+do not make it true; it does not inspect whether the current song contains music.
+`\ulIfVariant{name}{yes}{no}` validates a registered name and tests immutable
+identity, unaffected by visibility changes. Use it for genuinely variant-specific
+pagination or instrument help, not as a substitute for a capability test.
 
 ## Tags and indices
 
@@ -855,8 +977,15 @@ and the second full pass settles references and PDF resources. Repeat full
 passes until rerun warnings disappear. A first-pass PDF is not final; follow any
 reported recovery instructions if a build is interrupted.
 
+Direct compilation uses `default` automatically. For other declared variants,
+use the compiler, for example:
+
+```sh
+./ulsbs/ulsbs-compile --variants bassclef my-songbook_A5.tex
+```
+
 This is a TeX build, not a replacement for the Python publication pipeline:
-LilyPond source processing, optional score alternatives, font sharing, range
+LilyPond source processing, optional score alternatives, PDF optimization, range
 packaging, JSON, printouts and media exports are compiler responsibilities. Use
 `ulsbs-compile` for those products. Merely enabling PDF layers in manual TeX does
 not produce a validated `_MULTIKEY_RANGES.json` package.
@@ -904,6 +1033,7 @@ document; preamble commands customize the loaded styles.
 
 | Option | Meaning |
 |---|---|
+| `variants={default,...}` | Literal main-source availability; omission is default only; see [Variants and visibility](#variants-and-visibility) |
 | `paper={...}` | Paper size, for example `a5paper` or `a4paper` |
 | `maintitle={...}` | Main book title |
 | `subtitle={...}` | Subtitle / sub-book title |
@@ -931,7 +1061,8 @@ for the separate `_A5` printout convention.
 
 Put these commands after `\documentclass{ulsbs-songbook}` and before
 `\begin{document}`. Boolean settings take exactly `true` or `false` as an
-argument. Assignments are local to the surrounding TeX group:
+argument. Visibility permissions freeze at document start; use grouped local
+requests in the body, as described in [Variants and visibility](#variants-and-visibility):
 
 ```tex
 \ulShowTags{false}
@@ -939,7 +1070,7 @@ argument. Assignments are local to the surrounding TeX group:
 \renewcommand{\ulSongEndMark}{*}
 ```
 
-| Setter (`{true}` or `{false}`) | Default | Meaning |
+| Setter (`{true}` or `{false}`) | Standard baseline | Meaning |
 |---|---|---|
 | `\ulShowExtraInfo` | `true` | Show extra prelude info (`ex=`) |
 | `\ulShowOfferedTo` | `true` | Show offered-to info (`off=`) |
@@ -949,8 +1080,11 @@ argument. Assignments are local to the surrounding TeX group:
 | `\ulShowPhaseInToc` | `true` | Show phases in the TOC |
 | `\ulShowTags` | `true` | Show/hide tags in preludes; collection and index membership are unchanged |
 | `\ulSongIndexes` | `true` | Enable both index collection and display; false disables both |
+| `\ulShowChords` | `true` | Show inline chord symbols, not score ChordNames |
+| `\ulShowMeasures` | `true` | Show measure bars independently of chords |
 | `\ulShowNotes` | `true` | Show melody-note hints |
 | `\ulShowBeats` | `true` | Show beat marks |
+| `\ulShowMusicComments` | `true` | Show musical prose helpers, not pitched notes |
 | `\ulShowAuthors` | `true` | Show song authors in preludes |
 | `\ulShowLilypond` | `true` | Show LilyPond score blocks |
 | `\ulShowPassage` | `true` | Show `passage` environments |
@@ -967,6 +1101,10 @@ argument. Assignments are local to the surrounding TeX group:
 | `\ulUseChapterColors` | `true` | Enable colored chapter corner marks |
 | `\ulAdjustChordChars` | `true` | Apply chord-character typography adjustments |
 
+Preset changes are listed above; these baseline values are not a guarantee for a
+custom class. `\ulSongIndexes`, title casing, chapter colors and chord typography
+are ordinary configuration, not `\ulLocalShow` features.
+
 Other useful settings:
 
 | Setting | Purpose |
@@ -978,15 +1116,100 @@ Other useful settings:
 | `\renewcommand{\ulLyricFont}{...}` | Default lyric font |
 | `\renewcommand{\ulChordFont}{...}` | Default chord font |
 | `\renewcommand{\ulAltChordsStyle}{...}` | Standalone alternate-chord style |
-| `\renewcommand{\ulChordLineBaselineSkip}{...}` / `\ulChordLineLineskipLimit` / `\ulChordLineLineskip` | Chord-line spacing controls; redefine their dimension-valued macros in the needed scope |
-| `\renewcommand{\ulChordWhitespaceMinimumWidth}{...}` | Minimum advance for a visible annotation followed by source whitespace; default `.8ex`, `0pt` disables |
+| `\renewcommand{\ulChordLineBaselineSkip}{...}` / `\ulChordLineLineskipLimit` / `\ulChordLineLineskip` | Annotation-row clearance; neighboring anchors on a physical line share the required baseline |
+| `\renewcommand{\ulChordWhitespaceMinimumWidth}{...}` | Minimum advance for a visible annotation followed by source whitespace; zero disables |
 | `\renewcommand{\ulTranslationFont}{...}` | Translation font |
+| `\renewcommand{\ulNoteFont}{...}` | Font for text notes, attached notes and musical prose notes; not melody hints |
 | `\renewcommand{\ulExplanationFont}{...}` | Explanation font |
 | `\renewcommand{\ulPassageFont}{...}` / `\renewcommand{\ulAltPassageFont}{...}` | Passage fonts |
-| `\renewcommand{\ulMelodySymbolStyle}{...}` | Melody-note symbol style |
-| `\renewcommand{\ulMelodyTagText}{...}` / `\renewcommand{\ulMelodyAltTagText}{...}` | Melody-note tag text |
+| `\renewcommand{\ulMelodySize}{...}` | Melody size for both spacing and rendering; use a font-size declaration such as `\scriptsize` |
+| `\renewcommand{\ulMelodySymbolStyle}{...}` | Appearance-only melody-note symbol hook; not called for sizing |
+| `\renewcommand{\ulMelodyTagText}{...}` / `\renewcommand{\ulMelodyAltTagText}{...}` | Appearance-only melody-note tag hooks; not called for sizing |
 | `\renewcommand{\ulHeaderTitleStyle}{...}` | Header title style |
 | `\renewcommand{\ulPageNumberStyle}{...}` | Page-number style in headers |
+
+### Optional spacing and bar styling
+
+The default styling usually works well; most authors need none of these changes.
+The examples below are optional overrides, not default values.
+
+Use `\ulMelodySize` for note-size changes rather than a font-size command inside
+`\ulMelodySymbolStyle`: the size setting keeps circles and their shared spacing
+grid in agreement. The symbol/tag hooks are for appearance and are not run during
+measurement. An annotation row shares its required baseline across a physical line,
+so a deep chord label does not leave just one melody hint floating above its neighbors.
+
+`\ulVerseBaseline{natural}{stretch}{shrink}` sets nominal lyric-line baseline
+glue; `\ulVerseSeparation{natural}{stretch}{shrink}` sets inter-verse glue.
+All three arguments are finite, nonnegative scalars multiplying the configured
+lyric font's capital-`A` height. The baseline is the **total nominal baseline
+distance**, not an amount added to the font size. Actual ink clearance and minimum
+gaps can require more space. `\ulVerseMinimumGap{dimension}` sets the minimum
+clearance between lyric lines.
+
+Call the scalar setters after font customization: they resolve dimensions when
+called and do not automatically rescale after later font changes. Settings obey
+TeX grouping; keep a local override's group around the affected verses.
+
+These scalar settings control lyric verses, not prose line leading. Translations
+use their selected font's normal line spacing (`\small` before
+`\ulTranslationFont`). Passages and explanations likewise use their selected
+font's normal line spacing, multiplied by `\ulPassageBaselineMultiplier` or
+`\ulExplanationBaselineMultiplier` (both default to `1`). For example:
+
+```tex
+\renewcommand{\ulTranslationFont}{\small\itshape}
+\renewcommand{\ulExplanationFont}{\rmfamily\small}
+\renewcommand{\ulExplanationBaselineMultiplier}{1.1}
+```
+
+Illustrative overrides only, **not documented defaults**, after font setup:
+
+```tex
+\ulVerseBaseline{1.8}{0}{0}
+\ulVerseSeparation{1.7}{0}{.2}
+\ulVerseMinimumGap{1pt}
+```
+
+For advanced relative calculations, the read-only, expandable
+`\ulVerseSpacingScale{baseline|separation}{natural|stretch|shrink}` returns the
+stored scalar (choose one key from each pair of braces). Use it in numeric
+expressions with these setters rather than accessing private registers.
+
+`\ulMeasureBarTop{occupied logical level}{reference level}{scale}` and
+`\ulRepeatBarTop{occupied logical level}{reference level}{scale}` independently
+choose bar tops. Occupied levels are `0` for lyrics/beats, `1` for chords or low
+melody hints, `2` for normal hints, and `3` for higher hints. Hidden annotations
+and rests do not increase the occupied level. Choose a reference level from `0`
+through the occupied level, including a lower one for a deliberately shorter bar.
+
+The target top is `reference bottom + BASE * scale`, with a finite, nonnegative
+scale. Reference `0` uses the lyric capital-`A` height at the lyric baseline;
+reference `1` uses the chord capital-`A` height at the chord-row base. References
+`2` and `3` use the actual melody circle's bottom and diameter as `BASE`.
+If the selected melody lane is empty, its usual position uses circle dimensions
+from the nearest visible hint; this does not print a phantom annotation.
+`\ulUseVerseAnnotationMinimum{true}` enables a one-level minimum for otherwise
+plain or beat-only lines in a verse containing visible chords or melody hints;
+`{false}` disables it. It never reserves multiple absent melody rows, and a wholly
+beat-only verse stays compact. Meter labels and actual ink bounds remain protected
+even when a shorter bar top is requested.
+
+`\ulRepeatBarBottomScale{scale}` controls the repeat bar's extension below the
+lyric baseline in multiples of the lyric capital-`A` height.
+`\ulRepeatBarMinimumGap{dimension}` limits how closely separate, complete repeat
+bars in the same column can approach; `0pt` disables it. It does not separate
+nested bars or fragments continuing the same repeat. These bar settings are
+scoped too.
+
+Illustrative overrides only, **not documented defaults**:
+
+```tex
+\ulMeasureBarTop{3}{2}{.9}
+\ulRepeatBarTop{2}{1}{1.1}
+\ulRepeatBarBottomScale{.04}
+\ulRepeatBarMinimumGap{2pt}
+```
 
 For custom class development beyond these settings, see
 [developer navigation](ARCHITECTURE.md#developer-navigation). Build-output
@@ -996,10 +1219,8 @@ where supported, are configured separately; see
 
 ## Extension points
 
-Use the documented class options, pre-load `\ul...` settings and post-load
-font/visibility commands rather than modifying private module state. For example,
-`\ulSongbookType` may be defined as `lyric` before class loading for a manual
-lyrics-only build; leave compiler-provided definitions to the compiler.
+Use the documented class options, preamble settings and scoped local requests.
+Build declared variants through the [compiler](README.md#variants-and-editions).
 `\ulSongColumns{0}`, `{1}` and `{2}` select unpositioned flow, one column and two
 columns respectively; set columns outside an individual song. `\ulSongPosition{0}`
 through `{3}` control song-positioning lookahead, not the number of columns.
@@ -1027,6 +1248,6 @@ and `\ulSongId` are available in the relevant song scope. Stanza hooks run once
 per stanza, not once per transposition layer. The anchor hook runs when anchor
 nodes are inserted, not when their eventual page coordinates become known.
 Hooks may run while a song is being boxed, including a song later excluded by a
-selection; they are not publication callbacks. Do not depend on private
-`\__ulsbs_...` variables, internal Lua tables or old upstream `\SB@...` commands.
+selection; they are not publication callbacks. Only documented public commands
+and hooks are supported extension points.
 See [song engine ownership](ARCHITECTURE.md#song-engine) for boundaries.

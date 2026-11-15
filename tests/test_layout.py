@@ -117,9 +117,8 @@ RULE
                     body = (FIXTURES / f"{fixture}.tex").read_text().replace(
                         "layout-stanza.tex", str(FIXTURES / "layout-stanza.tex"))
                     preamble = r"\ulSongColumns{2}" if edition == "two-column" else ""
-                    source = document(body, preamble)
-                    if edition == "lyric":
-                        source = r"\def\ulSongbookType{lyric}" + "\n" + source
+                    source = document(body, preamble,
+                                      variant="lyric" if edition == "lyric" else "default")
                     output = self.compile_source(source, label=name, passes=2)
                     self.assertTrue(self.pdf_text().strip())
                     self.assertNotIn("Overfull \\vbox", output)
@@ -140,6 +139,8 @@ RULE
                 for page in root.iter() if page.tag.endswith("}page")]
 
     def test_two_column_positioning_avoids_an_unnecessary_page_turn(self):
+        # Exercise overflow deliberately, without relying on phantom chord height
+        # in plain lyric lines. These fixtures have explicit authored leading.
         body = r"\begin{ulSongs}{}" + "\n"
         for name, lines in (("Alpha", 15), ("Beta", 27)):
             body += r"\beginsong{" + name + "}\n" + r"\beginverse*" + "\n"
@@ -149,7 +150,7 @@ RULE
         for position in (1, 2, 3):
             with self.subTest(songpos=position):
                 self.compile_source(document(body,
-                    r"\setlength\textheight{450pt}\ulSongColumns{2}\ulSongPosition{" +
+                    r"\ulVerseBaseline{\fpeval{\ulVerseSpacingScale{baseline}{natural}+10*65536/(\number\fontcharht\font`A)}}{\ulVerseSpacingScale{baseline}{stretch}}{\ulVerseSpacingScale{baseline}{shrink}}\setlength\textheight{450pt}\ulSongColumns{2}\ulSongPosition{" +
                     str(position) + "}"), label=f"position-{position}")
                 pages = self.positioned_words()
                 beta_pages = [page for page, words in enumerate(pages, start=1)
@@ -207,10 +208,8 @@ NEXT
 \let\OriginalSegno\musSegno
 \renewcommand\musSegno{\global\advance\NoteTextEffects1 \OriginalSegno}
 """
-            if edition == "lyric":
-                preamble += r"\input{ulsbs-internal-lyricbook-postsetup.tex}"
-            source = (r"\def\ulSongbookType{" + edition + "}\n"
-                      + document(body, preamble))
+            source = document(body, preamble,
+                              variant="lyric" if edition == "lyric" else "default")
             with self.subTest(edition=edition):
                 output = self.compile_source(source, label=edition)
                 words = self.positioned_words()
@@ -278,7 +277,7 @@ Passage prose with a \passagenote{short note}.
 \begin{explanation}[EN]
 Explanation prose.
 \end{explanation}
-\ulShowTranslation{false}
+\translationoff
 \begin{translation}
 Hidden translation unique.
 \end{translation}
@@ -296,6 +295,611 @@ Fresh lyric line.
             self.assertIn(value, text)
         self.assertNotIn("Hidden translation unique", text)
         self.assertNotIn("Overfull \\vbox", output)
+
+    def test_language_blocks_use_font_leading_not_verse_spacing(self):
+        preamble = r"""
+\makeatletter
+\ulSongColumns{1}\ulSongPosition{0}
+\renewcommand\baselinestretch{1.2}
+\renewcommand\ulExplanationBaselineMultiplier{1.25}
+\renewcommand\ulPassageBaselineMultiplier{1.5}
+\newcount\BaselineInstalls
+\expandafter\pretocmd\csname __ulsbs_verse_baseline:\endcsname
+  {\global\advance\BaselineInstalls1 }{}{\errmessage{Baseline patch failed}}
+\newcommand\CheckFontBaseline[2]{%
+  \dimen0=#2\normalbaselineskip\relax
+  \ifdim\baselineskip=\dimen0\else\errmessage{Wrong font baseline: #1}\fi
+  \ifdim\gluestretch\baselineskip=0pt\else\errmessage{Prose stretch: #1}\fi
+  \ifdim\glueshrink\baselineskip=0pt\else\errmessage{Prose shrink: #1}\fi
+  \typeout{FONT-BASELINE:#1=\the\baselineskip}}
+\newcommand\CheckVerseBaseline{%
+  \ifdim\baselineskip=\csname l__ulsbs_verse_nominal_skip\endcsname
+  \else\errmessage{Ordinary verse baseline changed}\fi}
+\AddToHook{ulsbs/stanza/start}{%
+  \ifulsbs@intranslation
+    \CheckFontBaseline{translation-start}{1}%
+  \else\CheckVerseBaseline\fi}
+\makeatother
+"""
+        body = r"""
+\begin{ulSongs}{}
+\beginsong{Independent prose leading}[id={independent-prose},key={C}]
+\beginverse*
+\CheckVerseBaseline \[C]First lyric line.
+Second lyric line.
+\endverse
+\edef\InstallsBeforeBlocks{\the\BaselineInstalls}
+\begin{explanation}
+\CheckFontBaseline{explanation}{1.25}Explanation text with enough words to wrap
+into several physical lines inside the narrow song column.
+\end{explanation}
+\begin{passage}{Passage title}
+\CheckFontBaseline{passage}{1.5}Passage text with enough words to wrap
+into several physical lines inside the narrow song column.
+\end{passage}
+\begin{passage}*{Starred passage title}
+\CheckFontBaseline{starred}{1.5}Starred passage text.
+\end{passage}
+\begin{translation}
+\CheckFontBaseline{translation}{1}Translated first line.
+Translated second line.
+\end{translation}
+{%
+\renewcommand\ulExplanationFont{\fontsize{12}{18}\selectfont}
+\renewcommand\ulPassageFont{\fontsize{12}{18}\selectfont}
+\renewcommand\ulAltPassageFont{\fontsize{12}{18}\selectfont}
+\renewcommand\ulTranslationFont{\fontsize{12}{18}\selectfont}
+\begin{explanation}[EN]
+\CheckFontBaseline{custom-explanation}{1.25}Custom explanation.
+\end{explanation}
+\begin{passage}[EN]{Custom passage title}
+\CheckFontBaseline{custom-passage}{1.5}Custom passage.
+\end{passage}
+\begin{passage}*[EN]{Custom starred title}
+\CheckFontBaseline{custom-starred}{1.5}Custom starred passage.
+\end{passage}
+\begin{translation}[EN]
+\CheckFontBaseline{custom-translation}{1}Custom translation.
+\end{translation}
+}%
+{\renewcommand\ulVerseFont{\small}% Same size as translation's built-in selection.
+\begin{translation}
+\CheckFontBaseline{same-size-translation}{1}Same size translation.
+\end{translation}
+}%
+\ifnum\BaselineInstalls=\InstallsBeforeBlocks\relax\else
+  \errmessage{Prose installed the verse baseline}\fi
+\beginverse*
+\CheckVerseBaseline Final lyric line.
+\endverse\endsong\end{ulSongs}
+"""
+        baselines = []
+        for multikey in (False, True):
+            for scale in (3, 6):
+                with self.subTest(multikey=multikey, scale=scale):
+                    output = self.compile_source(
+                        r"\def\ulPdfTranspositionLayers{" + str(multikey).lower() + "}"
+                        + document(body, preamble + rf"\ulVerseBaseline{{{scale}}}{{.2}}{{.1}}"),
+                        label=f"font-baselines-{multikey}-{scale}")
+                    rows = re.findall(r"FONT-BASELINE:([^=\r\n]+)=([^\r\n]+)", output)
+                    self.assertEqual(len(rows), 12, rows)
+                    baselines.append(rows)
+        self.assertTrue(all(rows == baselines[0] for rows in baselines[1:]))
+
+    def test_translation_skip_is_opaque_empty_and_preserves_later_visible_blocks(self):
+        hidden = r"""
+\begin{translation}[PT]
+\global\advance\TranslationEffects100
+\translationon\input{must-not-be-read.tex}
+\iftrue { } } { \iffalse
+\end{translation}
+"""
+        preamble = r"""
+\makeatletter
+\newcount\TranslationEffects\newcount\TranslationFonts
+\newcount\BlockStarts\newcount\FillCalls
+\renewcommand\ulTranslationFont{\global\advance\TranslationFonts1 }
+\pretocmd\ulsbs@blockstart{\global\advance\BlockStarts1 }{}{\errmessage{Block patch failed}}
+\pretocmd\ulEndSongVfill{\global\advance\FillCalls1 }{}{\errmessage{Fill patch failed}}
+\newcommand\TranslationEffect{\global\advance\TranslationEffects1 }
+\setotherlanguage{portuguese}
+\ulSongColumns{1}\ulSongPosition{0}
+\makeatother
+"""
+        body = r"""
+\makeatletter
+\begin{ulSongs}{}\beginsong{Translation source}[id={translation-source},key={C}]
+\beginverse*
+\[<* E>C]Beforeanchor.
+\endverse
+\ulEndSongVfill{false}\global\FillCalls=0
+\edef\SavedLanguage{\languagename}\edef\SavedColor{\current@color}
+\setbox0=\vbox{HIDDEN-SOURCE}
+\typeout{HIDDEN-DIMS:\the\wd0/\the\ht0/\the\dp0}
+\typeout{HIDDEN-EFFECTS:\the\TranslationEffects/\the\TranslationFonts/\the\BlockStarts/\the\FillCalls}
+\ExplSyntaxOn
+\bool_if:NT \g__ulsbs_layout_fill_bool {\errmessage{Hidden translation changed fill}}
+\ExplSyntaxOff
+\edef\AfterLanguage{\languagename}\edef\AfterColor{\current@color}
+\ifx\SavedLanguage\AfterLanguage\else\errmessage{Hidden language leaked}\fi
+\ifx\SavedColor\AfterColor\else\errmessage{Hidden color leaked}\fi
+\ifulsbs@intranslation\errmessage{Hidden translation leaked state}\fi
+\beginverse*
+\[<* E>G]Afteranchor.
+\endverse
+VISIBLE-SOURCE
+\typeout{FINAL-EFFECTS:\the\TranslationEffects/\the\TranslationFonts/\the\BlockStarts/\the\FillCalls}
+\edef\AfterLanguage{\languagename}\edef\AfterColor{\current@color}
+\ifx\SavedLanguage\AfterLanguage\else\errmessage{Visible language leaked}\fi
+\ifx\SavedColor\AfterColor\else\errmessage{Visible color leaked}\fi
+\ifulsbs@intranslation\errmessage{Visible translation leaked state}\fi
+\typeout{RESTORED-MUSIC:\ifulShowChords on\else off\fi/\ifulShowNotes on\else off\fi/\ifulShowBeats on\else off\fi/\ifulShowMeasures on\else off\fi/\ifulShowLilypond on\else off\fi/\ifulShowAltChords on\else off\fi}
+\endsong\end{ulSongs}
+"""
+        # Local-off and book-off are independently empty; controls remove source
+        # entirely. Visible translations then exercise all existing language paths.
+        visible = "\n".join(
+            r"\begin{translation}" + (f"[{language}]" if language else "") + "\n"
+            + rf"\TranslationEffect Visible{language or 'None'}." + "\n"
+            + r"\nextverse" + "\nSecond translated stanza.\n"
+            + r"\end{translation}" for language in ("EN", "PT", "FI", ""))
+        anchors = []
+        for multikey in (False, True):
+            for mode in ("local-off", "book-off", "control"):
+                policy = (r"\ulShowTranslation{false}" if mode == "book-off" else "")
+                request = r"\translationon" if mode == "book-off" else r"\translationoff"
+                content = body.replace("HIDDEN-SOURCE", "" if mode == "control" else hidden)
+                content = content.replace("VISIBLE-SOURCE", "" if mode == "book-off"
+                                          else r"\translationon" + "\n" + visible)
+                source = (rf"\def\ulPdfTranspositionLayers{{{'true' if multikey else 'false'}}}"
+                          + document(content, preamble + policy + request))
+                with self.subTest(multikey=multikey, mode=mode):
+                    output = self.compile_source(source, label=f"{multikey}-{mode}", passes=3)
+                    self.assertIn("HIDDEN-DIMS:0.0pt/0.0pt/0.0pt", output)
+                    self.assertIn("HIDDEN-EFFECTS:0/0/0/0", output)
+                    self.assertIn("FINAL-EFFECTS:" + ("0/0/0/0" if mode == "book-off"
+                                                    else "4/4/4/4"), output)
+                    self.assertIn("RESTORED-MUSIC:on/on/on/on/on/on", output)
+                    words = {text: box for page in self.positioned_words() for text, box in page}
+                    anchors.append([words[key] for key in ("Beforeanchor.", "Afteranchor.")])
+                    text = self.pdf_text()
+                    for language in ("EN", "PT", "FI", "None"):
+                        self.assertEqual(text.count(f"Visible{language}."), int(mode != "book-off"))
+        self.assertTrue(all(value == anchors[0] for value in anchors[1:]))
+
+    def test_explanation_skip_is_opaque_empty_and_preserves_prose_state(self):
+        hidden = r"""
+\begin{explanation}[PT]
+\global\advance\ExplanationEffects100
+\ulLocalShow{explanation}{true}\input{must-not-be-read.tex}
+\iftrue { } } { \iffalse
+\end{explanation}
+"""
+        preamble = r"""
+\makeatletter
+\newcount\ExplanationEffects\newcount\ExplanationFonts\newcount\TranslationEffects
+\newcount\BlockStarts\newcount\FillCalls\newcount\CodeBoxes
+\renewcommand\ulExplanationFont{\global\advance\ExplanationFonts1 \rmfamily\footnotesize}
+\pretocmd\ulsbs@blockstart{\global\advance\BlockStarts1 }{}{\errmessage{Block patch failed}}
+\pretocmd\ulEndSongVfill{\global\advance\FillCalls1 }{}{\errmessage{Fill patch failed}}
+\pretocmd\ulsbs@langcodebox{\global\advance\CodeBoxes1 }{}{\errmessage{Code patch failed}}
+\newcommand\ExplanationEffect{\global\advance\ExplanationEffects1 }
+\newif\ifulsbs@hide\ulsbs@hidefalse
+\setotherlanguage{portuguese}
+\ulSongColumns{1}\ulSongPosition{0}
+\makeatother
+"""
+        body = r"""
+\makeatletter
+\begin{ulSongs}{}\beginsong{Explanation source}[id={explanation-source},key={C}]
+\beginverse*
+\[<* E>C]Beforeanchor.
+\endverse
+\ulEndSongVfill{true}\global\FillCalls=0
+\edef\SavedLanguage{\languagename}\edef\SavedColor{\current@color}
+\setbox0=\vbox{HIDDEN-SOURCE}
+\typeout{HIDDEN-DIMS:\the\wd0/\the\ht0/\the\dp0}
+\typeout{HIDDEN-EFFECTS:\the\ExplanationEffects/\the\ExplanationFonts/\the\BlockStarts/\the\FillCalls/\arabic{ulsbs@explcounter}/\the\CodeBoxes}
+\ExplSyntaxOn
+\bool_if:NF \g__ulsbs_layout_fill_bool {\errmessage{Hidden explanation changed fill}}
+\ExplSyntaxOff
+\ifulsbs@hide\errmessage{Hidden decision leaked}\fi
+\typeout{AFTER-HIDDEN:\ifulShowExplanation on\else off\fi/\ifulShowTranslation on\else off\fi}
+\edef\AfterLanguage{\languagename}\edef\AfterColor{\current@color}
+\ifx\SavedLanguage\AfterLanguage\else\errmessage{Hidden language leaked}\fi
+\ifx\SavedColor\AfterColor\else\errmessage{Hidden color leaked}\fi
+\beginverse*
+\[<* E>G]Afteranchor.
+\endverse
+VISIBLE-SOURCE
+\typeout{FINAL-EFFECTS:\the\ExplanationEffects/\the\ExplanationFonts/\the\BlockStarts/\the\FillCalls/\arabic{ulsbs@explcounter}/\the\CodeBoxes}
+\ExplSyntaxOn
+\bool_if:NT \g__ulsbs_layout_fill_bool {\errmessage{Visible explanation lost end-fill policy}}
+\ExplSyntaxOff
+\begin{translation}[EN]
+\global\advance\TranslationEffects1 Later translation.
+\end{translation}
+\typeout{TRANSLATION-EFFECTS:\the\TranslationEffects}
+\edef\AfterLanguage{\languagename}\edef\AfterColor{\current@color}
+\ifx\SavedLanguage\AfterLanguage\else\errmessage{Visible language leaked}\fi
+\ifx\SavedColor\AfterColor\else\errmessage{Visible color leaked}\fi
+\ifulsbs@hide\errmessage{Visible decision leaked}\fi
+\ifulsbs@intranslation\errmessage{Translation state leaked}\fi
+\typeout{RESTORED-MUSIC:\ifulShowChords on\else off\fi/\ifulShowNotes on\else off\fi/\ifulShowBeats on\else off\fi/\ifulShowMeasures on\else off\fi/\ifulShowLilypond on\else off\fi/\ifulShowAltChords on\else off\fi}
+\endsong
+\typeout{COUNTER-RESET:\arabic{ulsbs@explcounter}}
+\end{ulSongs}
+"""
+        visible = "\n".join(
+            r"\begin{explanation}" + (f"[{language}]" if language else "") + "\n"
+            + rf"\ExplanationEffect Visible{language or 'None'}." + "\n"
+            + r"\end{explanation}" for language in ("EN", "PT", "FI", ""))
+        anchors = []
+        for multikey in (False, True):
+            for mode in ("local-off", "book-off", "language-skip", "control"):
+                policy = r"\ulShowExplanation{false}" if mode == "book-off" else ""
+                request = (r"\ulLocalShow{explanation}{false}" if mode in ("local-off", "control")
+                           else r"\ulLocalShow{explanation}{true}")
+                skip = r"\renewcommand\ulExplanationLanguagesToSkip{PT}" if mode == "language-skip" else ""
+                # Author book-off remains denied; other modes restore the request
+                # and remove only the language skip, not the independent omit list.
+                content = body.replace("HIDDEN-SOURCE", "" if mode == "control" else hidden)
+                content = content.replace("VISIBLE-SOURCE",
+                                          r"\renewcommand\ulExplanationLanguagesToSkip{}"
+                                          + r"\ulLocalShow{explanation}{true}" + "\n" + visible)
+                # No visible explanation can change fill when book permission is denied.
+                if mode == "book-off":
+                    content = content.replace(r"\bool_if:NT \g__ulsbs_layout_fill_bool",
+                                              r"\bool_if:NF \g__ulsbs_layout_fill_bool")
+                source = (rf"\def\ulPdfTranspositionLayers{{{'true' if multikey else 'false'}}}"
+                          + document(content, preamble + policy + request + skip
+                                     + r"\renewcommand\ulExplanationOmitLangCodes{PT,FI}"))
+                with self.subTest(multikey=multikey, mode=mode):
+                    output = self.compile_source(source, label=f"explanation-{multikey}-{mode}", passes=3)
+                    self.assertIn("HIDDEN-DIMS:0.0pt/0.0pt/0.0pt", output)
+                    self.assertIn("HIDDEN-EFFECTS:0/0/0/0/0/0", output)
+                    state = "on" if mode == "language-skip" else "off"
+                    self.assertIn(f"AFTER-HIDDEN:{state}/on", output)
+                    # Only the first explanation starts a block; later ones retain
+                    # their smaller gap and increment the shared song counter.
+                    self.assertIn("FINAL-EFFECTS:" + ("0/0/0/0/0/0" if mode == "book-off"
+                                                    else "4/4/1/4/4/1"), output)
+                    self.assertIn("TRANSLATION-EFFECTS:1", output)
+                    self.assertIn("COUNTER-RESET:0", output)
+                    self.assertIn("RESTORED-MUSIC:on/on/on/on/on/on", output)
+                    words = {text: box for page in self.positioned_words() for text, box in page}
+                    anchors.append([words[key] for key in ("Beforeanchor.", "Afteranchor.")])
+                    text = self.pdf_text()
+                    for language in ("EN", "PT", "FI", "None"):
+                        self.assertEqual(text.count(f"Visible{language}."), int(mode != "book-off"))
+                    self.assertEqual(text.count("Later translation."), 1)
+        self.assertTrue(all(value == anchors[0] for value in anchors[1:]))
+
+    def test_passage_skip_is_opaque_empty_and_preserves_later_prose(self):
+        hidden = r"""
+\begin{passage}*[PT]{\global\advance\PassageEffects100 Hidden title}
+\global\advance\PassageEffects100
+\ulLocalShow{passage}{true}\input{must-not-be-read.tex}
+\iftrue { } } { \iffalse
+\end{passage}
+"""
+        preamble = r"""
+\makeatletter
+\newcount\PassageEffects\newcount\PassageFonts\newcount\PassageTitles
+\newcount\BlockStarts\newcount\FillCalls\newcount\CodeBoxes
+\newcount\ExplanationEffects\newcount\TranslationEffects
+\renewcommand\ulPassageFont{\global\advance\PassageFonts1 \ulLyricFontStyle}
+\renewcommand\ulAltPassageFont{\global\advance\PassageFonts1 \ulLyricFontStyle\normalsize\sffamily\itshape}
+\pretocmd\ulsbs@passagestart{\global\advance\PassageTitles1 }{}{\errmessage{Title patch failed}}
+\pretocmd\ulsbs@blockstart{\global\advance\BlockStarts1 }{}{\errmessage{Block patch failed}}
+\pretocmd\ulEndSongVfill{\global\advance\FillCalls1 }{}{\errmessage{Fill patch failed}}
+\pretocmd\ulsbs@langcodebox{\global\advance\CodeBoxes1 }{}{\errmessage{Code patch failed}}
+\newcommand\PassageEffect{\global\advance\PassageEffects1
+ \ifdim\rightskip=\ulPassageRightSkip\else\errmessage{Passage right skip lost}\fi
+ \ifdim\leftskip<\ulPassageLeftSkipAdd\errmessage{Passage left skip lost}\fi}
+\newif\ifulsbs@hide\ulsbs@hidefalse
+\setotherlanguage{portuguese}
+\ulSongColumns{1}\ulSongPosition{0}
+\makeatother
+"""
+        body = r"""
+\makeatletter
+\edef\SavedLanguage{\languagename}\edef\SavedColor{\current@color}
+\setbox0=\vbox{HIDDEN-SOURCE}
+\typeout{OUTSIDE-DIMS:\the\wd0/\the\ht0/\the\dp0}
+\ifulsbs@hide\errmessage{Outside hide decision leaked}\fi
+\begin{ulSongs}{}\beginsong{Passage source}[id={passage-source},key={C}]
+\beginverse*
+\[<* E>C]Beforeanchor.
+\endverse
+\ulEndSongVfill{false}\global\FillCalls=0
+\setbox0=\vbox{HIDDEN-SOURCE}
+\typeout{HIDDEN-DIMS:\the\wd0/\the\ht0/\the\dp0}
+\typeout{HIDDEN-EFFECTS:\the\PassageEffects/\the\PassageFonts/\the\PassageTitles/\the\BlockStarts/\the\FillCalls/\the\CodeBoxes}
+\ExplSyntaxOn
+\bool_if:NT \g__ulsbs_layout_fill_bool {\errmessage{Hidden passage changed fill}}
+\ExplSyntaxOff
+\ifulsbs@hide\errmessage{Inside hide decision leaked}\fi
+\edef\AfterLanguage{\languagename}\edef\AfterColor{\current@color}
+\ifx\SavedLanguage\AfterLanguage\else\errmessage{Hidden language leaked}\fi
+\ifx\SavedColor\AfterColor\else\errmessage{Hidden color leaked}\fi
+\beginverse*
+\[<* E>G]Afteranchor.
+\endverse
+VISIBLE-INSIDE
+\ExplSyntaxOn
+\bool_if:NT \g__ulsbs_layout_fill_bool {\errmessage{Visible passage changed fill}}
+\ExplSyntaxOff
+\begin{explanation}[EN]
+\global\advance\ExplanationEffects1 Later explanation.
+\end{explanation}
+\begin{translation}[EN]
+\global\advance\TranslationEffects1 Later translation.
+\end{translation}
+\endsong\end{ulSongs}
+VISIBLE-OUTSIDE
+\typeout{FINAL-EFFECTS:\the\PassageEffects/\the\PassageFonts/\the\PassageTitles/\the\CodeBoxes}
+\typeout{LATER-PROSE:\the\ExplanationEffects/\the\TranslationEffects}
+\edef\AfterLanguage{\languagename}\edef\AfterColor{\current@color}
+\ifx\SavedLanguage\AfterLanguage\else\errmessage{Visible language leaked}\fi
+\ifx\SavedColor\AfterColor\else\errmessage{Visible color leaked}\fi
+\ifulsbs@hide\errmessage{Visible hide decision leaked}\fi
+\typeout{RESTORED-MUSIC:\ifulShowChords on\else off\fi/\ifulShowNotes on\else off\fi/\ifulShowBeats on\else off\fi/\ifulShowMeasures on\else off\fi/\ifulShowLilypond on\else off\fi/\ifulShowAltChords on\else off\fi}
+"""
+        visible = [
+            r"\begin{passage}" + ("*" if star else "")
+            + (f"[{language}]" if language else "") + "{Title" + (language or "None") + "}\n"
+            + r"\obeylines" + "\n" + rf"\PassageEffect Visible{language or 'None'}."
+            + "\nSecond passage line.\n" + r"\disobeylines" + "\nRejoined prose.\n"
+            + r"\end{passage}"
+            for language, star in (("PT", False), ("", True), ("EN", False), ("FI", True))]
+        anchors = []
+        for multikey in (False, True):
+            for mode in ("local-off", "book-off", "language-skip", "control"):
+                policy = r"\ulShowPassage{false}" if mode == "book-off" else ""
+                request = (r"\ulLocalShow{passage}{false}" if mode in ("local-off", "control")
+                           else r"\ulLocalShow{passage}{true}")
+                skip = r"\renewcommand\ulPassageLanguagesToSkip{PT}" if mode == "language-skip" else ""
+                restore = r"\renewcommand\ulPassageLanguagesToSkip{}\ulLocalShow{passage}{true}" + "\n"
+                content = body.replace("HIDDEN-SOURCE", "" if mode == "control" else hidden)
+                content = content.replace("VISIBLE-INSIDE", restore + "\n".join(visible[:2]))
+                content = content.replace("VISIBLE-OUTSIDE", restore + "\n".join(visible[2:]))
+                source = (rf"\def\ulPdfTranspositionLayers{{{'true' if multikey else 'false'}}}"
+                          + document(content, preamble + policy + request + skip
+                                     + r"\renewcommand\ulPassageOmitLangCodes{PT,FI}"))
+                with self.subTest(multikey=multikey, mode=mode):
+                    output = self.compile_source(source, label=f"passage-{multikey}-{mode}", passes=3)
+                    self.assertIn("OUTSIDE-DIMS:0.0pt/0.0pt/0.0pt", output)
+                    self.assertIn("HIDDEN-DIMS:0.0pt/0.0pt/0.0pt", output)
+                    self.assertIn("HIDDEN-EFFECTS:0/0/0/0/0/0", output)
+                    # EN has a code; PT/FI omit theirs; later explanation adds EN.
+                    self.assertIn("FINAL-EFFECTS:" + ("0/0/0/1" if mode == "book-off"
+                                                    else "4/4/4/2"), output)
+                    self.assertIn("LATER-PROSE:1/1", output)
+                    self.assertIn("RESTORED-MUSIC:on/on/on/on/on/on", output)
+                    words = {text: box for page in self.positioned_words() for text, box in page}
+                    anchors.append([words[key] for key in ("Beforeanchor.", "Afteranchor.")])
+                    text = self.pdf_text()
+                    for language in ("EN", "PT", "FI", "None"):
+                        self.assertEqual(text.count(f"Visible{language}."), int(mode != "book-off"))
+                        self.assertEqual(text.count(f"Title{language}"), int(mode != "book-off"))
+                    self.assertEqual(text.count("Later explanation."), 1)
+                    self.assertEqual(text.count("Later translation."), 1)
+        self.assertTrue(all(value == anchors[0] for value in anchors[1:]))
+
+    def test_feeler_capture_is_lazy_empty_and_preserves_later_blocks(self):
+        # Unlike the raw-skipping prose environments, feelers capture balanced
+        # braces/environment delimiters. Unmatched conditional tokens stay opaque.
+        hidden = r"""
+\begin{feeler}
+\global\advance\FeelerEffects100
+\ulLocalShow{feeler}{true}\input{must-not-be-read.tex}\iftrue
+
+\begin{em}\iffalse\end{em}
+\end{feeler}
+"""
+        preamble = r"""
+\makeatletter
+\newcount\FeelerEffects\newcount\BlockStarts\newcount\FillCalls
+\newcount\PassageEffects\newcount\ExplanationEffects\newcount\TranslationEffects
+\pretocmd\ulsbs@blockstart{\global\advance\BlockStarts1 }{}{\errmessage{Block patch failed}}
+\pretocmd\ulEndSongVfill{\global\advance\FillCalls1 }{}{\errmessage{Fill patch failed}}
+{\small\em\xdef\ExpectedSize{\f@size}\xdef\ExpectedShape{\f@shape}}
+\newcommand\FeelerEffect{\global\advance\FeelerEffects1
+  \ifdim\f@size pt=\ExpectedSize pt\else\errmessage{Feeler small size lost}\fi
+  \edef\ActualShape{\f@shape}\ifx\ActualShape\ExpectedShape\else\errmessage{Feeler emphasis lost}\fi}
+\ulSongColumns{1}\ulSongPosition{0}
+\makeatother
+"""
+        body = r"""
+\makeatletter
+\edef\SavedSize{\f@size}\edef\SavedShape{\f@shape}
+\begin{ulSongs}{}\beginsong{Feeler source}[id={feeler-source},key={C}]
+\beginverse*
+\[<* E>C]Beforeanchor.
+\endverse
+\ulEndSongVfill{false}\global\FillCalls=0
+\setbox0=\vbox{HIDDEN-SOURCE}
+\typeout{HIDDEN-DIMS:\the\wd0/\the\ht0/\the\dp0}
+\typeout{HIDDEN-EFFECTS:\the\FeelerEffects/\the\BlockStarts/\the\FillCalls}
+\ExplSyntaxOn
+\bool_if:NT \g__ulsbs_layout_fill_bool {\errmessage{Hidden feeler changed fill}}
+\ExplSyntaxOff
+\beginverse*
+\[<* E>G]Afteranchor.
+\endverse
+\global\BlockStarts=0 \global\FillCalls=0
+\ulLocalShow{feeler}{true}
+\begin{feeler}
+\FeelerEffect Visibleinside.
+
+Second paragraph with \emph{nested emphasis}.
+\end{feeler}
+\typeout{VISIBLE-HOOKS:\the\BlockStarts/\the\FillCalls}
+\ExplSyntaxOn
+\bool_if:NTF \g__ulsbs_layout_fill_bool
+  {\typeout{VISIBLE-FILL:on}}{\typeout{VISIBLE-FILL:off}}
+\ExplSyntaxOff
+\begin{passage}{Later passage}
+\global\advance\PassageEffects1 Later passage body.
+\end{passage}
+\begin{explanation}[EN]
+\global\advance\ExplanationEffects1 Later explanation.
+\end{explanation}
+\begin{translation}[EN]
+\global\advance\TranslationEffects1 Later translation.
+\end{translation}
+\endsong
+\global\BlockStarts=0 \global\FillCalls=0
+\begin{intersong}
+\setbox0=\vbox{HIDDEN-SOURCE}
+\typeout{INTER-HIDDEN-DIMS:\the\wd0/\the\ht0/\the\dp0}
+\begin{feeler}\FeelerEffect Visibleoutside.\end{feeler}
+\end{intersong}
+\typeout{INTER-HOOKS:\the\BlockStarts/\the\FillCalls}
+\beginsong{Following}[key={C}]
+\beginverse*\[<* G>C]Followinganchor.\endverse\endsong\end{ulSongs}
+\typeout{FINAL-EFFECTS:\the\FeelerEffects/\the\PassageEffects/\the\ExplanationEffects/\the\TranslationEffects}
+\edef\AfterSize{\f@size}\edef\AfterShape{\f@shape}
+\ifx\SavedSize\AfterSize\else\errmessage{Feeler size leaked}\fi
+\ifx\SavedShape\AfterShape\else\errmessage{Feeler emphasis leaked}\fi
+\typeout{RESTORED-MUSIC:\ifulShowChords on\else off\fi/\ifulShowNotes on\else off\fi/\ifulShowBeats on\else off\fi/\ifulShowMeasures on\else off\fi/\ifulShowLilypond on\else off\fi/\ifulShowAltChords on\else off\fi}
+"""
+        anchors = []
+        for multikey in (False, True):
+            for mode in ("local-off", "book-off", "control"):
+                policy = r"\ulShowFeeler{false}" if mode == "book-off" else ""
+                # Each hidden occurrence has its own request scope, including
+                # the intersong occurrence after a visible in-song restoration.
+                hidden_source = ("" if mode == "control" else
+                                 r"\ulLocalShow{feeler}{false}" + hidden)
+                content = body.replace("HIDDEN-SOURCE", hidden_source)
+                source = (rf"\def\ulPdfTranspositionLayers{{{'true' if multikey else 'false'}}}"
+                          + document(content, preamble + policy))
+                with self.subTest(multikey=multikey, mode=mode):
+                    output = self.compile_source(source, label=f"feeler-{multikey}-{mode}", passes=3)
+                    for marker in ("HIDDEN-DIMS:0.0pt/0.0pt/0.0pt",
+                                   "INTER-HIDDEN-DIMS:0.0pt/0.0pt/0.0pt", "HIDDEN-EFFECTS:0/0/0"):
+                        self.assertIn(marker, output)
+                    visible = int(mode != "book-off")
+                    self.assertIn(f"VISIBLE-HOOKS:{visible}/{visible}", output)
+                    self.assertIn(f"INTER-HOOKS:{visible}/{visible}", output)
+                    self.assertIn(f"VISIBLE-FILL:{'on' if visible else 'off'}", output)
+                    self.assertIn(f"FINAL-EFFECTS:{2 * visible}/1/1/1", output)
+                    self.assertIn("RESTORED-MUSIC:on/on/on/on/on/on", output)
+                    words = {text: box for page in self.positioned_words() for text, box in page}
+                    anchors.append([words[key] for key in ("Beforeanchor.", "Afteranchor.")])
+                    text = self.pdf_text()
+                    for marker in ("Visibleinside.", "Visibleoutside."):
+                        self.assertEqual(text.count(marker), visible)
+                    for marker in ("Later passage body.", "Later explanation.", "Later translation."):
+                        self.assertEqual(text.count(marker), 1)
+        self.assertTrue(all(value == anchors[0] for value in anchors[1:]))
+
+    def test_hidden_musiccomments_are_opaque_empty_and_preserve_open_verse(self):
+        hidden = r"""
+\musicnote{\global\advance\CommentEffects100\input{must-not-be-read.tex}\iftrue}
+\musicnoteforprev{\global\advance\CommentEffects100\iffalse}
+\musicnotefornext{\ulLocalShow{musiccomments}{true}\iftrue}*
+\musicnotefornext{\input{must-not-be-read.tex}\iffalse}
+\musicnotemiddle{\global\advance\CommentEffects100\iftrue}
+"""
+        preamble = r"""
+\newcount\CommentEffects\newcount\DisplayEffects\newcount\GlueEffects\newcount\FillEffects
+\makeatletter
+\pretocmd\textnote{\global\advance\DisplayEffects1 }{}{\errmessage{Note patch failed}}
+\pretocmd\attachednote{\global\advance\DisplayEffects1 }{}{\errmessage{Attached patch failed}}
+\pretocmd\glueverses{\global\advance\GlueEffects1 }{}{\errmessage{Glue patch failed}}
+\pretocmd\ulEndSongVfill{\global\advance\FillEffects1 }{}{\errmessage{Fill patch failed}}
+\makeatother
+\ulSongColumns{1}\ulSongPosition{0}
+"""
+        body = r"""
+\begin{ulSongs}{}\beginsong{Hidden comments}[id={hidden-comments},key={C}]
+\beginverse*
+\[<* E>C]Beforeanchor.
+\global\DisplayEffects=0 \global\GlueEffects=0 \global\FillEffects=0
+\setbox0=\vbox{HIDDEN-COMMENTS}
+\typeout{HIDDEN-DIMS:\the\wd0/\the\ht0/\the\dp0}
+HIDDEN-COMMENTS
+\typeout{HIDDEN-HOOKS:\the\CommentEffects/\the\DisplayEffects/\the\GlueEffects/\the\FillEffects}
+\[<* G>G]Afteranchor.
+\endverse
+HIDDEN-COMMENTS
+\endsong
+\beginsong{Following}[id={following-comments},key={C}]
+\beginverse*Followinganchor.\endverse\endsong\end{ulSongs}
+"""
+        anchors = []
+        for multikey in (False, True):
+            for mode in ("local-off", "book-off", "control"):
+                policy = (r"\ulShowMusicComments{false}\ulLocalShow{musiccomments}{true}"
+                          if mode == "book-off" else r"\ulLocalShow{musiccomments}{false}")
+                source = (rf"\def\ulPdfTranspositionLayers{{{'true' if multikey else 'false'}}}"
+                          + document(body.replace("HIDDEN-COMMENTS", "" if mode == "control" else hidden),
+                                     preamble + policy))
+                with self.subTest(multikey=multikey, mode=mode):
+                    output = self.compile_source(source, label=f"comments-{multikey}-{mode}", passes=3)
+                    self.assertIn("HIDDEN-DIMS:0.0pt/0.0pt/0.0pt", output)
+                    self.assertIn("HIDDEN-HOOKS:0/0/0/0", output)
+                    words = {text: box for page in self.positioned_words() for text, box in page}
+                    anchors.append([words[key] for key in ("Beforeanchor.", "Afteranchor.",
+                                                           "Followinganchor.")])
+        self.assertTrue(all(value == anchors[0] for value in anchors[1:]))
+
+    def test_visible_musiccomments_match_text_adapters_once_with_chords_off(self):
+        # The text adapters are the spacing/attachment reference, including the
+        # trailing star. Chord/pitch/score suppression must not hide musical prose.
+        body = r"""
+\makeatletter
+\edef\SavedSize{\f@size}\edef\SavedColor{\current@color}
+\begin{ulSongs}{}\beginsong{Visible comments}[id={visible-comments}]
+\musicnotefornext{\CommentEffect Firstcomment.}*
+\beginverse*
+Beforeanchor.
+\musicnote{\CommentEffect Wrappedcomment with enough prose to wrap naturally across the narrow song width without re-evaluating its source.}
+Afteranchor.
+\endverse
+\musicnoteforprev{\CommentEffect Previouscomment.}
+\musicnotefornext{\CommentEffect Nextcomment.}
+\beginverse*Secondanchor.\endverse
+\musicnotemiddle{\CommentEffect Middlecomment.}
+\endsong
+\begin{intersong}\musicnote{\CommentEffect Outsidecomment.}\end{intersong}
+\beginsong{Following}\beginverse*Followinganchor.\endverse\endsong\end{ulSongs}
+\edef\AfterSize{\f@size}\edef\AfterColor{\current@color}
+\ifx\SavedSize\AfterSize\else\errmessage{Comment size leaked}\fi
+\ifx\SavedColor\AfterColor\else\errmessage{Comment color leaked}\fi
+\typeout{VISIBLE-EFFECTS:\the\CommentEffects}
+"""
+        preamble = r"""
+\ulShowChords{false}\ulShowNotes{false}\ulShowLilypond{false}
+\ulSongColumns{1}\ulSongPosition{0}\setlength\textwidth{190pt}
+\makeatletter
+{\ulNoteFont\xdef\ExpectedSize{\f@size}}
+{\color{ulChordColor}\xdef\ExpectedColor{\current@color}}
+\newcount\CommentEffects
+\newcommand\CommentEffect{\global\advance\CommentEffects1
+  \ifdim\f@size pt=\ExpectedSize pt\else\errmessage{Wrong comment size}\fi
+  \edef\ActualColor{\current@color}
+  \ifx\ActualColor\ExpectedColor\else\errmessage{Wrong comment color}\fi}
+\makeatother
+"""
+        positions = []
+        for mode in ("comments", "text-adapters"):
+            content = body
+            if mode == "text-adapters":
+                for suffix in ("fornext", "forprev", "middle", ""):
+                    content = content.replace(r"\musicnote" + suffix + "{",
+                                              r"\textnote" + suffix + r"{\color{ulChordColor}")
+            output = self.compile_source(document(content, preamble), label=mode, passes=2)
+            self.assertEqual(re.findall(r"VISIBLE-EFFECTS:(\d+)", output), ["6", "6"])
+            positions.append(self.positioned_words())
+            text = self.pdf_text()
+            for marker in ("Firstcomment.", "Wrappedcomment", "Previouscomment.", "Nextcomment.",
+                           "Middlecomment.", "Outsidecomment.", "Followinganchor."):
+                self.assertEqual(text.count(marker), 1)
+        self.assertEqual(*positions)
 
     def test_force_break_and_page_clear_preserve_song_order(self):
         self.compile_source(document(r"""
@@ -352,9 +956,8 @@ Second song line.
         for edition in ("chorded", "lyric"):
             variant = source
             if edition == "lyric":
-                variant = r"\def\ulSongbookType{lyric}" + "\n" + variant.replace(
-                    r"\begin{document}", r"\input{ulsbs-internal-lyricbook-postsetup.tex}"
-                    + "\n" + r"\begin{document}")
+                variant = r"\def\ulBuildVariant{lyric}" + "\n" + source.replace(
+                    r"\documentclass[", r"\documentclass[variants={default,lyric},")
             with self.subTest(edition=edition):
                 output = self.compile_source(variant, label=edition, passes=2,
                     files={"suppressed-include.tex": included.encode()})
@@ -386,9 +989,8 @@ Second song line.
 """
         for edition in ("chorded", "lyric"):
             preamble = r"\newcount\InterEffects\def\InterEffect{\global\advance\InterEffects1 }"
-            if edition == "lyric":
-                preamble += r"\input{ulsbs-internal-lyricbook-postsetup.tex}"
-            source = (r"\def\ulSongbookType{" + edition + "}\n" + document(body, preamble))
+            source = document(body, preamble,
+                              variant="lyric" if edition == "lyric" else "default")
             output = self.compile_source(source, label=edition)
             self.assertEqual(re.findall(r"INTER-EFFECTS=(\d+)", output), ["4"])
             words = {text: box for page in self.positioned_words() for text, box in page}
@@ -422,12 +1024,10 @@ Second song line.
         for mode in ("chorded", "lyric", "two-column", "hidden-intersong"):
             preamble = (r"\newcount\InterEffects\def\InterEffect{\global\advance\InterEffects1 }"
                         r"\setlength\textheight{300pt}")
-            if mode == "lyric":
-                preamble += r"\input{ulsbs-internal-lyricbook-postsetup.tex}"
             if mode == "two-column":
                 preamble += r"\ulSongColumns{2}"
-            edition = "lyric" if mode == "lyric" else "chorded"
-            source = (r"\def\ulSongbookType{" + edition + "}\n" + document(body, preamble))
+            source = document(body, preamble,
+                              variant="lyric" if mode == "lyric" else "default")
             if mode == "two-column":
                 source = source.replace("\\vfill\n\\begin{intersong}",
                                         "\\vfil\\vfill\\vfill\n\\begin{intersong}")
@@ -574,7 +1174,7 @@ LINES
 \end{ulSongs}
 \typeout{EMPTY-EFFECTS=\the\EmptyEffects}
 """.replace("LINES", lines),
-            r"\newcount\EmptyEffects\def\EmptyEffect{\global\advance\EmptyEffects1 }")
+            r"\ulVerseBaseline{\fpeval{\ulVerseSpacingScale{baseline}{natural}+10*65536/(\number\fontcharht\font`A)}}{\ulVerseSpacingScale{baseline}{stretch}}{\ulVerseSpacingScale{baseline}{shrink}}\newcount\EmptyEffects\def\EmptyEffect{\global\advance\EmptyEffects1 }")
         source = source.replace("[oneside,openany,", "[twoside,openany,")
         for position in (1, 2, 3):
             with self.subTest(position=position):
@@ -661,31 +1261,6 @@ LINES
         self.assertIn("Single column afterwards", text)
         self.assertNotIn("Overfull \\vbox", output)
 
-    def test_layout_does_not_call_vendor_layout_or_block_helpers(self):
-        poison = r"""
-\makeatletter
-\def\SB@stype{\errmessage{VENDOR LAYOUT CALLED}}
-\def\SB@breakpoint#1{\errmessage{VENDOR BREAK CALLED}}
-\def\SB@boxup#1{\errmessage{VENDOR NOTE CALLED}}
-\def\SB@chordsoff{\errmessage{VENDOR CHORD TOGGLE CALLED}}
-\makeatother
-"""
-        self.compile_source(document(r"""
-\begin{ulSongs}{}
-\beginsong{Owned layout}
-\beginverse
-Owned stanza.
-\endverse
-\begin{translation}[EN]
-Owned translation.
-\end{translation}
-\begin{explanation}
-Owned explanation.
-\end{explanation}
-\endsong
-\end{ulSongs}
-""", poison))
-
     def test_song_position_arguments_are_validated(self):
         self.compile_source(document("", r"\ulSongPosition{4}"),
                             failure="be 0, 1, 2 or 3")
@@ -701,7 +1276,7 @@ Lyric third line.
 \endverse
 \endsong
 \end{ulSongs}
-""", r"\input{ulsbs-internal-lyricbook-postsetup.tex}")
+""", variant="lyric")
         self.compile_source(source)
         bbox = subprocess.run(["pdftotext", "-bbox", str(self.book / "book.pdf"), "-"],
                               check=True, capture_output=True, text=True).stdout

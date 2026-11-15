@@ -15,15 +15,13 @@ from typing import List
 
 from .config import Config
 from .constants import (
-    BASSCLEF_FNAMEPART,
-    CHARANGO_FNAMEPART,
-    LYRICSONLY_FNAMEPART,
     MULTIKEY_FNAMEPART,
     RESULT_JSON_SUBDIRNAME,
     RESULT_MULTIKEY_SUBDIRNAME,
     TEMP_DIRNAME,
 )
-from .util import read_text, regex_documentclass_ulsbs_songbook
+from .util import read_text
+from .variants import VARIANTS, available_variants, read_documentclass, validate_variant_names
 
 
 @dataclass(frozen=True)
@@ -35,57 +33,6 @@ class Job:
     variant: str
     compile_dir: Path
     multikey: bool = False
-
-
-def variant_possible_lyrics(doc_tex_abs: Path) -> bool:
-    """Return True if doc uses ulsbs-songbook class (lyrics variant ok)."""
-    text = read_text(doc_tex_abs)
-
-    # Use shared matcher for \\documentclass[...]{ulsbs-songbook*}
-    docclass_re = regex_documentclass_ulsbs_songbook()
-    return docclass_re.search(text) is not None
-
-
-def _extra_variant_enabled(doc_tex_abs: Path, target: str) -> bool:
-    """Return True if the given extra variant is enabled via ULSBS-EXTRA-VARIANTS.
-
-    Examples of supported syntax (whitespace/comments flexible):
-
-        % ULSBS-EXTRA-VARIANTS: bassclef % comment
-        %%%ULSBS-EXTRA-VARIANTS:bassclef,somevariant % comment
-        % ... ULSBS-EXTRA-VARIANTS: bassclef, somevariant % comment
-    """
-    text = read_text(doc_tex_abs)
-
-    # Use shared matcher for \\documentclass[...]{ulsbs-songbook*}
-    docclass_re = regex_documentclass_ulsbs_songbook()
-    if docclass_re.search(text) is None:
-        return False
-
-    pattern = re.compile(r"ULSBS-EXTRA-VARIANTS\s*:(?P<variants>[^%]*)")
-
-    for line in text.splitlines():
-        m = pattern.search(line)
-        if not m:
-            continue
-        raw = m.group("variants")
-        for item in raw.split(","):
-            name = item.strip().lower()
-            if not name:
-                continue
-            if name == target:
-                return True
-    return False
-
-
-def variant_possible_charango(doc_tex_abs: Path) -> bool:
-    """Detect marker enabling the charango variant."""
-    return _extra_variant_enabled(doc_tex_abs, "charango")
-
-
-def variant_possible_bassclef(doc_tex_abs: Path) -> bool:
-    """Detect marker enabling the bass-clef variant."""
-    return _extra_variant_enabled(doc_tex_abs, "bassclef")
 
 
 def build_variant_basename(original_base: str, insert: str) -> str:
@@ -103,12 +50,7 @@ def build_job_basename(job: Job) -> str:
     Variant tokens retain their position before the paper suffix; ``_MULTIKEY``
     follows that suffix so the ordinary stem remains the package's identity.
     """
-    variant_marker = {
-        "default": "",
-        "lyrics": LYRICSONLY_FNAMEPART,
-        "charango": CHARANGO_FNAMEPART,
-        "bassclef": BASSCLEF_FNAMEPART,
-    }[job.variant]
+    variant_marker = VARIANTS[job.variant].filename_marker
     basename = build_variant_basename(job.doc_stem, variant_marker)
     return basename + (MULTIKEY_FNAMEPART if job.multikey else "")
 
@@ -121,21 +63,31 @@ def build_job_queue(cfg: Config) -> List[Job]:
     """
     project_root = cfg.runtime.project_paths.project_root
     jobs: List[Job] = []
+    requested = None if cfg.variants == "all" else validate_variant_names(
+        ",".join(cfg.variants)
+    )
+    matched: set[str] = set()
     for doc in cfg.songbooks:
         base = doc.stem
         first_job = len(jobs)
-        jobs.append(Job(doc, base, "default", project_root / TEMP_DIRNAME / base / "default"))
-        if cfg.lyricbooks and variant_possible_lyrics(doc):
-            jobs.append(Job(doc, base, "lyrics", project_root / TEMP_DIRNAME / base / "lyrics"))
-        if cfg.extrainstrumentbooks and variant_possible_charango(doc):
-            jobs.append(
-                Job(doc, base, "charango", project_root / TEMP_DIRNAME / base / "charango")
-            )
-        if cfg.extrainstrumentbooks and variant_possible_bassclef(doc):
-            jobs.append(
-                Job(doc, base, "bassclef", project_root / TEMP_DIRNAME / base / "bassclef")
-            )
-        if cfg.multikey_books:
+        try:
+            text = read_text(doc)
+            available = available_variants(text)
+            declaration = read_documentclass(text)
+        except ValueError as error:
+            raise ValueError(f"{doc}: {error}") from error
+        selected = [name for name in available if requested is None or name in requested]
+        if requested is not None and len(cfg.songbooks) == 1:
+            unavailable = set(requested) - set(available)
+            if unavailable:
+                raise ValueError(f"{doc}: unavailable variants: {', '.join(sorted(unavailable))}")
+        # Declaration order is authoritative except that selected default is first.
+        selected.sort(key=lambda name: name != "default")
+        matched.update(selected)
+        jobs.extend(Job(doc, base, name, project_root / TEMP_DIRNAME / base / name)
+                    for name in selected)
+        songbook = declaration is not None and declaration.name.startswith("ulsbs-songbook")
+        if cfg.multikey_books and songbook:
             standard_jobs = jobs[first_job:]
             jobs.extend(
                 replace(
@@ -144,8 +96,10 @@ def build_job_queue(cfg: Config) -> List[Job]:
                     compile_dir=job.compile_dir.with_name(f"{job.variant}-multikey"),
                 )
                 for job in standard_jobs
-                if job.variant != "lyrics"
+                if "multikey" in VARIANTS[job.variant].editions
             )
+    if requested is not None and (unmatched := set(requested) - matched):
+        raise ValueError(f"Requested variants available in none of the selected books: {', '.join(sorted(unmatched))}")
     # Distinct job locks do not protect a shared publication destination.
     outputs: dict[Path, Job] = {}
     for job in jobs:

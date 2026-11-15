@@ -19,6 +19,10 @@ import pikepdf
 
 from ulsbs import lilypond_score_cache as cache
 from ulsbs import lilypond_scores as scores
+from ulsbs import pipeline, variants
+from ulsbs.config import Config
+from ulsbs.engine_assets import EngineAssets
+from ulsbs.jobs import Job
 
 
 class ScoreCacheTests(unittest.TestCase):
@@ -447,6 +451,77 @@ class ScoreCacheTests(unittest.TestCase):
         bassclef = self.fingerprint()
         self.assertIsNotNone(bassclef)
         self.assertNotEqual(before, bassclef)
+
+    def test_prepared_recipe_assets_key_cold_and_warm_cache_by_actual_bytes(self):
+        doc = self.root / "book.tex"
+        doc.write_text(r"\documentclass[variants={default,lyric,charango,bassclef}]{ulsbs-songbook}")
+        cfg = replace(Config(), midifiles_allow_for_optional_variants=True,
+                      audiofiles_allow_for_optional_variants=True,
+                      runtime=SimpleNamespace(in_container=False))
+        keys = {}
+
+        def prepare(name, variant, *, multikey=False, config=cfg):
+            job = Job(doc, doc.stem, variant, self.root / name, multikey=multikey)
+            pipeline.prepare_compile_dir(Mock(), EngineAssets(), config, job)
+            pipeline.make_variant_tex(job, config)
+            directory = job.compile_dir / "ulsbs-assets/ly"
+            self.assertTrue(all(trusted for _, _, trusted in cache.audit_assets([directory])))
+            source = job.compile_dir / "snippet.ly"
+            source.write_text('\\include "ulsbs-include-head.ly"\n'
+                              'theMelody = { c4 }\n\\include "ulsbs-include-tail.ly"\n')
+            fingerprint = self.fingerprint(source=source, cwd=job.compile_dir,
+                                           include_args=["-I", str(directory)])
+            self.assertIsNotNone(fingerprint, name)
+            keys[name] = cache.candidate_key(
+                fingerprint, signed=2, spelled=("c", "d"), original_dimensions=(100, 50),
+                original_boundaries=[0, 0, 100, 50], extra={"mode": "major"})
+            self.assertIsNotNone(keys[name])
+
+        # No LilyPond/TeX probes: use the fixture's fixed toolchain fingerprint.
+        with patch.object(cache.subprocess, "run", side_effect=AssertionError("no host tools")):
+            for variant in ("default", "lyric", "charango", "bassclef"):
+                prepare(variant, variant)
+                if variant != "lyric":
+                    prepare(variant + "-multikey", variant, multikey=True)
+            prepare("charango-no-media", "charango", config=replace(
+                cfg, midifiles=False, audiofiles=False))
+            registry = {**variants.VARIANTS,
+                        "default": replace(variants.VARIANTS["default"], score_recipe="charango")}
+            with patch.object(variants, "VARIANTS", registry):
+                prepare("remapped", "default")
+                prepare("remapped-multikey", "default", multikey=True)
+
+        self.assertEqual(keys["default"], keys["lyric"], "shared recipe and media bytes")
+        self.assertEqual(keys["remapped"], keys["charango"], "recipe reference, not identity")
+        self.assertEqual(keys["remapped-multikey"], keys["charango-multikey"])
+        self.assertEqual(keys["charango-no-media"], keys["charango-multikey"])
+        self.assertEqual(len({keys[name] for name in ("default", "charango", "bassclef")}), 3)
+        for variant in ("default", "charango", "bassclef"):
+            self.assertNotEqual(keys[variant], keys[variant + "-multikey"], "MIDI include bytes")
+        self.assertEqual(len(set(keys.values())), 6, "three recipes with and without media")
+
+        published = {}
+        for warm in (False, True):
+            misses = 0
+            for name, key in keys.items():
+                with self.subTest(warm=warm, name=name):
+                    destination = self.root / ("warm" if warm else "cold") / name / "t01"
+                    restored = cache.restore(key, destination, env=self.env)
+                    if key not in published:
+                        self.assertIsNone(restored, "different prepared bytes must miss")
+                        misses += 1
+                        self.artifacts(destination, log=f"recipe artifact {name}\n")
+                        self.assertTrue(cache.publish(
+                            key, destination, success=True, original_dimensions=(100, 50),
+                            minimum_scale=scores.LILYPOND_SCORE_MIN_SCALE, env=self.env,
+                            metadata={"prepared": name}))
+                        published[key] = name
+                        restored = cache.restore(key, destination, env=self.env)
+                    self.assertIsNotNone(restored)
+                    self.assertEqual(restored["metadata"]["prepared"], published[key])
+                    self.assertEqual(destination.with_suffix(".log").read_text(),
+                                     f"recipe artifact {published[key]}\n")
+            self.assertEqual(misses, 0 if warm else 6)
 
     def test_audited_host_converted_tail_is_eligible_but_other_changes_are_not(self):
         # Reconstruct the audited convert-ly output without running a process.

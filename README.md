@@ -234,16 +234,16 @@ The only setting needed to select this book is:
 songbooks = ["my-songbook_A5.tex"]
 ```
 
-Other settings retain their defaults. Normal builds enable lyrics-only variants,
-printouts, JSON, cover images, MIDI/audio where available, and deployment to
-`deploy/`. Multikey editions are off by default.
+Other settings retain their defaults. Normal builds select all variants declared
+by each book; omission of `variants={...}` means default only, not an implicit
+lyrics-only companion. Printouts, JSON, cover images, MIDI/audio where available,
+and deployment to `deploy/` are enabled. Multikey editions are off by default.
 
 For a normal build with only the main PDF, use:
 
 ```toml
 songbooks = ["my-songbook_A5.tex"]
-lyricbooks = false
-extrainstrumentbooks = false
+variants = ["default"]
 create-printouts = false
 coverimage = false
 json = false
@@ -266,6 +266,7 @@ Run these commands from your songbook project root:
 | Build one document | `./ulsbs/ulsbs-compile my-songbook_A5.tex` |
 | Use a configured profile | `./ulsbs/ulsbs-compile --profile dev` |
 | Quick main-PDF build | `./ulsbs/ulsbs-compile --quick my-songbook_A5.tex` |
+| Select declared variants | `./ulsbs/ulsbs-compile --variants default,lyric` |
 | Omit multikey companions | `./ulsbs/ulsbs-compile --no-multikey my-songbook_A5.tex` |
 | Compile on the host | `./ulsbs/ulsbs-compile --no-container` |
 | Open a compiler-container shell | `./ulsbs/ulsbs-compile --shell` |
@@ -351,44 +352,67 @@ not an all-or-nothing snapshot and can still contain older or partial files.
 
 ## Variants and editions
 
-A **variant** is a version of a source book: default, lyrics-only, or an
-instrument-specific version. They are peers, generated from the same source.
+A **variant** is a named preset of a source book: `default`, `lyric`, `charango`,
+or `bassclef`. They are peers, generated from the same source.
 An **edition** determines how that variant is published: an ordinary PDF or an
 optional multikey package with reader-selectable keys.
 
+Declare availability literally in the main document, including with a derived
+`ulsbs-songbook...` class:
+
+```tex
+\documentclass[
+  variants={default,lyric,charango,bassclef},
+  maintitle={My Songbook}
+]{ulsbs-songbook}
+```
+
+Omission means `{default}`. Include `default` exactly once; empty lists,
+duplicates, unknown names, repeated declarations and computed values are errors.
+Do not hide availability in a macro, input file or custom class.
+
+Normal selection is `all` declared variants. Set `variants = "all"` or
+`variants = ["default", "lyric"]` in TOML; `--variants all`,
+`--variants default,lyric` or `--variants bassclef` overrides configuration and
+the selected profile. Explicit lists intersect each book's availability and never
+add default. Selected default comes first, then the other variants in declaration
+order, not selector order. For one book, an unavailable request is an error.
+For a collection, selections/skips are reported per book; a requested name
+available in none of the selected books is an error. Unknown names always fail.
+
 | Variant | Ordinary edition | Multikey edition |
 |---|---|---|
-| Default | Always generated for a selected source | Available when enabled |
-| Lyrics-only | Enabled by default | Not currently generated |
-| Instrument (charango or bass clef) | Generated when selected and enabled | Available when enabled |
+| `default` | When selected | Available when enabled |
+| `lyric` | When declared and selected | Not supported |
+| `charango`, `bassclef` | When declared and selected | Available when enabled |
 
-The edition axis is separate from the variant, but the compiler currently
-generates multikey editions only for default and instrument variants.
-Lyrics-only variants currently have ordinary editions only.
+Non-songbook documents can still be compiled as ordinary default jobs; they do
+not gain songbook variants or multikey companions.
 
 ### Default variant
 
-Every selected source produces its default variant's ordinary PDF. Other
-variants and multikey editions are additional outputs; they do not replace it.
-`--quick` builds only the default variant's ordinary edition.
+`default` preserves the source class's baseline presentation; it is not a musical
+book type. Direct compilation needs no variant selector. `--quick` builds only
+its ordinary edition. It rejects conflicting explicit selectors, including CLI
+`--variants all`; use `--variants default` or omit the CLI selector. A configured
+`"all"` permits quick mode, but a configured non-default subset conflicts.
 
 ### Lyrics-only variant
 
-Normal builds enable an additional lyrics-only variant. Use `lyricbooks = false`
-or `--no-lyric` to omit it. This reuses the same song sources; no separate copy
-of each song is needed.
+Declare and select `lyric` to reuse the same songs without inline chords,
+pitches, beats, full scores, alternate chords, key badges or music comments by
+default. Measures and independent prose remain available. Author preamble
+settings can override preset permissions; local song switches cannot bypass them.
+Its output filename uses `_LYRICS-ONLY`, for example
+`my-songbook_LYRICS-ONLY_A5.pdf`.
 
 ### Instrument variants
 
-Enable supported instrument variants with a comment in the main `.tex` file:
-
-```tex
-%% ULSBS-EXTRA-VARIANTS: bassclef, charango
-```
-
-Use `extrainstrumentbooks = false` or `--no-extrainstr` to omit them. These
-variants apply the bundled instrument setups to supported notation; they do not
-automatically arrange arbitrary music for another instrument.
+Declare and select `charango` or `bassclef` to apply the bundled presets and
+score recipes. Charango uses its tuning/tab setup; bass clef hides inline chords,
+pitches and beats but shows bass-clef scores without tablature. Score `ChordNames`
+remain independent of inline chord visibility, including in bass clef. These
+recipes do not automatically arrange arbitrary music for another instrument.
 
 Each selected instrument variant also gets a multikey edition when
 `multikey-books` is enabled.
@@ -608,7 +632,7 @@ songbooks = ["my-songbook_A5.tex"]
 
 [profiles.dev]
 deploy = false
-lyricbooks = false
+variants = ["default"]
 create-printouts = false
 coverimage = false
 audiofiles = false
@@ -620,7 +644,7 @@ settings unless they override them; `inherit-from` selects another parent
 profile. Arrays replace their parent's value unless listed in `merge-keys`.
 
 Common settings include `deploy`, `deploy-dir`, `create-printouts`, `coverimage`,
-`json`, `midifiles`, `audiofiles`, `lyricbooks`, and `multikey-books`.
+`json`, `midifiles`, `audiofiles`, `variants`, and `multikey-books`.
 The `common-deploy-icons`, `common-deploy-social-images`, `common-deploy-metadata`,
 and `common-deploy-other` lists add project files to deployment.
 
@@ -706,12 +730,15 @@ and converted notation before committing. See
 
 ### `ulsbs-migrate-syntax-v2`
 
-Upgrade configuration, book-assembly, font and metadata-accessor names to the
-current `ulCamelCase` API. Short lowercase song-content commands remain short.
+The v2 command combines the naming upgrade with supported named-variant
+and visibility migration. It upgrades
+configuration, book-assembly, font and metadata-accessor names to the current
+`ulCamelCase` API. Short lowercase song-content commands remain short.
 For example, `\ulTOC` becomes `\ulToc`, `\ultextnote{...}` becomes
 `\attachednote{...}`, and `\showtagsfalse` becomes `\ulShowTags{false}`.
-Boolean setters take an explicit `true` or `false` argument, respect TeX scope,
-and preserve the previous defaults. No old runtime command aliases are provided.
+Boolean setters take an explicit `true` or `false` argument. Visibility setters
+configure preamble book policy; supported body uses become local requests.
+No old runtime command aliases are provided.
 Class option keys, remaining song metadata keys and public hook paths do not change.
 The inherited `sr=` field and three-braced song metadata form have been removed;
 v2 diagnoses them for review rather than converting scripture references into tags.
@@ -734,11 +761,48 @@ index-book and note-name/printer hooks, `\ulPreludeTextGood` and
 `\ulSongNumberDefaultHeight`) likewise diagnose in either spelling instead of
 being renamed to removed APIs.
 
+Verse spacing is now automatic: existing `\beginverse+` forms are still read,
+but `+` has no layout effect. New sources should use `\beginverse` (optionally
+starred or indented). Removed `\ulBaselineAdjustment` and `\ulVerseSep`
+settings require manual review; use the writing guide's
+[scalar verse settings](WRITING_SONGBOOKS.md#optional-spacing-and-bar-styling)
+rather than translating old dimensions mechanically.
+
 ```sh
 ./ulsbs/ulsbs-migrate-syntax-v2 --check content/ include/ my-songbook_A5.tex
 ./ulsbs/ulsbs-migrate-syntax-v2 --diff content/ include/ my-songbook_A5.tex
 ./ulsbs/ulsbs-migrate-syntax-v2 --write content/ include/ my-songbook_A5.tex
 ```
+
+Supported conversions are deliberately narrow: a single leading,
+standalone literal `ULSBS-EXTRA-VARIANTS` marker before the main class declaration becomes
+`variants={default,lyric,...}`. Historical `none` means no instruments, retaining
+the implicit lyric companion. No marker means no inferred companions: review
+availability manually for those existing books. Existing new declarations combined
+with a marker, and conflicting, repeated, nonleading or unknown markers require
+review. Direct body display setters with a safely recognized scope become
+`\ulLocalShow{feature}{true|false}`; supported literal body measure setters and
+balanced instrument-only pagination conditionals are also converted.
+
+Other type/capability conditionals, mutable identity, broad legacy `\chordsoff`,
+removed measure queries/preamble forms, delayed hooks, unrecognized execution
+contexts, and more complex conditional contents are diagnostic-only. Choose
+effective feature guards or immutable identity tests according to intent rather
+than applying a blind rename. Valid current preamble settings remain valid.
+
+Select compiler configs explicitly for diagnostics:
+
+```sh
+./ulsbs/ulsbs-migrate-syntax-v2 --check --config-file ulsbs-config.toml
+```
+
+`--config-file FILE` is repeatable and **diagnostic-only in every mode, including
+`--write`**: it never converts or writes selected configs. Manually replace
+`lyricbooks` / `extrainstrumentbooks` and their negative forms with `variants`
+after reviewing each book's literal availability and root/profile settings.
+Replace removed CLI flags `--no-lyric` / `--no-extrainstr` in known scripts
+manually. The migrator neither guesses a selector from old booleans nor discovers
+configs, follows book paths from them, or rewrites shell invocations.
 
 Convert a legacy tag-definition file explicitly, either alone or alongside
 source migration. `--tags-file FILE` requires one of `--check`, `--diff`, or
@@ -774,10 +838,12 @@ review diagnostics. `--diff`
 previews safe conversions; `--write` applies them. Both exit nonzero for review
 diagnostics or I/O errors. A file with any diagnostic is neither changed nor
 shown as a partial diff; safe files in the same batch may still be updated.
-Writes are file-atomic, not a directory transaction. Comments, verbatim-like
-regions, literal URLs and embedded LilyPond bodies are preserved. Computed names,
-unsafe boolean or chorus-boundary references and ambiguous tokenization need
-manual review, not blind search-and-replace.
+Diagnostics point to the original source. Files are updated individually, not
+as an all-or-nothing directory operation. Comments, literal regions, URLs and
+embedded LilyPond bodies are preserved. Computed names, delayed settings and
+ambiguous source constructs need manual review, not blind search-and-replace.
+Directory scans skip generated/VCS directories and engine checkouts. Choose
+explicit project source paths; symlinks and nonregular files are refused.
 
 The [writing guide](WRITING_SONGBOOKS.md) documents the resulting API;
 [architecture](ARCHITECTURE.md#syntax-migration) describes migration boundaries.
@@ -812,18 +878,10 @@ You do not need to open a GitHub issue to ask for help; email is welcome too.
 
 ## Developer documentation
 
-[Architecture](ARCHITECTURE.md) covers engine internals, PDF/viewer contracts,
-cache maintenance, and testing. Its [song engine reference](ARCHITECTURE.md#song-engine)
-maps module ownership, load order and lifecycle boundaries; the
-[annotation scanner contract](ARCHITECTURE.md#annotation-scanner-contract) describes
-token handling and once-only source effects. Public syntax and extension points
-remain in [Writing Songbooks](WRITING_SONGBOOKS.md).
-
-From the engine source directory, `./ulsbs-test`
-runs the supported containerized regression suite. Authors do not need to run
-that suite to compile their books.
-
-[MAINTAINERS.md](MAINTAINERS.md) documents release procedures.
+[Architecture](ARCHITECTURE.md) covers engine development and PDF/viewer
+integration. [MAINTAINERS.md](MAINTAINERS.md) documents release procedures.
+Neither is required to write or compile a songbook; public syntax and supported
+customization are in [Writing Songbooks](WRITING_SONGBOOKS.md).
 
 ## Acknowledgements
 

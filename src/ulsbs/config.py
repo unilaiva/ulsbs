@@ -20,6 +20,7 @@ from typing import Any, Dict, Iterable, Mapping, Tuple, Set
 from .constants import CONFIG_FILENAME, COVERIMAGE_HEIGHT, ASSUMED_OS_MEM_GB, ASSUMED_JOB_MEM_GB, DEPLOY_DIRNAME
 from .ui import UI
 from .util import SystemInfo, system_info
+from .variants import validate_variant_names
 
 
 # NOTE: We only import the type to avoid runtime dependency cycles
@@ -96,8 +97,7 @@ class Config:
     deploy_dir: Path = Path("deploy")
 
     # Features
-    extrainstrumentbooks: bool = True
-    lyricbooks: bool = True
+    variants: str | tuple[str, ...] = "all"
     create_printouts: bool = True
     coverimage: bool = True
     json: bool = True
@@ -113,7 +113,7 @@ class Config:
     multikey_layer_ui: str = "native"
     multikey_require_song_ids: bool = False
     multikey_min_chordname_scale: float = 0.85
-    # Opt-in; used only when producing non-lyrics multikey PDFs.
+    # Opt-in; used only when producing supported multikey PDFs.
     multikey_lilypond_scores: bool = False
 
     # Container resources (GiB)
@@ -598,8 +598,7 @@ _ALLOWED_FILE_KEYS: Set[str] = {
     "fast_audio_encode",
     "midifiles_allow_for_optional_variants",
     "audiofiles_allow_for_optional_variants",
-    "extrainstrumentbooks",
-    "lyricbooks",
+    "variants",
     "multikey_books",
     "multikey_max_pages_per_range",
     "multikey_target_max_range_bytes",
@@ -745,6 +744,23 @@ def build_config(
     raw = _load_toml(cfg_path)
     flat_raw, profiles_raw = _split_flat_and_profiles(raw)
 
+    # Validate selector declarations before inheritance or CLI overrides can hide
+    # malformed file settings. Array entries are single literal registered names.
+    for scope, data in [("flat config", flat_raw), *profiles_raw.items()]:
+        removed = {"lyricbooks", "extrainstrumentbooks", "no_lyricbooks", "no_extrainstrumentbooks"}
+        if removed.intersection(data):
+            raise ValueError(f"Unknown keys in {scope}: {sorted(removed.intersection(data))}")
+        if "variants" in data:
+            value = data["variants"]
+            if isinstance(value, str) and value == "all":
+                continue
+            if not isinstance(value, list) or not value or any(
+                not isinstance(name, str) or not name or name.strip() != name or "," in name
+                for name in value
+            ):
+                raise ValueError("variants must be 'all' or a nonempty array of literal variant names")
+            validate_variant_names(",".join(value))
+
     # Apply negations and validate keys scope-by-scope
     flat = _apply_negations(flat_raw)
     _ensure_known_keys("flat config", flat, _ALLOWED_FILE_KEYS)
@@ -791,6 +807,8 @@ def build_config(
 
     # Merge: defaults -> file (effective profile already includes flat and parents)
     file_over: Dict[str, Any] = dict(prof_eff)
+    if "variants" in file_over and file_over["variants"] != "all":
+        file_over["variants"] = validate_variant_names(",".join(file_over["variants"]))
 
     # Complex/structured settings that exist only in the config file
     if "modified_cover_png" in file_over:
@@ -878,10 +896,13 @@ def build_config(
             cli_over["midifiles_allow_for_optional_variants"] = True
         if getattr(args_ns, "audiofiles_allow_for_optional_variants", False):
             cli_over["audiofiles_allow_for_optional_variants"] = True
-        if getattr(args_ns, "no_extrainstr", False):
-            cli_over["extrainstrumentbooks"] = False
-        if getattr(args_ns, "no_lyric", False):
-            cli_over["lyricbooks"] = False
+        variants_cli = getattr(args_ns, "variants", None)
+        if variants_cli is not None:
+            if not isinstance(variants_cli, str):
+                raise ValueError("--variants must be 'all' or a comma-separated list")
+            cli_over["variants"] = (
+                "all" if variants_cli == "all" else validate_variant_names(variants_cli)
+            )
         if getattr(args_ns, "no_multikey", False):
             cli_over["multikey_books"] = False
         if getattr(args_ns, "require_song_ids", False):
@@ -1185,14 +1206,17 @@ def build_config(
 
     # Apply quick-mode derivations last
     if conf.quick:
+        if ("variants" in cli_over and cli_over["variants"] != ("default",)) or (
+            conf.variants not in ("all", ("default",))
+        ):
+            raise ValueError("--quick conflicts with explicit variants; select only default")
         conf = replace(
             conf,
             deploy=False,
             create_printouts=False,
             coverimage=False,
             clean_temp=False,
-            extrainstrumentbooks=False,
-            lyricbooks=False,
+            variants=("default",),
             multikey_books=False,
             midifiles=False,
             audiofiles=False,

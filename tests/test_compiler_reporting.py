@@ -115,6 +115,25 @@ class CompilerReportingTests(unittest.TestCase):
         self.assertEqual(worker.diagnostics[0].affected_count, 7)
         self.assertEqual(worker.diagnostics[0].occurrences, 1)
 
+    def test_lilypond_diagnostics_are_not_filtered_by_printed_variant_policy(self):
+        lily = self.log("lilypond.log", "score.ly:4:2: warning: barcheck failed\n")
+        missing = self.compile_dir / "missing-lilypond.log"
+        tex = self.log("final.log", "Overfull \\vbox (1.24992pt too high)\n")
+        for variant in ("default", "lyric", "charango", "bassclef"):
+            for allow_media in (False, True):
+                with self.subTest(variant=variant, allow_media=allow_media):
+                    job = replace(self.job, variant=variant)
+                    cfg = replace(self.cfg, midifiles_allow_for_optional_variants=allow_media,
+                                  audiofiles_allow_for_optional_variants=allow_media)
+                    worker = pipeline._JobUI(self.ui, job)
+                    worker.tool_logs[lily] = "LilyPond"
+                    worker.tool_logs[missing] = "LilyPond"
+                    self.assertEqual(pipeline.analyze_warnings(worker, cfg, job, lily, tex), 3)
+                    self.assertEqual({item.source for item in worker.diagnostics},
+                                     {"LilyPond", "Reporting", "TeX"})
+                    self.assertEqual([item.log_path for item in worker.diagnostics], [lily, missing, tex])
+                    self.assertIn("1.24992pt", worker.diagnostics[-1].message)
+
     def test_unfamiliar_warning_messages_are_counted_and_reported_with_log_paths(self):
         self.log("early.log", "LaTeX Warning: An earlier unfamiliar diagnostic.\n")
         tex = self.log("final.log", "LaTeX Warning: An unfamiliar future diagnostic.\n" * 2)

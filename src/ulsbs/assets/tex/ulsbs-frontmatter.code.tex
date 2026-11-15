@@ -6,7 +6,7 @@
 %
 % Load: ulsbs.sty, at the start of the front matter/song-content phase, after
 % book defaults, typography and the complete ulsbs-style.code.tex policy.
-% Requires: book-type switches, xparse, etoolbox, graphicx, pdfpages,
+% Requires: captured registry presentation policy, xparse, etoolbox, graphicx, pdfpages,
 % hyperref, microtype and the document class's chapter/contents machinery.
 % Image helpers (imagel/imagecc) are defined later, before document-time use.
 % State: inherits @ as a letter; no enclosing group or catcode changes. Allocates
@@ -201,7 +201,7 @@
 
 % Up to eight optional [filename] arguments: set variable cover icons in the
 % caller's scope, undefining omitted slots. ulCoverPage may replace/clear these
-% for generated lyric-only, charango and bass-clef book types.
+% according to the selected registered presentation policy.
 \NewDocumentCommand{\ulSetVariableCoverIcons}{o o o o o o o o}{%
   \IfValueTF{#1}{\def\ulsbs@covivari{#1}}{\let\ulsbs@covivari\undefined}%
   \IfValueTF{#2}{\def\ulsbs@covivarii{#2}}{\let\ulsbs@covivarii\undefined}%
@@ -213,6 +213,57 @@
   \IfValueTF{#8}{\def\ulsbs@covivarviii{#8}}{\let\ulsbs@covivarviii\undefined}%
 }
 
+\ExplSyntaxOn
+% #1: registry reference; #2--#6: label, icons, title, badge size and tint.
+% Keep author hooks as tokens, not expanded snapshots. Badge defaults delegate
+% here without overwriting a class's or author's public style hooks at preset time.
+\cs_new_protected:Npn \__ulsbs_presentation_define:nnnnnn #1#2#3#4#5#6
+  {
+    \cs_new:cpn {__ulsbs_presentation_#1_label:} {#2}
+    \cs_new_protected:cpn {__ulsbs_presentation_#1_icons:n} ##1 {#3}
+    \cs_new:cpn {__ulsbs_presentation_#1_title:} {#4}
+    \cs_new_protected:cpn {__ulsbs_presentation_#1_badgefont:} {#5}
+    \cs_new_protected:cpn {__ulsbs_presentation_#1_badgestyle:} {#6}
+  }
+\__ulsbs_presentation_define:nnnnnn {default}
+  {\ulBookDefaultVariantText} {} {\ulThisBookTitle} {\scriptsize} {}
+\__ulsbs_presentation_define:nnnnnn {lyric}
+  {\ulBookLyricVariantText}
+  {\IfBooleanTF{#1}{\ulSetVariableCoverIcons}
+    {\ulSetVariableCoverIcons[\ulLyricsOnlyTagIcon]}}
+  {\ulThisBookTitle\space(\ulBookLyricVariantText)}
+  {\tiny} {\color{gray}}
+\__ulsbs_presentation_define:nnnnnn {charango}
+  {\ulBookCharangoVariantText}
+  {\IfBooleanTF{#1}{\ulSetVariableCoverIcons}
+    {\ulSetVariableCoverIcons[\ulChordsTagIcon][\ulTrebleclefTagIcon][\ulCharangoTagIcon]}}
+  {\ulThisBookTitle\space(\ulBookCharangoVariantText)}
+  {\scriptsize} {}
+\__ulsbs_presentation_define:nnnnnn {bassclef}
+  {\ulBookBassclefVariantText}
+  {\IfBooleanTF{#1}{\ulSetVariableCoverIcons}
+    {\ulSetVariableCoverIcons[\ulBassclefTagIcon]}}
+  {\ulThisBookTitle\space(\ulBookBassclefVariantText)}
+  {\scriptsize} {}
+% Resolve the registry reference once. Missing policy implementations are an
+% installation/development error, never a silent fallback to another identity.
+\clist_map_inline:nn {label:,icons:n,title:,badgefont:,badgestyle:}
+  {
+    \cs_if_exist:cF {__ulsbs_presentation_\c__ulsbs_variant_presentation_tl _#1}
+      {\msg_fatal:nnn {ulsbs} {variant} {Missing~registered~presentation~policy}}
+  }
+\cs_new_eq:Nc \ulsbs@variantlabel
+  {__ulsbs_presentation_\c__ulsbs_variant_presentation_tl _label:}
+\cs_new_eq:Nc \ulsbs@variantcovericons
+  {__ulsbs_presentation_\c__ulsbs_variant_presentation_tl _icons:n}
+\cs_new_eq:Nc \ulsbs@variantpdftitle
+  {__ulsbs_presentation_\c__ulsbs_variant_presentation_tl _title:}
+\cs_new_eq:Nc \ulsbs@variantbadgefont
+  {__ulsbs_presentation_\c__ulsbs_variant_presentation_tl _badgefont:}
+\cs_new_eq:Nc \ulsbs@variantbadgestyle
+  {__ulsbs_presentation_\c__ulsbs_variant_presentation_tl _badgestyle:}
+\ExplSyntaxOff
+
 % Creates a cover page here. Ought to be the first command used after
 % \begin{document}.
 % There is one mandatory parameter, which is the cover PDF's file name without
@@ -222,26 +273,11 @@
 %
 % Optionally set icons in the document preamble with ulSetPermanentCoverIcons
 % and ulSetVariableCoverIcons. For generated variants, the unstarred command
-% replaces variable icons with type-specific ones; the star clears those slots.
-% Permanent slots are unchanged. The ordinary chorded type keeps variable icons.
+% replaces variable icons with policy-specific ones; the star clears those slots.
+% Permanent slots are unchanged. Default keeps authored variable icons, even starred.
+% Renew the public tag-icon macros or ulInsertCoverIcons to customize output.
 \NewDocumentCommand{\ulCoverPage}{s m}{%
-  \IfBooleanTF{#1}{% starred: clear variant icons for the active book type
-    \ifulLyricOnly
-      \ulSetVariableCoverIcons%
-    \else\ifulCharangoBook
-      \ulSetVariableCoverIcons%
-    \else\ifulBassclefBook
-      \ulSetVariableCoverIcons%
-    \fi\fi\fi
-  }{% unstarred: set variant icons for the active book type
-    \ifulLyricOnly
-      \ulSetVariableCoverIcons[\ulLyricsOnlyTagIcon]%
-    \else\ifulCharangoBook
-      \ulSetVariableCoverIcons[\ulChordsTagIcon][\ulTrebleclefTagIcon][\ulCharangoTagIcon]%
-    \else\ifulBassclefBook
-      \ulSetVariableCoverIcons[\ulBassclefTagIcon]%
-    \fi\fi\fi
-  }%
+  \ulsbs@variantcovericons{#1}%
   \IfBlankTF{#2}{%
     % fallback page
     \clearpage
@@ -292,19 +328,7 @@
       \par\vspace{0.618034ex}
       {\Large%
         \par\large\emph{%
-          \ifulLyricOnly%
-            \ulBookLyricVariantText%
-          \else%
-            \ifulCharangoBook%
-              \ulBookCharangoVariantText%
-            \else%
-              \ifulBassclefBook%
-                \ulBookBassclefVariantText%
-              \else%
-                \ulBookDefaultVariantText%
-              \fi%
-            \fi%
-          \fi}%
+          \ulsbs@variantlabel}%
         \ulVariantIconsTextSize%
       }
       \par\vspace{2ex}
@@ -409,6 +433,17 @@
   {\textcolor{#1}\ulChapterSymbol}%
 }
 
+% Select artwork at the source chapter, before marks and delayed TOC writes.
+% Keep the existing title/source capture behavior; only freeze visibility.
+\newcommand*\ulsbs@setshortchaptertitle[1]{%
+  \def\ulsbs@shorttitlefull{%
+    \texorpdfstring{% PDF indexes cannot contain images.
+      \ifulUppercaseShortChapterTitle\protect\MakeUppercase{\expandafter\ulsbs@shorttitletext}\else\ulsbs@shorttitletext\fi%
+      #1%
+    }{\protect\MakeUppercase{\expandafter\ulsbs@shorttitletext}}%
+  }%
+}
+
 % Define a main book chapter; index chapters instead use songchapter.
 %
 % Usage: \ulMainChapter*[short title]{long title}{chapter color}[image filename]
@@ -455,14 +490,11 @@
       \vfill%
     }%
   }%
-  \def\ulsbs@shorttitlefull{%
-    % Include the image in the chapter title string, if the image is given and
-    % the feature is turned on.
-    \texorpdfstring{% pdf indexes can't contain images (and \MakeUppercase must be protected)
-      \ifulUppercaseShortChapterTitle\protect\MakeUppercase{\expandafter\ulsbs@shorttitletext}\else\ulsbs@shorttitletext\fi%
-      \ifulShowImageInChapterName\ifdefined\ulsbs@smallchapterimage\hspace{1em}\ulsbs@smallchapterimage\fi\fi%
-    }{\protect\MakeUppercase{\expandafter\ulsbs@shorttitletext}}%
-  }
+  \ifulShowImageInChapterName
+    \ulsbs@setshortchaptertitle{\ifdefined\ulsbs@smallchapterimage\hspace{1em}\ulsbs@smallchapterimage\fi}%
+  \else
+    \ulsbs@setshortchaptertitle{}%
+  \fi
   \def\ulsbs@longtitlefull{%
     \ifulUppercaseLongChapterTitle\protect\MakeUppercase{\expandafter\ulsbs@longtitletext}\else\ulsbs@longtitletext\fi%
   }

@@ -1,0 +1,11 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Authoritative named-variant records, shared by Python and TeX.
+% The caller supplies \ulsbsVariantRecord before input; this file owns no state.
+% Each literal record is: identifier, preset, score recipe, filename marker,
+% presentation policy reference, supported editions. No expansion or inline comments.
+\ulsbsVariantRecord{default}{ulsbs-variant-default.code.tex}{default}{}{default}{ordinary,multikey}
+\ulsbsVariantRecord{lyric}{ulsbs-variant-lyric.code.tex}{default}{_LYRICS-ONLY}{lyric}{ordinary}
+\ulsbsVariantRecord{charango}{ulsbs-variant-charango.code.tex}{charango}{_CHARANGO}{charango}{ordinary,multikey}
+\ulsbsVariantRecord{bassclef}{ulsbs-variant-bassclef.code.tex}{bassclef}{_BASSCLEF}{bassclef}{ordinary,multikey}

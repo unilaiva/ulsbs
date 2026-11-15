@@ -78,7 +78,6 @@ from .util import (
     which,
     write_text,
     append_text,
-    regex_documentclass_ulsbs_songbook,
     current_time_human_readable,
     deduplicate_paths_preserve_order,
 )
@@ -595,49 +594,16 @@ def prepare_compile_dir(ui: UI, assets: EngineAssets, cfg: Config, job: Job) -> 
         write_text(midi_include, "% MIDI generation is disabled for this edition.\n")
 
 
-def make_variant_tex(job: Job, cfg: Config) -> Path:
-    """Create variant .tex with pre-load configuration and variant post-setup."""
-    src = job.doc_tex_abs
-    layers = cfg.multikey_books and job.multikey and job.variant != "lyrics"
-    layers_value = "true" if layers else "false"
-    txt = (
-        f"\\newcommand{{\\ulPdfTranspositionLayers}}{{{layers_value}}}\n"
-        f"\\newcommand{{\\ulPdfTranspositionLayerUi}}{{{cfg.multikey_layer_ui}}}\n"
-        f"\\newcommand{{\\ulPdfTranspositionRequireSongIds}}{{{'true' if cfg.multikey_require_song_ids else 'false'}}}\n"
-        f"\\newcommand{{\\ulPdfTranspositionMinimumScale}}{{{cfg.multikey_min_chordname_scale}}}\n"
-        f"\\newcommand{{\\ulMultikeyLilypondScores}}{{{'true' if layers and cfg.multikey_lilypond_scores else 'false'}}}\n"
-        + (r"\providecommand{\ulScoreSystem}[3]{\includegraphics{#3}}" + "\n"
-           if layers and cfg.multikey_lilypond_scores else "")
-        + (MULTIKEY_DISABLED_FALLBACK_TEX if layers else "")
-        + read_text(src)
-    )
-    suffix = src.suffix if job.variant == "default" else ".tex"
-    out_path = job.compile_dir / (build_job_basename(job) + suffix)
+def _prepare_score_recipe(recipe: str, directory: Path) -> None:
+    """Apply a registered external-score recipe to this job's copied assets.
 
-    if job.variant == "default":
-        write_text(out_path, txt)
-        return out_path
-
-    if job.variant == "lyrics":
-        docclass_re = regex_documentclass_ulsbs_songbook()
-        injected = docclass_re.sub(
-            lambda m: m.group(0) + "\n\\input{ulsbs-internal-lyricbook-postsetup.tex}",
-            txt,
-            count=1,
-        )
-        write_text(out_path, injected)
-        return out_path
-
-    if job.variant == "charango":
-        docclass_re = regex_documentclass_ulsbs_songbook()
-        injected = docclass_re.sub(
-            lambda m: m.group(0) + "\n\\input{ulsbs-internal-charangobook-postsetup.tex}",
-            txt,
-            count=1,
-        )
-        write_text(out_path, injected)
-
-        head = job.compile_dir / _JOB_ULSBS_ASSETS_DIRNAME / "ly" / "ulsbs-internal-common-head.ly"
+    Keep the exact audited mutations idempotent on retained builds. Recipes do
+    not set TeX visibility, edition eligibility or MIDI/audio export permission.
+    """
+    if recipe == "default":
+        return
+    if recipe == "charango":
+        head = directory / "ulsbs-internal-common-head.ly"
         if head.exists():
             head_txt = read_text(head)
             if (
@@ -651,25 +617,53 @@ def make_variant_tex(job: Job, cfg: Config) -> Path:
                         break
                 head_txt = "".join(lines)
             write_text(head, head_txt)
-        return out_path
+        return
+    if recipe == "bassclef":
+        for tail in directory.glob("ulsbs-include-tail*_bassclef.ly"):
+            shutil.copy2(tail, directory / tail.name.replace("_bassclef", ""))
+        return
+    raise ValueError(f"Unimplemented score recipe: {recipe!r}")
 
-    if job.variant == "bassclef":
-        docclass_re = regex_documentclass_ulsbs_songbook()
-        injected = docclass_re.sub(
-            lambda m: m.group(0) + "\n\\input{ulsbs-internal-bassclefbook-postsetup.tex}",
-            txt,
-            count=1,
-        )
-        write_text(out_path, injected)
 
-        for f in (job.compile_dir / _JOB_ULSBS_ASSETS_DIRNAME / "ly").glob(
-            "ulsbs-include-tail*_bassclef.ly"
-        ):
-            newname = f.name.replace("_bassclef", "")
-            shutil.copy2(f, job.compile_dir / _JOB_ULSBS_ASSETS_DIRNAME / "ly" / newname)
-        return out_path
+def make_variant_tex(job: Job, cfg: Config) -> Path:
+    """Prepend build configuration; TeX owns post-class preset application.
 
-    raise SystemExit(f"Unknown variant: {job.variant}")
+    Validate again for direct pipeline callers before writing any artifact. Score
+    asset transformations below remain separate from TeX rendering policy.
+    """
+    from .variants import VARIANTS, available_variants
+
+    src = job.doc_tex_abs
+    source = read_text(src)
+    if job.variant not in VARIANTS:
+        raise ValueError(f"Unknown variant: {job.variant!r}")
+    if job.variant not in available_variants(source):
+        raise ValueError(f"{src}: unavailable variant: {job.variant}")
+    if job.multikey and "multikey" not in VARIANTS[job.variant].editions:
+        raise ValueError(f"Variant {job.variant!r} does not support multikey")
+    layers = cfg.multikey_books and job.multikey
+    layers_value = "true" if layers else "false"
+    txt = (
+        f"\\newcommand{{\\ulPdfTranspositionLayers}}{{{layers_value}}}\n"
+        f"\\newcommand{{\\ulPdfTranspositionLayerUi}}{{{cfg.multikey_layer_ui}}}\n"
+        f"\\newcommand{{\\ulPdfTranspositionRequireSongIds}}{{{'true' if cfg.multikey_require_song_ids else 'false'}}}\n"
+        f"\\newcommand{{\\ulPdfTranspositionMinimumScale}}{{{cfg.multikey_min_chordname_scale}}}\n"
+        f"\\newcommand{{\\ulMultikeyLilypondScores}}{{{'true' if layers and cfg.multikey_lilypond_scores else 'false'}}}\n"
+        + (r"\providecommand{\ulScoreSystem}[3]{\includegraphics{#3}}" + "\n"
+           if layers and cfg.multikey_lilypond_scores else "")
+        + (MULTIKEY_DISABLED_FALLBACK_TEX if layers else "")
+        + (f"\\def\\ulBuildVariant{{{job.variant}}}\n" if job.variant != "default" else "")
+        + source
+    )
+    suffix = src.suffix if job.variant == "default" else ".tex"
+    out_path = job.compile_dir / (build_job_basename(job) + suffix)
+
+    _prepare_score_recipe(
+        VARIANTS[job.variant].score_recipe,
+        job.compile_dir / _JOB_ULSBS_ASSETS_DIRNAME / "ly",
+    )
+    write_text(out_path, txt)
+    return out_path
 
 
 def step_lilypond_book(
@@ -1458,8 +1452,6 @@ def analyze_warnings(
     if last_lualatex_log is not None:
         logs[last_lualatex_log] = "TeX"
     for path, source in logs.items():
-        if source == "LilyPond" and job.variant == "lyrics":
-            continue
         try:
             text = read_text(path)
         except OSError as error:
@@ -1661,7 +1653,7 @@ def _compile_one_job(
     if cfg.verbose:
         basename = build_job_basename(job)
         midi, audio = _midi_audio_enabled(cfg, job)
-        layers = cfg.multikey_books and job.multikey and job.variant != "lyrics"
+        layers = cfg.multikey_books and job.multikey
         printouts = (
             not job.multikey and cfg.create_printouts and PAPERA5_FNAMEPART in basename
             and bool(which("context") or which("contextjit"))
@@ -1694,7 +1686,7 @@ def _compile_one_job(
         env: dict[str, str]
         lp_include_args: list[str]
         env, lp_include_args, db_include_paths = build_include_paths(cfg=cfg, job=job)
-        if job.multikey and cfg.multikey_books and cfg.multikey_lilypond_scores and job.variant != "lyrics":
+        if job.multikey and cfg.multikey_books and cfg.multikey_lilypond_scores:
             # Capture the authoritative breaks while engraving t00, not in a
             # second approximation of the original's layout.
             # Heads cover explicit assemblies without tails; tails reinstall
@@ -1725,7 +1717,7 @@ def _compile_one_job(
         ensure_dir(pdf_dir)
 
         score_sources = None
-        if job.multikey and cfg.multikey_books and cfg.multikey_lilypond_scores and job.variant != "lyrics":
+        if job.multikey and cfg.multikey_books and cfg.multikey_lilypond_scores:
             from .lilypond_scores import prepare_scores
 
             score_sources = prepare_scores(cwd, basename)

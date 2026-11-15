@@ -17,17 +17,55 @@ Before distributing an engine change:
 - Run `./ulsbs-test` in the supported compiler container, including normalized
   TeX and Python integration checks. A focused test run alone is not a release
   gate. Inspect wheel/sdist and installed-package assets as well as source-tree
-  lookup; all required `.code.tex` and `.lua` companions must be included and the
-  old `songs.sty`/`songidx.lua` runtime must be absent.
+   lookup; all required `.code.tex` and `.lua` companions must be included.
 - Validate a standalone third-party lyrics/chords book with manual
-  draft/full/full LuaLaTeX and no upstream package installed. Validate fresh and
+  draft/full/full LuaLaTeX. Validate fresh and
   retained builds, separate output directories and convergence after index edits.
   A corrupt/aborted snapshot must diagnose rather than silently reuse stale data.
+- For variant changes, verify omitted availability/default-only builds, declared
+  subsets/all, default-first declaration ordering and quick-selector conflicts.
+  Include a nested third-party custom class: presets must run after its complete
+  setup but before author overrides, and policy must freeze before begin-document
+  callbacks. Check grouped book-off/local-on denial and effective predicates,
+  compact beat-only/empty geometry, replay and once-only source effects.
+- Inspect the installed `ulsbs-variants.def.tex` registry and every referenced
+  preset as well as Python resources. Use
+  `python3 tests/test_modules.py --packaging-smoke` for source/wheel/sdist asset
+  consistency and installed lookup. Exercise selector-free direct default and a
+  separate non-default launcher; manual TeX does not install compiler score recipes.
+  Test score-only bass-clef multikey separately from inline chords. Keep printed
+  score visibility, score ChordNames/recipes, edition eligibility and media opt-ins
+  independent, including global no-MIDI/no-audio switches.
+- For migration delivery, preserve the versioned v2 entry point and
+  v1-then-v2 upgrade sequence. Run focused `test_migrate_syntax_v1` /
+  `test_migrate_syntax_v2` checks and the latter's `--installed-smoke` and
+  `--installed-smoke-container` modes when validating tool delivery. Verify one
+  original-source finalization, original coordinates, whole-file rejection,
+  idempotence, mixed safe/rejected inputs, tag collisions and explicit config
+  no-write behavior in every mode, including `--write`. Installed semantic smoke
+  is not full installed raw-score/TeX or release acceptance. Unsupported TeX forms
+  remain diagnostics, not invitations to widen conversion heuristics.
+- Keep corpus migration separate: manually review each main source's availability
+  and root/profile `variants` selection, known scripts and consumer catalog IDs.
+  `--config-file` reviews selected configs but never writes or follows their book
+  paths. Directory scans prune recognized nested engines; use explicit consumer
+  scopes and inspect diffs, rather than treating the tool as a filesystem sandbox.
+- Recipe changes must retain score-cache validation and audited asset inputs.
+  Use the [score-cache maintenance workflow](ARCHITECTURE.md#opt-in-score-layers)
+  for asset review; do not normalize away tuning/clef differences or rewrite a
+  trust manifest merely to accept an unexplained cache result.
 - For rendering changes, inspect representative affected books and variants,
   including long songs, selections, indices or multikey scores where relevant.
   Broaden coverage when the change warrants it, rather than requiring a complete
   consumer-corpus matrix for every edit. Default styling is allowed to evolve;
-  there is no legacy pixel/PDF compatibility requirement.
+  there is no legacy pixel/PDF compatibility requirement. Test current behavior;
+  do not add old-engine comparisons or guards for nonexistent legacy macros.
+  Historical-input tests remain necessary for the migration tools.
+- Check annotation alignment on physical lines, wrapped lyrics and independent
+  raised/lowered groups. Verify shared `\ulMelodySize` slot/render sizing, retained
+  ink clearance, scoped scalar verse spacing and font-based translation/prose
+  leading. Read current styling values from the runtime and presets; use explicit
+  fixture policies rather than pinning evolving defaults.
 - Check content, pagination/navigation and ID/occurrence semantics separately
   from pixels. Inspect remaining visual differences explicitly rather than
   assuming historical byte identity. Check all twelve layer names/defaults and
@@ -96,7 +134,10 @@ Run these commands from the ULSBS repository root on `main`.
    "$EDITOR" vscode-extension/ulsbs-tex-tools/CHANGELOG.md
    ```
 
-   Move the release entries from `Unreleased` to
+   Keep Unreleased notes concise and consumer-oriented: summarize changes since
+   the preceding release, including required source/configuration migration.
+   Consolidate intermediate fixes into their final behavior rather than listing
+   implementation phases or individual commits. Then move the release entries to
    `## [$VERSION] - $DATE`, then leave a new empty `## [Unreleased]` above it.
 
 4. Verify versions and run release checks:
@@ -107,7 +148,9 @@ Run these commands from the ULSBS repository root on `main`.
    ./ulsbs-test
    npm --prefix vscode-extension/ulsbs-tex-tools ci
    npm --prefix vscode-extension/ulsbs-tex-tools run compile-web
-   npm --prefix vscode-extension/ulsbs-tex-tools run test:grammar
+    npm --prefix vscode-extension/ulsbs-tex-tools run test:grammar
+    npm --prefix vscode-extension/ulsbs-tex-tools run test:songbooks
+    npm --prefix vscode-extension/ulsbs-tex-tools run test:verse
    npm --prefix vscode-extension/ulsbs-tex-tools run package
    git diff --check
    git status --short

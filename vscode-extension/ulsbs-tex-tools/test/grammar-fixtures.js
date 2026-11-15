@@ -25,3 +25,7 @@ for (const fixture of fixtures.valid) {
 for (const fixture of fixtures.invalid) {
   assert.equal(chordPattern.test(fixture), false, `Expected grammar not to match: ${fixture}`);
 }
+const annotations = "\\[<C>Am]Words \\[<!*>] more \\[G7]";
+assert.deepEqual([...annotations.matchAll(new RegExp(pattern.match, "g"))].map((match) => match[0]),
+  ["\\[<C>Am]", "\\[<!*>]", "\\[G7]"]);
+console.log("Chord grammar fixture tests passed.");

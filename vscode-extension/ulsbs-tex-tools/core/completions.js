@@ -9,6 +9,7 @@
 const { getDocumentSelector, shouldProcessDocument } = require("./filetypes");
 const { stripComment } = require("./parser");
 const { tokenizeSongLine } = require("./songsyntax");
+const staticSnippets = require("../snippets/latex.json");
 
 /**
  * Compute a lightweight context for completion filtering.
@@ -452,6 +453,18 @@ function registerCompletionProvider(vscode, context) {
 
           /** @type {{name:string, snippet: string, isAllowed: (ctx:any)=>boolean, title: string, doc: string}[]} */
           const snippetMacros = [
+            ...["ulLocalShow", "ulIfVariant", "ulIfMusical", "ulVerseBaseline",
+              "ulVerseSeparation", "ulVerseMinimumGap", "ulVerseSpacingScale"].map((name) => {
+              const snippet = Object.values(staticSnippets)
+                .find((entry) => entry.prefix === name);
+              return {
+                name,
+                title: `${name} (ULSBS)`,
+                doc: snippet.description,
+                snippet: snippet.body.slice(1),
+                isAllowed: () => true
+              };
+            }),
             {
               name: "ulTagFile",
               title: "Tag-definition file (ULSBS)",
@@ -479,7 +492,7 @@ function registerCompletionProvider(vscode, context) {
                 return {
                   name,
                   title: "Verse (ULSBS)",
-                  doc: `Insert a \`\\${name}\` ... \`\\endverse\` block (only inside a song).`,
+                  doc: `Insert a \`\\${name}\` ... \`\\endverse\` block (only inside a song). * suppresses numbering; [n] indents by n verse-indent widths. Clearance is automatic; + is accepted but has no spacing effect.`,
                   snippet: `beginverse${suffix}${numbered ? "[${1:n}]" : ""}\n\t$0\n\\endverse`,
                   isAllowed: (ctx) => ctx.inSong && !ctx.inVerse
                 };
@@ -530,13 +543,6 @@ function registerCompletionProvider(vscode, context) {
               title: "ULSBS macro",
               doc: "Close a `\\beginrep` block.",
               isAllowed: (ctx) => ctx.inRep
-            },
-            {
-              name: "endtranslation",
-              insert: "endtranslation",
-              title: "ULSBS macro",
-              doc: "Close a translation block (e.g. `\\begin{translation}` / `\\begintranslation`).",
-              isAllowed: (ctx) => ctx.inTranslation
             },
             {
               name: "endsong",

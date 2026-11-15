@@ -52,6 +52,128 @@ class LayoutScopeTests(unittest.TestCase):
             self.assertEqual(re.findall(r"EFFECTS:(\d+)", output), [str(effects)] * 2)
         return outputs
 
+    def test_bottom_glue_is_independent_scoped_policy_and_matches_break_probes(self):
+        probe = r"""
+\newskip\ActualGlue\newskip\ExpectedGlue
+\newcommand\CheckGlue[1]{%
+  \begingroup
+  \ActualGlue=\ulColumnBottomGlue\relax\ExpectedGlue=#1\relax
+  \edef\Actual{\the\ActualGlue}\edef\Expected{\the\ExpectedGlue}%
+  \ifx\Actual\Expected\else\errmessage{Bottom glue changed: \Actual/\Expected}\fi
+  \endgroup}
+\newbox\BreakBox\newbox\CandidateBox\newbox\ProbeBox
+\newcommand\CheckBreaks{%
+  \setbox\BreakBox\vbox{\hbox{Before}\vskip7pt plus 3pt minus 1pt
+    \csname __ulsbs_layout_break:n\endcsname{317}\hbox{After}}%
+  \setbox\CandidateBox\vbox{\hbox{Candidate}}%
+  \ActualGlue=\ulColumnBottomGlue\relax
+  \directlua{
+    local w,s,h,so,ho=tex.getglue('ActualGlue')
+    local function same(n,sign)
+      assert(n and n.id==node.id('glue'),'Missing bottom glue')
+      assert(n.width==sign*w and n.stretch==sign*s and n.shrink==sign*h,
+        'Bottom glue dimensions differ: '..table.concat({n.width,n.stretch,n.shrink,w,s,h,sign},','))
+      assert(n.stretch_order==so and n.shrink_order==ho,'Glue orders differ')
+    end
+    local function check(b,previous)
+      local found=false
+      for n in node.traverse(tex.box[b].head) do
+        if n.id==node.id('penalty') and n.penalty==317 then
+          same(n.prev,1);same(n.next,-1);found=true
+          if previous then
+            local p=n.next.next
+            assert(p.width==7*65536 and p.stretch==3*65536 and p.shrink==65536
+              and p.stretch_order==0 and p.shrink_order==0,'Prior skip lost')
+          end
+        end
+      end
+      assert(found,'Missing candidate break')
+    end
+    check(\number\BreakBox,true)
+    ulsbs_layout.combine_page(\number\CandidateBox,\number\ProbeBox,317,0,'ActualGlue')
+    check(\number\ProbeBox)
+  }%
+  \setbox\BreakBox\vbox{\hbox{Forced}\csname __ulsbs_layout_break:\endcsname}%
+  \directlua{
+    local n=node.tail(tex.box[\number\BreakBox].head)
+    assert(n.penalty==-10000,'Missing forced break')
+    local w,s,h,so,ho=tex.getglue('ActualGlue');n=n.prev
+    assert(n.width==w and n.stretch==s and n.shrink==h
+      and n.stretch_order==so and n.shrink_order==ho,'Forced glue differs')
+  }}
+\CheckGlue{0pt plus .5\textheight}
+\begin{document}
+\CheckGlue{0pt plus .5\textheight}\CheckBreaks
+{\chordsoff\notesoff\beatsoff
+ \CheckGlue{0pt plus .5\textheight}
+ \chordson\noteson\beatson\measuresoff\ulLocalShow{scores}{false}
+ \CheckGlue{0pt plus .5\textheight}}
+{\renewcommand\ulColumnBottomGlue{3pt plus 19pt minus 2pt}
+ \CheckGlue{3pt plus 19pt minus 2pt}\CheckBreaks
+ {\chordsoff\notesoff\beatsoff\CheckGlue{3pt plus 19pt minus 2pt}}
+ {\ulSeparateVerses\CheckGlue{0pt plus 1fil}\CheckBreaks}
+ \CheckGlue{3pt plus 19pt minus 2pt}}
+{\renewcommand\ulColumnBottomGlue{0pt}\CheckGlue{0pt}\CheckBreaks}
+\CheckGlue{0pt plus .5\textheight}
+\begin{ulSongs}{}\beginsong{Glue requests}[id={glue},key={C}]
+\beginverse*
+\chordsoff\notesoff\beatsoff\CheckGlue{0pt plus .5\textheight}
+Hidden lyric.
+\endverse
+{\ulSeparateVerses
+\beginverse*
+\CheckGlue{0pt plus 1fil}Separated lyric.
+\endverse}
+\CheckGlue{0pt plus .5\textheight}\endsong
+\end{ulSongs}\CheckGlue{0pt plus .5\textheight}
+\typeout{GLUE-POLICY:OK}\end{document}
+"""
+        entries = [(name, r"\documentclass[variants={default,lyric,charango,bassclef},"
+                    r"oneside,openany]{ulsbs-songbook}")
+                   for name in ("default", "lyric", "charango", "bassclef")]
+        entries.append(("package", r"\documentclass[oneside,openany]{book}\usepackage{ulsbs}"))
+        for name, entry in entries:
+            for layers in (False, True):
+                with self.subTest(entry=name, layers=layers):
+                    source = (r"\def\ulPdfTranspositionLayers{"
+                              + str(layers).lower() + "}\n")
+                    if name not in ("default", "package"):
+                        source += rf"\def\ulBuildVariant{{{name}}}" + "\n"
+                    output = self.compile_source(source + entry + probe,
+                                                 label=f"{name}-{layers}")
+                    self.assertIn("GLUE-POLICY:OK", output)
+
+    def test_authored_bottom_glue_survives_selected_repeated_column_layout(self):
+        for columns in (1, 2):
+            for layers in (False, True):
+                with self.subTest(columns=columns, layers=layers):
+                    preamble = PREAMBLE + rf"""
+\ulSongColumns{{{columns}}}\ulSongPosition{{3}}
+\ulIncludeOnlySongs{{2,1,2}}
+\renewcommand\ulColumnBottomGlue{{0pt plus 37pt minus 2pt}}
+\AddToHook{{ulsbs/stanza/start}}{{%
+  \skip0=\ulColumnBottomGlue\relax
+  \ifdim\gluestretch\skip0=37pt\else\errmessage{{Lost authored glue}}\fi}}
+"""
+                    body = song("First", 14) + "{\n" + r"\chordsoff\notesoff\beatsoff" + "\n"
+                    body += song("Second", 14) + "}\n" + song("Excluded", 4)
+                    source = lifecycle.document(
+                        r"\begin{ulSongs}{titleidx,authidx,tagidx}" + "\n" + body
+                        + r"\end{ulSongs}\typeout{EFFECTS:\the\Effects}", preamble)
+                    source = (r"\def\ulPdfTranspositionLayers{" + str(layers).lower()
+                              + "}\n" + source)
+                    output = self.compile_source(source, passes=3,
+                                                 label=f"columns-{columns}-layers-{layers}")
+                    self.assertEqual(re.findall(r"EFFECTS:(\d+)", output), ["32"] * 3)
+                    text = lifecycle.SongLifecycleTests.pdf_text(self)
+                    self.assertEqual(text.count("Second line 0:"), 2)
+                    self.assertEqual(text.count("First line 0:"), 1)
+                    self.assertNotIn("Excluded line", text)
+                    rows = [line.split("|")[1] for line in
+                            (self.book / "book.ulsbs.psv").read_text().splitlines()
+                            if line.startswith("ID-NR-PAGE-Y|")]
+                    self.assertEqual(rows, ["Second", "First", "Second"])
+
     def test_grouped_excluded_columns_do_not_change_selection_commit(self):
         body = song("First") + song("Second") + "{\n" + r"""
 \chordsoff\small\ulSongColumns{2}\ulSongPosition{1}

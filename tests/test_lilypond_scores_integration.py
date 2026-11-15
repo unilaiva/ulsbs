@@ -66,7 +66,85 @@ def score_layer_drawings(pdf, *, generic=False):
 
 
 class LilyPondScoreIntegrationTests(unittest.TestCase):
-    backend_preamble = ""
+    def test_score_visibility_gates_generated_inclusions_layers_and_geometry(self):
+        if shutil.which('lualatex') is None:
+            self.skipTest('lualatex is not installed')
+        with pikepdf.Pdf.new() as graphic:
+            page = graphic.add_blank_page(page_size=(60, 30))
+            page.Contents = pikepdf.Stream(graphic, b'0.2 0.4 0.6 rg 0 0 60 30 re f\n')
+            buffer = io.BytesIO()
+            graphic.save(buffer)
+            image = buffer.getvalue()
+        metrics = {}
+        for multikey in (False, True):
+            for permission, request in ((True, True), (True, False), (False, True), (False, False)):
+                with self.subTest(multikey=multikey, permission=permission, request=request):
+                    visible = permission and request
+                    source = (r'\def\ulBuildVariant{lyric}' + '\n'
+                              + r'\def\ulMultikeyLilypondScores{true}' + '\n'
+                              + rf'\def\ulPdfTranspositionLayers{{{str(multikey).lower()}}}'
+                              + r'\documentclass[variants={default,lyric}]{ulsbs-songbook}' + '\n'
+                              + rf'\ulShowLilypond{{{str(permission).lower()}}}'
+                              + rf'\ulLocalShow{{scores}}{{{str(request).lower()}}}' + r'''
+\ulSongColumns{1}\ulSongPosition{0}
+\newcount\ScoreEffects\newcount\InlineEffects\newcount\ImageEffects
+\newbox\RetainedScore
+\def\InlineEffect{\global\advance\InlineEffects1 }
+\let\OriginalGraphics\includegraphics
+\renewcommand\includegraphics[1]{\global\advance\ImageEffects1 \OriginalGraphics{#1}}
+\begin{document}
+\begin{ulSongs}{}\beginsong{Score permission}[id={score-policy},key={C}]
+\beginverse*
+\InlineEffect\[<* E>C]Independent inline music.
+\endverse
+\ulEndSongVfill{false}
+\setbox\RetainedScore=\vbox{\hsize=100pt
+\begin{lilywrap}\input{generated-systems.tex}\end{lilywrap}}
+\typeout{SCORE-BOX:\the\wd\RetainedScore/\the\ht\RetainedScore/\the\dp\RetainedScore}
+\typeout{SCORE-BLOCKS:\arabic{ulsbs@aftersongblocks}}
+\ExplSyntaxOn
+\typeout{SCORE-FILL:\bool_if:NTF\g__ulsbs_layout_fill_bool{on}{off}}
+\ExplSyntaxOff
+\box\RetainedScore
+{\ulLocalShow{scores}{false}
+\begin{lilywrap}
+\ulLocalShow{scores}{true}\global\advance\ScoreEffects100
+\input{must-not-be-read.tex}\ulScoreSystem{hidden}{1}{missing.pdf}\iftrue
+\end{lilywrap}}
+\beginverse*After retained score.\endverse
+\endsong\end{ulSongs}
+\typeout{SCORE-EFFECTS:\the\ScoreEffects;IMAGES:\the\ImageEffects;INLINE:\the\InlineEffects}
+\end{document}
+''')
+                    files = {'source-effects.tex': source.encode(), 'system.pdf': image,
+                             'generated-systems.tex': (
+                                 r'\global\advance\ScoreEffects1 '
+                                 r'\noindent\ulScoreSystem{visible}{1}{system.pdf}\par').encode()}
+                    artifacts = {'source-effects.ulsbs-scores.json': None}
+                    output, contents = compile_fixture(
+                        'source-effects', files=files, multikey=None, passes=3, artifacts=artifacts)
+                    self.assertIn(f'SCORE-EFFECTS:{int(visible)};IMAGES:{int(visible)};INLINE:1', output)
+                    dimensions = tuple(float(value) for value in re.search(
+                        r'SCORE-BOX:([\d.]+)pt/([\d.]+)pt/([\d.]+)pt', output).groups())
+                    metrics[multikey, permission, request] = dimensions
+                    if visible:
+                        self.assertGreater(dimensions[0], 0)
+                        self.assertGreater(dimensions[1], 30)
+                    else:
+                        self.assertEqual(dimensions, (0, 0, 0))
+                    self.assertIn(f'SCORE-BLOCKS:{int(visible)}', output)
+                    self.assertIn('SCORE-FILL:' + ('on' if visible else 'off'), output)
+                    with pikepdf.open(io.BytesIO(contents)) as pdf:
+                        drawings = score_layer_drawings(pdf, generic=True)
+                    if multikey:
+                        requests = json.loads(artifacts['source-effects.ulsbs-scores.json'])['requests']
+                        self.assertEqual([row['snippet_id'] for row in requests], ['visible'] if visible else [])
+                        self.assertEqual(len(drawings), 12 if visible else 0, drawings)
+                    else:
+                        self.assertIsNone(artifacts['source-effects.ulsbs-scores.json'])
+                        self.assertEqual(drawings, {})
+        for permission, request in ((True, True), (True, False), (False, True), (False, False)):
+            self.assertEqual(metrics[False, permission, request], metrics[True, permission, request])
 
     def test_generated_minimum_scale_controls_real_tex_graphic_fallback(self):
         if shutil.which('lualatex') is None:
@@ -246,8 +324,7 @@ class LilyPondScoreIntegrationTests(unittest.TestCase):
                 (root / child).mkdir()
             doc = root / 'ul-selection_score_A5.tex'
             doc.write_text(
-                self.backend_preamble
-                + r'\documentclass[maintitle={Score Milestone}]{ulsbs-songbook}' + '\n'
+                r'\documentclass[variants={default},maintitle={Score Milestone}]{ulsbs-songbook}' + '\n'
                 r'\begin{document}\begin{ulSongs}{}' + '\n'
                 r'\input{content/song.tex}' + '\n'
                 r'\input{content/song.tex}' + '\n'

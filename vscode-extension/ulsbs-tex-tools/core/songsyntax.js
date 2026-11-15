@@ -14,10 +14,10 @@
 const PATTERNS = [
   {
     type: "beginsong",
-    regex: /\\beginsong(?:\[(.*?)\])?\{([^}]*)\}(?:\[(.*?)\])?/g,
+    regex: /\\beginsong\{([^}]*)\}(?:\[(.*?)\])?/g,
     map: (match) => ({
-      title: (match[2] || "").trim(),
-      options: (match[1] || match[3] || "").trim()
+      title: (match[1] || "").trim(),
+      options: (match[2] || "").trim()
     })
   },
   {
@@ -30,11 +30,11 @@ const PATTERNS = [
   },
   {
     type: "beginintersong",
-    regex: /\\begin\{intersong\*?\}/g
+    regex: /\\begin\{intersong\}/g
   },
   {
     type: "endintersong",
-    regex: /\\end\{intersong\*?\}/g
+    regex: /\\end\{intersong\}/g
   },
   {
     type: "beginexplanation",
@@ -49,9 +49,10 @@ const PATTERNS = [
   },
   {
     type: "beginpassage",
-    regex: /\\begin\{passage\}(?:\[(.*?)\])?/g,
+    regex: /\\begin\{passage\}(\*)?(?:\[(.*?)\])?/g,
     map: (match) => ({
-      language: (match[1] || "").trim()
+      starred: !!match[1],
+      language: (match[2] || "").trim()
     })
   },
   {
@@ -71,9 +72,9 @@ const PATTERNS = [
   {
     type: "begintranslation",
     regex:
-      /\\begin\{translation\}(?:\[(.*?)\])?|\\begintranslation(?:\[(.*?)\])?/g,
+      /\\begin\{translation\}(?:\[(.*?)\])?/g,
     map: (match) => ({
-      language: (match[1] || match[2] || "").trim()
+      language: (match[1] || "").trim()
     })
   },
   {
@@ -90,7 +91,7 @@ const PATTERNS = [
   { type: "endrep", regex: /\\endrep\b/g },
   {
     type: "endtranslation",
-    regex: /\\end\{translation\}|\\endtranslation\b/g
+    regex: /\\end\{translation\}/g
   },
   { type: "endlilypond", regex: /\\end\{lilypond\}/g },
   {
@@ -100,7 +101,8 @@ const PATTERNS = [
   },
   {
     type: "documentclass",
-    regex: /\\documentclass(?:\[[^\]]*\])?\{[^}]+\}/g
+    // Detect the declaration start even when literal class options span lines.
+    regex: /\\documentclass\b/g
   },
   { type: "begindocument", regex: /\\begin\{document\}/g }
 ];

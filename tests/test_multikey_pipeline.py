@@ -25,7 +25,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from ulsbs import pipeline, resultlist
+from ulsbs import pipeline, resultlist, variants
 from ulsbs.config import Config
 from ulsbs.constants import (
     RESULT_MULTIKEY_SUBDIRNAME,
@@ -49,7 +49,10 @@ class MultikeyPipelineTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.doc = self.root / "book_A5.tex"
-        self.doc.write_text("\\documentclass{ulsbs-songbook}\n", encoding="utf-8")
+        self.doc.write_text(
+            "\\documentclass[variants={default,lyric,charango,bassclef}]{ulsbs-songbook}\n",
+            encoding="utf-8",
+        )
         self.result = self.root / "result"
         self.result.mkdir()
         resultlist.initialize(self.result, "pipeline-test")
@@ -102,16 +105,78 @@ class MultikeyPipelineTests(unittest.TestCase):
             "multikey_info": {"songs": []} if payload is None else payload,
         }))
 
-    def test_lilypond_score_opt_in_only_reaches_multikey_non_lyrics_jobs(self) -> None:
+    def test_lilypond_score_opt_in_only_reaches_multikey_non_lyric_jobs(self) -> None:
         for enabled, books, variant, multikey in product(
-                (False, True), (False, True), ("default", "lyrics", "charango", "bassclef"), (False, True)):
+                (False, True), (False, True), ("default", "lyric", "charango", "bassclef"), (False, True)):
             with self.subTest(enabled=enabled, books=books, variant=variant, multikey=multikey):
                 cfg = replace(self.cfg, multikey_lilypond_scores=enabled, multikey_books=books)
                 job = self.job(variant, multikey)
+                if variant == "lyric" and multikey:
+                    with self.assertRaisesRegex(ValueError, "does not support multikey"):
+                        pipeline.make_variant_tex(job, cfg)
+                    continue
                 text = pipeline.make_variant_tex(job, cfg).read_text(encoding="utf-8")
-                expected = enabled and books and multikey and variant != "lyrics"
+                expected = enabled and books and multikey
                 self.assertIn(r"\newcommand{\ulMultikeyLilypondScores}{" + str(expected).lower() + "}", text)
                 self.assertEqual(r"\providecommand{\ulScoreSystem}" in text, expected)
+
+    def test_score_preparation_dispatches_by_recipe_without_changing_identity_or_media(self) -> None:
+        assets = EngineAssets()
+        with assets.ly_dir() as original:
+            baseline = {path.name: path.read_bytes() for path in original.iterdir() if path.is_file()}
+        for variant, recipe in (("default", "charango"), ("lyric", "charango"),
+                                ("charango", "default"), ("charango", "bassclef"),
+                                ("bassclef", "charango")):
+            for multikey in (False, True):
+                if variant == "lyric" and multikey:
+                    continue
+                with self.subTest(variant=variant, recipe=recipe, multikey=multikey):
+                    job = self.job(variant, multikey)
+                    pipeline.prepare_compile_dir(self.ui, assets, self.cfg, job)
+                    registry = dict(variants.VARIANTS)
+                    registry[variant] = replace(registry[variant], score_recipe=recipe)
+                    with patch.object(variants, "VARIANTS", registry):
+                        output = pipeline.make_variant_tex(job, self.cfg)
+                        directory = job.compile_dir / "ulsbs-assets/ly"
+                        first = {path.name: path.read_bytes() for path in directory.iterdir()}
+                        pipeline.make_variant_tex(job, self.cfg)
+                        self.assertEqual(first, {path.name: path.read_bytes() for path in directory.iterdir()})
+                    self.assertTrue(output.read_text().endswith(self.doc.read_text()))
+                    selector = rf"\def\ulBuildVariant{{{variant}}}"
+                    self.assertEqual(selector in output.read_text(), variant != "default")
+                    self.assertEqual(b"ul-chosen-tuning = #ul-charango-tuning" in first[
+                        "ulsbs-internal-common-head.ly"], recipe == "charango")
+                    for name, data in baseline.items():
+                        if "_bassclef" in name:
+                            plain = name.replace("_bassclef", "")
+                            self.assertEqual(first[plain], data if recipe == "bassclef" else baseline[plain])
+                    midi = first["ulsbs-internal-score-midi.ly"]
+                    self.assertEqual(b"\\midi" in midi, not multikey)
+                    # A retained compile starts from freshly copied assets, not
+                    # the previous recipe's tuning/tails or MIDI suppression.
+                    pipeline.prepare_compile_dir(self.ui, assets, self.cfg, job)
+                    self.assertEqual((directory / "ulsbs-internal-common-head.ly").read_bytes(),
+                                     baseline["ulsbs-internal-common-head.ly"])
+                    self.assertEqual((directory / "ulsbs-include-tail.ly").read_bytes(),
+                                     baseline["ulsbs-include-tail.ly"])
+
+    def test_unknown_score_recipe_rejects_without_writing_source_or_mutating_assets(self) -> None:
+        job = self.job("charango")
+        pipeline.prepare_compile_dir(self.ui, EngineAssets(), self.cfg, job)
+        directory = job.compile_dir / "ulsbs-assets/ly"
+        before = {path.name: path.read_bytes() for path in directory.iterdir()}
+        output = job.compile_dir / (build_job_basename(job) + ".tex")
+        registry = dict(variants.VARIANTS)
+        registry[job.variant] = replace(registry[job.variant], score_recipe="not-implemented")
+        with patch.object(variants, "VARIANTS", registry):
+            with self.assertRaisesRegex(ValueError, "Unimplemented score recipe: 'not-implemented'"):
+                pipeline.make_variant_tex(job, self.cfg)
+            self.assertFalse(output.exists())
+            output.write_text("previous generated input")
+            with self.assertRaisesRegex(ValueError, "Unimplemented score recipe"):
+                pipeline.make_variant_tex(job, self.cfg)
+        self.assertEqual(output.read_text(), "previous generated input")
+        self.assertEqual(before, {path.name: path.read_bytes() for path in directory.iterdir()})
 
     def test_multikey_skips_all_ancillary_outputs_even_when_enabled(self) -> None:
         for variant in ("default", "charango", "bassclef"):
@@ -145,8 +210,10 @@ class MultikeyPipelineTests(unittest.TestCase):
                 self.assertEqual(list(self.result.iterdir()), [])
 
     def test_export_policy_honors_global_flags_and_optional_opt_ins(self) -> None:
-        for variant in ("default", "lyrics", "charango", "bassclef"):
+        for variant in ("default", "lyric", "charango", "bassclef"):
             for multikey, midi, audio, allow_midi, allow_audio in product((False, True), repeat=5):
+                if variant == "lyric" and multikey:
+                    continue
                 with self.subTest(variant=variant, multikey=multikey, flags=(midi, audio, allow_midi, allow_audio)):
                     cfg = replace(
                         self.cfg, midifiles=midi, audiofiles=audio,
@@ -163,8 +230,10 @@ class MultikeyPipelineTests(unittest.TestCase):
         assets = EngineAssets()
         cases = ((True, True, False, False), (False, True, True, True),
                  (True, False, True, False), (False, False, True, True))
-        for variant in ("default", "lyrics", "charango", "bassclef"):
+        for variant in ("default", "lyric", "charango", "bassclef"):
             for multikey in (False, True):
+                if variant == "lyric" and multikey:
+                    continue
                 for midi_export, audio_export, allow_midi, allow_audio in cases:
                     with self.subTest(variant=variant, multikey=multikey,
                                       flags=(midi_export, audio_export, allow_midi, allow_audio)):
@@ -235,9 +304,9 @@ class MultikeyPipelineTests(unittest.TestCase):
         resultlist.initialize(self.result, "multikey-test")
         try:
             expected = []
-            variants = ("default", "lyrics", "charango", "bassclef")
+            variants = ("default", "lyric", "charango", "bassclef")
             cases = [(variant, False) for variant in variants]
-            cases += [(variant, True) for variant in variants if variant != "lyrics"]
+            cases += [(variant, True) for variant in variants if variant != "lyric"]
             for variant, multikey in cases:
                 with self.subTest(variant=variant, multikey=multikey):
                     job = self.job(variant, multikey)
@@ -1331,9 +1400,11 @@ class MultikeyPipelineTests(unittest.TestCase):
 
     def test_job_details_are_verbose_only_and_report_effective_outputs(self) -> None:
         for variant, multikey, verbose, enabled, optional in product(
-            ("default", "lyrics", "charango", "bassclef"), (False, True),
+            ("default", "lyric", "charango", "bassclef"), (False, True),
             (False, True), (False, True), (False, True),
         ):
+            if variant == "lyric" and multikey:
+                continue
             with self.subTest(variant=variant, multikey=multikey, verbose=verbose,
                               enabled=enabled, optional=optional):
                 job = self.job(variant, multikey)
@@ -1366,7 +1437,7 @@ class MultikeyPipelineTests(unittest.TestCase):
                 self.assertIn(f"MIDI={midi}, audio={audio}", outputs)
                 self.assertIn(f"JSON={'range index' if multikey else enabled}", outputs)
                 self.assertIn(f"covers={not multikey and enabled}", outputs)
-                layers = cfg.multikey_books and multikey and variant != "lyrics"
+                layers = cfg.multikey_books and multikey
                 self.assertIn(f"layers={layers}", outputs)
                 self.assertEqual("strict IDs=" in outputs, layers)
                 self.assertEqual("layer UI=" in outputs, layers)
@@ -1398,7 +1469,7 @@ class MultikeyPipelineTests(unittest.TestCase):
                 self.assertTrue(lines[2].startswith("Outputs:"))
                 self.assertNotIn("/songbook-data/", settings)
 
-    def test_deployment_skips_legacy_full_multikey_records_and_preserves_unowned_artifacts(self) -> None:
+    def test_deployment_skips_full_multikey_master_records_and_preserves_unowned_artifacts(self) -> None:
         resultlist.initialize(self.result, "deploy-test")
         try:
             (self.result / RESULT_MULTIKEY_SUBDIRNAME).mkdir()
@@ -1440,12 +1511,87 @@ class MultikeyPipelineTests(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("lualatex") and shutil.which("qpdf"), "PDF tools unavailable")
 class ConventionalManualBuildTests(unittest.TestCase):
-    def test_generated_fallback_reports_source_lyrics_and_generic_class_disabled(self) -> None:
+    def test_explicit_layer_capability_is_independent_of_identity_and_visible_ink(self) -> None:
+        from test_pdf_transposition_layers import PdfStructure, rendered_pages, words_and_geometry
+        from test_tex_integration import compile_fixture
+
+        for variant, entry in (
+            ("default", r"\documentclass{ulsbs-songbook}"),
+            ("bassclef", r"\documentclass[variants={default,bassclef}]{ulsbs-songbook}"),
+            ("lyric", r"\documentclass[variants={default,lyric}]{ulsbs-songbook}"),
+            ("default", r"\documentclass{book}\usepackage{ulsbs}"),
+        ):
+            results = {}
+            for enabled, ink in ((True, True), (False, True), (True, False)):
+                with self.subTest(entry=entry, enabled=enabled, ink=ink):
+                    # Manual layers are not a registry-selected compiler edition.
+                    source = (pipeline.MULTIKEY_DISABLED_FALLBACK_TEX
+                              + rf"\def\ulPdfTranspositionLayers{{{str(enabled).lower()}}}"
+                              + (rf"\def\ulBuildVariant{{{variant}}}" if variant != "default" else "")
+                              + entry + r"""
+\makeatletter
+\typeout{LAYER-EARLY:\ifulsbs@pdflayers on\else off\fi}
+\ulShowChords{false}\ulShowBeats{false}\ulShowLilypond{false}\ulShowKey{false}
+""" + rf"\ulShowNotes{{{str(ink).lower()}}}" + r"""
+% Late renewal is deliberately too late to change imports or layer capability.
+\renewcommand\ulPdfTranspositionLayers{false}
+\begin{document}
+\ulSongColumns{1}\ulSongPosition{0}
+\ulIfVariant{VARIANT}{}{\errmessage{Wrong immutable identity}}
+\begin{ulSongs}{}\beginsong{Independent layers}[id={explicit-layers},key={C}]
+\beginverse*\[<C>]Opening anchor.\endverse
+{\notesoff\beginverse*\[<D>]Hidden anchor.\endverse}
+\beginverse*\[<E>]Restored anchor.\endverse
+\endsong\end{ulSongs}
+\typeout{LAYER-FINAL:\ifulsbs@pdflayers on\else off\fi}
+\end{document}
+""".replace("VARIANT", variant))
+                    status = "source-effects.ulsbs-multikey.json"
+                    artifacts = {status: None}
+                    output, pdf = compile_fixture(
+                        "source-effects", files={"source-effects.tex": source.encode()},
+                        multikey=None, passes=3, draft_passes=1, artifacts=artifacts,
+                    )
+                    state = "on" if enabled else "off"
+                    self.assertIn(f"LAYER-EARLY:{state}", output)
+                    self.assertIn(f"LAYER-FINAL:{state}", output)
+                    self.assertEqual("ocgx2.sty" in output, enabled)
+                    envelope = json.loads(artifacts[status])
+                    self.assertIs(envelope["has_multikey_info"], enabled)
+                    structure = PdfStructure(pdf)
+                    if enabled and ink:
+                        self.assertEqual(set(structure.names.values()), {
+                            f"ulsbs:transpose:v1:id:explicit-layers:t{offset:02d}"
+                            for offset in range(12)
+                        })
+                        songs = envelope["multikey_info"]["songs"]
+                        self.assertEqual(len(songs), 1)
+                        self.assertIsNotNone(songs[0]["anchor"])
+                        self.assertEqual(songs[0]["layer_page_indices"], [0])
+                        selected = structure.selected_pdf(pdf, {1: 2})
+                        self.assertNotEqual(rendered_pages(selected), rendered_pages(pdf))
+                        anchors = {"Opening", "Hidden", "Restored", "anchor."}
+                        self.assertEqual(
+                            [row for row in words_and_geometry(pdf) if row[1] in anchors],
+                            [row for row in words_and_geometry(selected) if row[1] in anchors],
+                        )
+                    else:
+                        self.assertEqual(structure.layers, {})
+                        self.assertNotIn("/OCProperties", structure.catalog)
+                        if enabled:
+                            self.assertEqual(envelope["multikey_info"]["songs"], [])
+                        else:
+                            self.assertIsNone(envelope["multikey_info"])
+                    results[enabled, ink] = pdf
+            self.assertEqual(rendered_pages(results[True, True]), rendered_pages(results[False, True]))
+            self.assertEqual(words_and_geometry(results[True, True]), words_and_geometry(results[False, True]))
+
+    def test_generated_fallback_reports_source_opt_out_and_generic_class_disabled(self) -> None:
         from test_pdf_transposition_layers import PdfStructure
         from test_tex_integration import FIXTURES, compile_fixture
 
         for name, source_mode in (
-            ("repeat-basic", "\\newcommand{\\ulSongbookType}{lyric}\n"),
+            ("repeat-basic", "\\def\\ulPdfTranspositionLayers{false}\n"),
             ("multikey-disabled-generic", ""),
         ):
             with self.subTest(source=name):

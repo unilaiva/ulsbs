@@ -190,12 +190,18 @@ class MultikeyMetadataTests(unittest.TestCase):
             x, y = song["anchor"]["x"], song["anchor"]["y"]
             self.assertTrue(0 < x < width)
             self.assertTrue(0 < y < height)
-        # Printed page/song numbers reset at every header. The anchor tracks the
-        # same virtual tag corner even with no key or tags and all notation hidden.
+        # Printed page/song numbers reset at every header. The header-edge anchor
+        # remains even without badges; hidden/absent samples no longer run style
+        # hooks just to manufacture the same vertical extent as visible badges.
         first = self.songs[0]["anchor"]
         for song in self.songs[1:]:
             self.assertAlmostEqual(song["anchor"]["x"], first["x"], places=3)
+        for song in (self.songs[1], self.songs[3]):
             self.assertAlmostEqual(song["anchor"]["y"], first["y"], places=3)
+        empty = self.songs[2]["anchor"]
+        self.assertTrue(0 < first["y"] - empty["y"] < 10)
+        empty_title = next(word for word in words if word[0] == 3 and word[1] == "Empty")
+        self.assertLess(abs(empty["y"] - (pages[3][1] - empty_title[3])), 20)
         phase = next(word for word in words if word[0] == 1 and word[1] == "I")
         height = pages[1][1]
         self.assertGreater(first["x"], phase[4])
@@ -250,7 +256,8 @@ class MultikeyMetadataTests(unittest.TestCase):
 
     def test_entirely_hidden_notation_has_no_ocgs_or_song_records(self) -> None:
         _, data, envelope = compile_with_manifest('multikey-metadata', passes=2, preamble=(
-            r'\AtBeginDocument{\chordsoff\ulShowNotes{false}}'))
+            r'\AtBeginDocument{\chordsoff\notesoff'
+            r'\ulLocalShow{key}{false}\ulLocalShow{goodkeys}{false}}'))
         self.assertEqual(envelope['multikey_info']['songs'], [])
         self.assert_no_embedded_json(data)
         self.assertEqual(PdfStructure(data).layers, {})

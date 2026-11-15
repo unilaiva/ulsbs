@@ -2,14 +2,13 @@
 
 ## Unreleased
 
-- Updated snippets, completions, structural editing and the new-songbook template
-  for current ULSBS command names and verse/repeat syntax.
-- Added title, author and tag index declarations and configuration, including
-  `\ulTagFile`; songbook templates and collection snippets include all three indices.
-- Updated outlines for `\ulSongChapter` and `\ulSongSection`, including starred
-  and optional short-title forms.
-- Fixed missing required arguments in `ulSongs` and `passage` snippets and
-  contextual completions.
+- Updated editing support and the new-book template for the current ULSBS API,
+  including variant availability, local visibility, identity and musical tests,
+  and scalar verse-spacing controls.
+- Added title, author and tag index snippets and corrected required arguments
+  in song-collection and passage completions.
+- Improved chapter/section outlines and discovery of multiline main declarations.
+- Build terminals now start in the selected book's workspace folder.
 
 ## v0.2.2 - 2026-10-24
 

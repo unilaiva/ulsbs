@@ -1,4 +1,4 @@
-\documentclass[paper={a5paper},maintitle={Source Effects}]{ulsbs-songbook}
+\documentclass[variants={default,lyric},paper={a5paper},maintitle={Source Effects}]{ulsbs-songbook}
 \providecommand{\SourceEffectsLyrics}{false}
 \newcount\SourceEffectCount
 \newcommand{\SourceEffect}{\global\advance\SourceEffectCount by 1\relax}
@@ -6,10 +6,13 @@
   \SourceEffect
   \typeout{SOURCE-SONG:\theulSongNumber}%
 }
-\begin{document}
+% This fixture mode suppresses all inline notation, not merely chord symbols.
 \ExplSyntaxOn
-\str_if_eq:eeT {\SourceEffectsLyrics}{true}{\chordsoff}
+\str_if_eq:eeT {\SourceEffectsLyrics}{true}
+  {\ulShowChords{false}\ulShowNotes{false}\ulShowBeats{false}
+   \ulShowKey{false}\ulShowGoodKeys{false}}
 \ExplSyntaxOff
+\begin{document}
 \ulSongColumns{1}
 \begin{ulSongs}{}
 \ulSongChapter{First Chapter}

@@ -4,24 +4,25 @@
   \ifdim\ulsbsTestVerseIndent=#1\relax\else
     \errmessage{verse indentation did not match #1}%
   \fi
-  \ifdim\ulBaselineAdjustment=#2\relax\else
-    \errmessage{verse baseline did not match #2}%
-  \fi
+  \ifdim\baselineskip=\csname l__ulsbs_verse_nominal_skip\endcsname\else
+     \errmessage{verse baseline did not match #2}%
+   \fi
+  \ifdim\ulVerseSpacingScale{baseline}{natural}pt=#2\relax\else
+    \errmessage{verse baseline scalar did not match #2}\fi
 }
-\def\ULtestverseended{\ifdim\ulBaselineAdjustment=2pt\relax\else
+\def\ULtestverseended{\ifdim\ulVerseSpacingScale{baseline}{natural}pt=2pt\relax\else
   \errmessage{verse baseline was not restored}\fi}
 \def\ULtestnumbered{\ifulsbs@vnumbered\else\errmessage{verse was not numbered}\fi}
 \def\ULtestunnumbered{\ifulsbs@vnumbered\errmessage{verse was numbered}\fi}
 \def\ULtestmelodyverse#1{%
   \ifdim\ulsbsTestVerseIndent=#1\relax\else
     \errmessage{melody verse indentation did not match #1}\fi
-  \ifdim\ulBaselineAdjustment>2pt\relax\else
-    \errmessage{melody verse baseline was not increased}\fi}
+  \ULtestverse{#1}{2pt}}
 \makeatother
 \begin{document}
 \begin{ulSongs}{}
 \beginsong{Verse Modifiers}
-  \ulBaselineAdjustment=2pt
+  \ulVerseBaseline{2}{0}{0}
   \beginverse\ULtestverse{0pt}{2pt}\ULtestnumbered
     |\[C]Plain verse.
   \endverse\ULtestverseended

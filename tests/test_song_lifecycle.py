@@ -16,11 +16,14 @@ import unittest
 
 import test_index_lifecycle as index_helpers
 from index_records import index_events
-from test_tex_integration import ROOT, TEX_ASSETS
+from test_tex_integration import ROOT
 
 
-def document(body: str, preamble: str = "") -> str:
-    return (r"\documentclass[oneside,openany,maintitle={Lifecycle}]{ulsbs-songbook}"
+def document(body: str, preamble: str = "", *, variant: str = "default") -> str:
+    selector = "" if variant == "default" else rf"\def\ulBuildVariant{{{variant}}}" + "\n"
+    availability = "" if variant == "default" else f"variants={{default,{variant}}},"
+    return (selector + r"\documentclass[" + availability
+            + r"oneside,openany,maintitle={Lifecycle}]{ulsbs-songbook}"
             + "\n" + r"\ulShowTags{false}\ulShowPhase{false}" + "\n" + preamble
             + "\n" + r"\begin{document}" + "\n" + body
             + "\n" + r"\end{document}" + "\n")
@@ -398,31 +401,19 @@ class SongLifecycleTests(unittest.TestCase):
         for missing in ("offered to:", "Key:", "Good keys:"):
             self.assertNotIn(missing, text)
 
-    def test_lifecycle_never_calls_vendor_song_implementations(self):
-        # Poison both renderer and index aliases to expose hidden vendor calls.
-        preamble = r"""
-\ExplSyntaxOn
-\clist_map_inline:nn
- {SB@@@beginsong,SB@endsong,SB@parsetitles,SB@bskvfmt,SB@beginverse,SB@obeylines,
-  SB@newindex,SB@displayindex,SB@addtoindex}
- {\cs_set_protected:cpn {#1}{\PackageError{test}{Vendor~song~fallback}{}}}
-\ExplSyntaxOff
-\ulNewIndex{customidx}{custom_title}
-"""
-        output = self.compile_source(document(r"""
+    def test_custom_title_index_matches_the_default_title_index(self):
+        self.compile_source(document(r"""
 \begin{ulSongs}{titleidx,tagidx,customidx}
 \beginsong{Owned lifecycle}[id={owned},key={F#},gk={B&},tags={fire}]\endsong
 \end{ulSongs}
 \ulShowIndex[1]{Titles}{titleidx}
 \ulShowIndex[1]{Tags}{tagidx}
 \ulShowIndex[1]{Custom titles}{customidx}
-""", preamble), passes=3)
-        self.assertNotIn("Vendor song fallback", output)
+""", r"\ulNewIndex{customidx}{custom_title}"), passes=3)
         self.assert_index_fragment("title")
         self.assert_index_fragment("tag")
         self.assertEqual((self.book / "custom_title.sbx").read_bytes(),
                          (self.book / "idx_title.sbx").read_bytes())
-        self.assertNotIn("SB@", (TEX_ASSETS / "ulsbs-song.code.tex").read_text())
 
     def test_explicit_empty_selection_omits_every_song_across_blocks(self):
         self.compile_source(document(r"""

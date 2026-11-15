@@ -13,11 +13,11 @@ import xml.etree.ElementTree as ET
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from test_pdf_transposition_layers import pdf_command
 from test_tex_integration import FIXTURES
-from ulsbs import lilypond_scores, pipeline
+from ulsbs import lilypond_scores, pipeline, variants
 from ulsbs.config import Config
 from ulsbs.engine_assets import EngineAssets
 from ulsbs.jobs import Job
@@ -45,6 +45,11 @@ class CharangoTests(unittest.TestCase):
             (self.root / child).mkdir()
         self.doc = self.root / "charango.tex"
         self.fixture = (FIXTURES / self.doc.name).read_text()
+        self.fixture = self.fixture.replace(
+            r"\documentclass{ulsbs-songbook}",
+            r"\documentclass[variants={default,charango,bassclef}]{ulsbs-songbook}",
+        )
+        self.fixture = self.fixture.replace("theMelody =", "theChords = \\chordmode { c1 }\ntheMelody =")
         self.assertIn('"ulsbs-include-tail.ly"', self.fixture)
         self.assertNotIn("tail-notab", self.fixture)
         self.doc.write_text(self.fixture)
@@ -54,8 +59,8 @@ class CharangoTests(unittest.TestCase):
         self.cfg = replace(Config(), runtime=SimpleNamespace(project_paths=paths, in_container=False))
         self.ui = Mock()
 
-    def prepare(self, variant, name):
-        job = Job(self.doc, self.doc.stem, variant, self.root / name)
+    def prepare(self, variant, name, *, multikey=False):
+        job = Job(self.doc, self.doc.stem, variant, self.root / name, multikey=multikey)
         pipeline.prepare_compile_dir(self.ui, EngineAssets(), self.cfg, job)
         source = pipeline.make_variant_tex(job, self.cfg)
         env, includes, _ = pipeline.build_include_paths(self.cfg, job)
@@ -77,7 +82,10 @@ class CharangoTests(unittest.TestCase):
         self.assertEqual(len(score.graphics), 1)
         pdf = (job.compile_dir / (score.graphics[0] + ".pdf")).read_bytes()
         words = self.words(pdf)
-        digits = [row[0] for row in words if re.fullmatch(r"\d+", row[0])]
+        # Poppler's reading order can follow TAB string rows. Musical order is
+        # left-to-right, independently of ChordNames and staff vertical spacing.
+        digits = [row[0] for row in sorted(words, key=lambda row: row[1])
+                  if re.fullmatch(r"\d+", row[0])]
         self.assertTrue(words)
         return score, words, digits
 
@@ -85,21 +93,37 @@ class CharangoTests(unittest.TestCase):
         charango = self.prepare("charango", "charango")
         score, evidence, digits = self.compile(charango)
         self.assertEqual(len(digits), 4, "each real TabNoteHead must render a fret number")
-        self.assertEqual(digits, ["0", "3", "5", "3"], "charango tuning/fret positions")
+        self.assertEqual(digits, ["3", "5", "0", "3"], "charango tuning/fret positions")
         # A no-op charango injection must not silently pass as guitar tablature.
         _, guitar, guitar_digits = self.compile(self.prepare("default", "guitar"))
         self.assertEqual(len(guitar_digits), 4)
-        self.assertEqual(guitar_digits, ["0", "0", "3", "2"], "guitar tuning/fret positions")
+        self.assertEqual(guitar_digits, ["3", "0", "2", "0"], "guitar tuning/fret positions")
         self.assertNotEqual(digits, guitar_digits)
         self.assertNotEqual(evidence, guitar)
-        _, bass, bass_digits = self.compile(self.prepare("bassclef", "bass"))
+        _, ordinary_bass, ordinary_bass_digits = self.compile(self.prepare("bassclef", "bass"))
+        bass_prepared = self.prepare("bassclef", "bass-multikey", multikey=True)
+        bass_score, bass, bass_digits = self.compile(bass_prepared)
+        self.assertEqual((bass, bass_digits), (ordinary_bass, ordinary_bass_digits))
         self.assertEqual(bass_digits, [])  # The production bass-clef tail omits TAB.
+        self.assertIn("C", [row[0] for row in bass], "bass score retains ChordNames")
+        self.assertIn('\\clef "bass"', (bass_prepared[0].compile_dir /
+                      "ulsbs-assets/ly/ulsbs-include-tail.ly").read_text())
         self.assertNotEqual(bass, guitar)
 
         _, repeated, repeated_digits = self.compile(charango)
         self.assertEqual((repeated, repeated_digits), (evidence, digits))
         _, fresh, fresh_digits = self.compile(self.prepare("charango", "charango-fresh"))
         self.assertEqual((fresh, fresh_digits), (evidence, digits))
+
+        # Change only the registered recipe, not the selected variant identity.
+        registry = {**variants.VARIANTS,
+                    "default": replace(variants.VARIANTS["default"], score_recipe="charango")}
+        with patch.object(variants, "VARIANTS", registry):
+            for multikey in (False, True):
+                with self.subTest(remapped_multikey=multikey):
+                    remapped = self.prepare("default", f"remapped-{multikey}", multikey=multikey)
+                    remapped_score, remapped_words, remapped_digits = self.compile(remapped)
+                    self.assertEqual((remapped_words, remapped_digits), (evidence, digits))
 
         # The staff-only production tail deliberately omits tablature.
         self.doc.write_text(self.fixture.replace("ulsbs-include-tail.ly", "ulsbs-include-tail-notab.ly"))
@@ -108,7 +132,8 @@ class CharangoTests(unittest.TestCase):
         self.assertNotEqual(staff_only, evidence)
 
         # Use the production multikey score assembler, not synthetic PDF shapes.
-        job, _, env, includes = charango
+        job, _, env, includes = remapped
+        score = remapped_score
         dimensions = tuple(lilypond_scores._dimensions(job.compile_dir / (graphic + ".pdf"))
                            for graphic in score.graphics)
         alternatives = []
@@ -121,13 +146,28 @@ class CharangoTests(unittest.TestCase):
                 )
                 self.assertIsNotNone(graphic, (reason, (job.compile_dir / log).read_text()))
                 pdf = (job.compile_dir / (graphic + "-1.pdf")).read_bytes()
-                numbers = [row[0] for row in self.words(pdf)
+                numbers = [row[0] for row in sorted(self.words(pdf), key=lambda row: row[1])
                            if re.fullmatch(r"\d+", row[0])]
                 self.assertEqual(len(numbers), 4)
                 alternatives.append((self.words(pdf), numbers))
         self.assertEqual(alternatives[0], (evidence, digits))
         self.assertNotEqual(alternatives[1][0], alternatives[0][0])
         self.assertNotEqual(alternatives[1][1], alternatives[0][1])
+
+        job, _, env, includes = bass_prepared
+        dimensions = tuple(lilypond_scores._dimensions(job.compile_dir / (graphic + ".pdf"))
+                           for graphic in bass_score.graphics)
+        for interval, target, chord in ((0, {"letter": 0, "pitch": 0}, "C"),
+                                        (2, {"letter": 1, "pitch": 2}, "D")):
+            with self.subTest(bass_interval=interval):
+                graphic, reason, log = lilypond_scores._engrave(
+                    bass_score, {"letter": 0, "pitch": 0, "minor": 0}, target,
+                    interval, interval, dimensions, job.compile_dir, env, includes,
+                )
+                self.assertIsNotNone(graphic, (reason, (job.compile_dir / log).read_text()))
+                words = self.words((job.compile_dir / (graphic + "-1.pdf")).read_bytes())
+                self.assertIn(chord, [row[0] for row in words])
+                self.assertFalse(any(re.fullmatch(r"\d+", row[0]) for row in words))
 
 
 if __name__ == "__main__":

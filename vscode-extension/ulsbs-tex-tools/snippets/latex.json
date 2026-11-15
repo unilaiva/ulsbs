@@ -1,4 +1,48 @@
 {
+  "Verse baseline glue (ULSBS)": {
+    "prefix": "ulVerseBaseline",
+    "body": "\\ulVerseBaseline{${1:1.8}}{${2:0}}{${3:0}}$0",
+    "description": "Set total nominal lyric baseline glue using nonnegative capital-A height scalars (natural, stretch, shrink). Apply after font setup; values are illustrative, not defaults."
+  },
+  "Inter-verse glue (ULSBS)": {
+    "prefix": "ulVerseSeparation",
+    "body": "\\ulVerseSeparation{${1:1.7}}{${2:0}}{${3:.2}}$0",
+    "description": "Set inter-verse glue using nonnegative capital-A height scalars (natural, stretch, shrink). Apply after font setup; values are illustrative, not defaults."
+  },
+  "Minimum lyric-line clearance (ULSBS)": {
+    "prefix": "ulVerseMinimumGap",
+    "body": "\\ulVerseMinimumGap{${1:1pt}}$0",
+    "description": "Set minimum clearance between lyric lines in the current scope. The dimension is illustrative, not a default."
+  },
+  "Read verse spacing scalar (ULSBS)": {
+    "prefix": "ulVerseSpacingScale",
+    "body": "\\ulVerseSpacingScale{${1|baseline,separation|}}{${2|natural,stretch,shrink|}}$0",
+    "description": "Read the stored scalar for a relative spacing calculation; this does not set spacing."
+  },
+  "Variant availability class option (ULSBS)": {
+    "prefix": "variants",
+    "body": "variants={default,lyric,charango,bassclef}$0",
+    "description": "Declare literal availability in the main document's class options. Keep default; omitting the option means default-only."
+  },
+
+  "Local feature visibility request (ULSBS)": {
+    "prefix": "ulLocalShow",
+    "body": "\\ulLocalShow{${1|chords,notes,beats,measures,scores,altchords,translation,explanation,passage,feeler,key,goodkeys,musiccomments,authors,offeredto,extrainfo,tags,phase,phaseintoc,imageinchaptername,imageonchapterfrontpage|}}{${2|true,false|}}$0",
+    "description": "Set a grouped local visibility request; true cannot override book permission. notes means inline pitches; scores means whole scores."
+  },
+
+  "Variant identity branches (ULSBS)": {
+    "prefix": "ulIfVariant",
+    "body": "\\ulIfVariant{${1|default,lyric,charango,bassclef|}}{${2:yes}}{${3:no}}$0",
+    "description": "Branch on immutable variant identity, not feature visibility."
+  },
+
+  "Effective musical visibility branches (ULSBS)": {
+    "prefix": "ulIfMusical",
+    "body": "\\ulIfMusical{${1:yes}}{${2:no}}$0",
+    "description": "Branch on effective chords OR inline pitches OR whole scores in this scope; excludes beats and measures."
+  },
+
   "Chord definition (ULSBS)": {
     "prefix": "\\[",
     "body": "\\[${1}]",
@@ -110,6 +154,16 @@
       "\\end{passage}"
     ],
     "description": "Insert passage with an optional language code and a required title argument (which may be empty)."
+  },
+
+  "Alternate passage (ULSBS)": {
+    "prefix": "passage*",
+    "body": [
+      "\\begin{passage}*[$1]{${2:Title}}",
+      "\t$0",
+      "\\end{passage}"
+    ],
+    "description": "Insert an alternate-style passage. The star follows the opening environment delimiter; language is optional and title braces are required."
   },
 
   "begin{feeler} ... end{feeler} (ULSBS)": {

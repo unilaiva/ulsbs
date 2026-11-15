@@ -8,7 +8,6 @@ from __future__ import annotations
 import tempfile
 import unittest
 from dataclasses import replace
-from itertools import product
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -25,8 +24,8 @@ class MultikeyJobTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.doc = self.root / "book_A5.tex"
         self.source = (
-            "\\documentclass{ulsbs-songbook}\n"
-            "%%%ULSBS-EXTRA-VARIANTS:charango, bassclef % unchanged comment\n"
+            "\\documentclass[variants={lyric,default,charango,bassclef},"
+            "subtitle={A, B}]{ulsbs-songbook}\n"
         )
         self.doc.write_text(self.source, encoding="utf-8")
         self.cfg = replace(
@@ -37,54 +36,97 @@ class MultikeyJobTests(unittest.TestCase):
         )
 
     def test_expansion_matrix_and_isolated_directories(self) -> None:
-        for multikey, lyrics, extra in product((False, True), repeat=3):
-            with self.subTest(multikey=multikey, lyrics=lyrics, extra=extra):
-                jobs = build_job_queue(replace(
-                    self.cfg, multikey_books=multikey, lyricbooks=lyrics,
-                    extrainstrumentbooks=extra,
-                ))
-                variants = ["default"]
-                if lyrics:
-                    variants.append("lyrics")
-                if extra:
-                    variants.extend(("charango", "bassclef"))
-                expected = [(variant, False) for variant in variants]
-                if multikey:
-                    expected.extend((variant, True) for variant in variants if variant != "lyrics")
-                self.assertEqual([(job.variant, job.multikey) for job in jobs], expected)
-                self.assertEqual(len({job.compile_dir for job in jobs}), len(jobs))
-                self.assertEqual(len({build_job_basename(job) for job in jobs}), len(jobs))
-                for job in jobs:
-                    edition_dir = job.variant + ("-multikey" if job.multikey else "")
-                    self.assertEqual(
-                        job.compile_dir.relative_to(self.root / "temp").parts,
-                        (self.doc.stem, edition_dir),
-                    )
+        for multikey in (False, True):
+            for selection in ("all", ("default",), ("lyric",), ("bassclef", "default")):
+                with self.subTest(multikey=multikey, selection=selection):
+                    self.assert_queue(multikey, selection)
         self.assertEqual(self.doc.read_text(encoding="utf-8"), self.source)
+
+    def assert_queue(self, multikey, selection):
+        """Compare selected identities and registry-supported edition expansion."""
+        jobs = build_job_queue(replace(
+            self.cfg, multikey_books=multikey, variants=selection,
+        ))
+        variants = [name for name in ("default", "lyric", "charango", "bassclef")
+                    if selection == "all" or name in selection]
+        expected = [(variant, False) for variant in variants]
+        if multikey:
+            expected.extend((variant, True) for variant in variants if variant != "lyric")
+        self.assertEqual([(job.variant, job.multikey) for job in jobs], expected)
+        self.assertEqual(len({job.compile_dir for job in jobs}), len(jobs))
+        self.assertEqual(len({build_job_basename(job) for job in jobs}), len(jobs))
+        for job in jobs:
+            edition_dir = job.variant + ("-multikey" if job.multikey else "")
+            self.assertEqual(
+                job.compile_dir.relative_to(self.root / "temp").parts,
+                (self.doc.stem, edition_dir),
+            )
+
+    def test_subsets_follow_declaration_order_without_adding_default(self) -> None:
+        self.doc.write_text(
+            r"\documentclass[variants={bassclef,lyric,default,charango}]{ulsbs-songbook-custom}",
+            encoding="utf-8",
+        )
+        for selection, expected in (
+            ("all", ["default", "bassclef", "lyric", "charango"]),
+            (("charango", "lyric"), ["lyric", "charango"]),
+            (("bassclef",), ["bassclef"]),
+        ):
+            jobs = build_job_queue(replace(self.cfg, variants=selection, multikey_books=False))
+            self.assertEqual([job.variant for job in jobs], expected)
+
+    def test_collection_intersections_and_unmatched_requests_fail_before_outputs(self) -> None:
+        other = self.root / "other.tex"
+        other.write_text(r"\documentclass{ulsbs-songbook}", encoding="utf-8")
+        cfg = replace(self.cfg, songbooks=(other, self.doc), variants=("lyric", "bassclef"))
+        jobs = build_job_queue(cfg)
+        self.assertEqual([job.variant for job in jobs], ["lyric", "bassclef", "bassclef"])
+        self.assertTrue(all(job.doc_tex_abs == self.doc for job in jobs))
+        from unittest.mock import patch
+        from ulsbs.cli import print_variant_selections
+
+        ui = UI(use_colors=False)
+        with patch.object(ui, "info_line") as info:
+            print_variant_selections(ui, cfg, jobs)
+        self.assertEqual([call.args[0] for call in info.call_args_list], [
+            "other.tex: selected <none>; skipped lyric, bassclef (unavailable)",
+            "book_A5.tex: selected lyric, bassclef",
+        ])
+        for docs in ((other,), (other, self.doc)):
+            other.write_text(r"\documentclass{ulsbs-songbook}", encoding="utf-8")
+            self.doc.write_text(r"\documentclass{ulsbs-songbook}", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "unavailable variants|available in none"):
+                build_job_queue(replace(cfg, songbooks=docs))
+        self.assertFalse((self.root / "temp").exists())
+
+    def test_invalid_availability_and_selection_fail_before_outputs(self) -> None:
+        for option in ("{}", "{lyric}", "{default,lyrics}", "{default,default}", r"\names"):
+            self.doc.write_text(
+                r"\documentclass[variants=" + option + "]{ulsbs-songbook}", encoding="utf-8"
+            )
+            with self.assertRaises(ValueError):
+                build_job_queue(self.cfg)
+        for selection in (("lyrics",), ("default", "default"), ()):
+            with self.assertRaises(ValueError):
+                build_job_queue(replace(self.cfg, variants=selection))
+        self.assertFalse((self.root / "temp").exists())
 
     def test_package_defaults_create_only_ordinary_jobs(self) -> None:
         cfg = replace(Config(), songbooks=(self.doc,), runtime=self.cfg.runtime)
         jobs = build_job_queue(cfg)
         self.assertEqual([(job.variant, job.multikey) for job in jobs], [
-            ("default", False), ("lyrics", False), ("charango", False), ("bassclef", False),
+            ("default", False), ("lyric", False), ("charango", False), ("bassclef", False),
         ])
 
-    def test_companions_follow_selection_without_new_variant_comments(self) -> None:
-        for marker, variants in (
-            ("", ["default", "lyrics"]),
-            ("% ULSBS-EXTRA-VARIANTS: bassclef", ["default", "lyrics", "bassclef"]),
-            ("% ULSBS-EXTRA-VARIANTS: multikey", ["default", "lyrics"]),
-            ("% ULSBS-EXTRA-VARIANTS: CHARANGO % bassclef", ["default", "lyrics", "charango"]),
+    def test_omission_and_legacy_markers_do_not_enable_companions(self) -> None:
+        for marker in (
+            "", "% ULSBS-EXTRA-VARIANTS: bassclef", "% ULSBS-EXTRA-VARIANTS: charango",
         ):
             with self.subTest(marker=marker):
                 source = "\\documentclass{ulsbs-songbook}\n" + marker + "\n"
                 self.doc.write_text(source, encoding="utf-8")
                 jobs = build_job_queue(self.cfg)
-                self.assertEqual([job.variant for job in jobs if not job.multikey], variants)
-                self.assertEqual(
-                    [job.variant for job in jobs if job.multikey],
-                    [variant for variant in variants if variant != "lyrics"],
-                )
+                self.assertEqual([job.variant for job in jobs], ["default", "default"])
                 self.assertEqual(self.doc.read_text(encoding="utf-8"), source)
 
     def test_non_songbook_does_not_gain_optional_variants(self) -> None:
@@ -94,7 +136,7 @@ class MultikeyJobTests(unittest.TestCase):
         )
         jobs = build_job_queue(self.cfg)
         self.assertEqual([(job.variant, job.multikey) for job in jobs], [
-            ("default", False), ("default", True),
+            ("default", False),
         ])
 
     def test_multiple_documents_have_independent_unique_directories(self) -> None:
@@ -148,7 +190,7 @@ class MultikeyJobTests(unittest.TestCase):
 
     def test_job_names_keep_standard_names_and_order_markers(self) -> None:
         markers = {
-            "default": "", "lyrics": "_LYRICS-ONLY",
+            "default": "", "lyric": "_LYRICS-ONLY",
             "charango": "_CHARANGO", "bassclef": "_BASSCLEF",
         }
         for stem in ("book", "book_A5", "book_A4", "book_NODEPLOY_A5"):
@@ -157,7 +199,7 @@ class MultikeyJobTests(unittest.TestCase):
                     job = Job(self.doc, stem, variant, self.root / variant)
                     self.assertFalse(job.multikey)
                     self.assertEqual(build_job_basename(job), build_variant_basename(stem, marker))
-                    if variant != "lyrics":
+                    if variant != "lyric":
                         self.assertEqual(
                             build_job_basename(replace(job, multikey=True)),
                             build_variant_basename(stem, marker) + "_MULTIKEY",

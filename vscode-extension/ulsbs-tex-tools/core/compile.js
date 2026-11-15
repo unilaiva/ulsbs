@@ -96,7 +96,7 @@ function registerCompileCommands(vscode, context, songbookService, treeControlle
       args.push(uri.fsPath || uri.path);
     }
 
-    const terminal = vscode.window.createTerminal("ULSBS Build");
+    const terminal = vscode.window.createTerminal({ name: "ULSBS Build", cwd: folder.uri });
     terminal.show(true);
     terminal.sendText([shellQuote(compilePath), ...args.map(shellQuote)].join(" "));
   }

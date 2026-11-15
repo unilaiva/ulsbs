@@ -402,7 +402,7 @@ class UI:
         # to gray. These are used for the ":<variant>" suffix in fmt_doc().
         self._variant_colors: dict[str, str] = {
             "default": self.C_GREEN,
-            "lyrics": self.C_YELLOW,
+            "lyric": self.C_YELLOW,
             "charango": self.C_MAGENTA,
             "bassclef": self.C_BROWN,
         }

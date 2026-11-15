@@ -19,6 +19,7 @@
 % for allocated lengths/skips, and direct assignment for penalty count registers.
 
 % === Paragraph stretching and named colors ===
+
 % Allow further emergency stretching to fix some "overfull hbox" situations.
 % See: https://www.tex.ac.uk/FAQ-overfull.html
 \setlength{\emergencystretch}{3em}
@@ -55,9 +56,8 @@
 \definecolor{ulLanguagePortugueseColor}{rgb}{0,0.26,0.26}%
 \definecolor{ulLanguageFinnishColor}{rgb}{0,0.05,0.38}%
 
-% === PDF presentation and load-time metadata ===
-% Book metadata strings must already be set; later string changes alone do not
-% repeat this setup. A consumer can explicitly call \hypersetup after loading.
+% === PDF presentation and preamble-finalized metadata ===
+
 \hypersetup{linkbordercolor=ulLinkBoxColor,%
             linkcolor=ulInternalLinkColor,%
             urlcolor=ulUrlLinkColor,%
@@ -68,13 +68,38 @@
             %                 scrolling, odd pageson the right
             pdfpagelayout=TwoColumnRight,%
             pdfpagemode=UseNone,% alt. UseThumbs or UseOutlines (bookmarks)
-            pdfprintscaling=None,%
-            pdftitle={\ulThisBookTitle},%
-            pdfauthor={\ulBookAuthor},%
-            pdfsubject={\ulBookSubject},%
-            pdfkeywords={\ulBookKeywords},%
-            pdfinfo={DocumentVersion={\ulBookVersion}}% this is a custom attr
+            pdfprintscaling=None%
            }
+
+\ExplSyntaxOn
+% Defer book-string expansion until after author preamble configuration, before
+% hyperref's begin-document metadata publication. Explicit hypersetup keys win,
+% including empty values. Observe the existing handlers rather than replacing
+% hyperref's parsing. Nonempty values from an earlier hyperref load also win.
+\clist_map_inline:nn {title,author,subject,keywords}
+  {
+    \tl_if_empty:cF {@pdf#1} {\cs_gset:cpn {ulsbs@pdf@#1@explicit} {}}
+    \exp_args:Nc \pretocmd {KV@Hyp@pdf#1}
+      {\cs_gset:cpn {ulsbs@pdf@#1@explicit} {}}
+      {} {\msg_fatal:nnn {ulsbs} {variant} {Cannot~observe~PDF~metadata~key}}
+  }
+% pdfinfo may contain arbitrary author fields; retain those and add only our
+% version field when the author has not supplied DocumentVersion explicitly.
+\cs_new_protected:Npn \ulsbs@finalizemetadata
+  {
+    \cs_if_exist:cF {ulsbs@pdf@title@explicit}
+      {\hypersetup{pdftitle={\ulsbs@variantpdftitle}}}
+    \cs_if_exist:cF {ulsbs@pdf@author@explicit}
+      {\hypersetup{pdfauthor={\ulBookAuthor}}}
+    \cs_if_exist:cF {ulsbs@pdf@subject@explicit}
+      {\hypersetup{pdfsubject={\ulBookSubject}}}
+    \cs_if_exist:cF {ulsbs@pdf@keywords@explicit}
+      {\hypersetup{pdfkeywords={\ulBookKeywords}}}
+    \cs_if_exist:cF {HyInfo@Value@DocumentVersion}
+      {\hypersetup{pdfinfo={DocumentVersion={\ulBookVersion}}}}
+  }
+\AddToHook{begindocument/before}{\ulsbs@finalizemetadata}
+\ExplSyntaxOff
 
 \renewcommand{\ulSongNumberBackgroundColor}{ulSongNumberBackgroundColor} % song-number background in prelude
 \renewcommand{\ulNoteBackgroundColor}{ulNoteBackgroundColor} % \musicnote and \textnote background
@@ -82,6 +107,7 @@
 
 
 % === Font hooks and spacing policy ===
+
 % Set lyric font style:
 \providecommand{\ulLyricFont}{\sffamily\large}
 % Verse layout: use the public lyric-font policy.
@@ -120,19 +146,16 @@
 \renewcommand{\ulIndexTitleFont}{\sffamily} % index title font
 \renewcommand{\ulIndexLyricFont}{\sffamily\slshape} % alternate (lyric) index title font
 \renewcommand{\ulIndexTagFont}{\sffamily\small\slshape} % tag index font
-% Notes: use same text color for music notes as for chords and do not show
-% at all in lyric-only books
-\renewcommand\musicnote[1]{\ifulLyricOnly\else\textnote{\color{ulChordColor}#1}\fi}%
 % Text/music notes are prose even when inserted within an active verse.
 
 % Chord accidentals: use a real sharp from the Noto Symbol font.
 \renewcommand{\ulSharpSymbol}{\textsuperscript{{\ulSymbolFont♯}}}%
 %
-% Verse spacing: keep baseline adjustment rigid.
-\ulBaselineAdjustment=0pt plus 0pt minus 0pt
-% Verse separation: bounded shrink lets the page builder fit tight songs.
-\ulVerseSep=14pt plus 0pt minus 2.7pt% was: 2.9pt%
-% Chord line: set the distance from chords to lyrics.
+% Scalar verse spacing defaults are installed later, after font configuration.
+% Share the annotation baseline even for empty beat-only anchors. Retained ink
+% still determines height: beat marks do not acquire a full chord/pitch row.
+% Authors may replace this hook to supply each anchor's clearance. The retained
+% line pass can lift neighboring rows to that minimum without rerunning the hook.
 \renewcommand{\ulChordLineParams}{%
   \baselineskip=\ulChordLineBaselineSkip%
   \lineskiplimit=\ulChordLineLineskipLimit%

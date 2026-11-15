@@ -25,6 +25,11 @@
   \pdf_version_gset:n{1.7}
 \ExplSyntaxOff
 
+% Resolve availability/identity from the raw main options before base-class key
+% processing. Preset application waits for the outermost custom class to return.
+\let\ulsbs@classpath\@empty
+\input{ulsbs-variants.code.tex}
+
 \RequirePackage{kvoptions}
 \RequirePackage{etoolbox}
 
@@ -43,6 +48,8 @@
 \DeclareStringOption{keywords} % use comma as separator
 \DeclareStringOption[english]{language}
 \DeclareStringOption[8mm]{bindingoffset}
+% Availability is owned by the raw main-source reader, not inherited key values.
+\DeclareStringOption{variants}
 
 % Omit book class's paper sizes, as we use our own paper option that will be
 % passed to geometry, which will handle paper size and layout settings.

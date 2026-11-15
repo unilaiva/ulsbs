@@ -294,9 +294,10 @@ function analyzeText(text) {
 
     if (token.type === "beginpassage") {
       const lang = token.language || "";
-      const label = lang ? `passage [${lang}]` : "passage";
-      const detail = lang ? `passage (${lang})` : "passage";
-      const node = makeNode("passage", label, detail, token, { language: lang });
+      const name = token.starred ? "passage*" : "passage";
+      const label = lang ? `${name} [${lang}]` : name;
+      const detail = lang ? `${name} (${lang})` : name;
+      const node = makeNode("passage", label, detail, token, { language: lang, starred: token.starred });
 
       if (!attachChild(node, ["song"])) {
         analysis.outline.push(node);

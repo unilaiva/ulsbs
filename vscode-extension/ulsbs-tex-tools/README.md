@@ -17,22 +17,6 @@ your first project or set up compilation, follow the
 syntax and book customization, use
 [Writing Songbooks](https://github.com/unilaiva/ulsbs/blob/main/WRITING_SONGBOOKS.md).
 
-## Contents
-
-- [Contents](#contents)
-- [Installation](#installation)
-- [Getting started](#getting-started)
-  - [Create a main document](#create-a-main-document)
-- [Compiling songbooks](#compiling-songbooks)
-- [Editing features](#editing-features)
-  - [Snippets and completions](#snippets-and-completions)
-  - [Chords and melody hints](#chords-and-melody-hints)
-- [Configuration](#configuration)
-- [Browser support](#browser-support)
-- [Troubleshooting](#troubleshooting)
-- [Development](#development)
-- [License](#license)
-
 ## Installation
 
 The extension is shipped as source in the ULSBS repository. Build a `.vsix`
@@ -95,7 +79,8 @@ workspace folder** in a multi-root workspace. It creates the main document,
 not a complete project: add its filename to `songbooks` in `ulsbs-config.toml`
 if you want the normal CLI build to select it. A wrapper-only or separately
 installed engine can still compile existing documents, but does not satisfy
-this template command's vendored-class check.
+this command's engine check. The template declares `variants={default}`;
+add companion names to that list to make them available to your build profiles.
 
 ## Compiling songbooks
 
@@ -135,6 +120,11 @@ not only those listed in the selected config profile's `songbooks` array.
 Use the CLI directly when you want the configuration alone to select books,
 or when you need flags such as `--quick`.
 
+Variant and edition selection belongs in your compiler profile, not the editor
+settings. For example, use `variants = ["default", "lyric"]` in a profile after
+declaring both variants in the main source. The extension passes the profile and
+main filenames to the compiler; it does not choose variants independently.
+
 ## Editing features
 
 The extension understands `\beginsong` / `\endsong`, all canonical
@@ -163,42 +153,51 @@ Use Tab to move between a snippet's editable fields.
 | `melodychordzero` | A zero-advance melody block and chord |
 | `melodychordskip` | An annotation excluded from chord memorization |
 | `translation`, `explanation`, `feeler` | The corresponding text environment |
-| `passage` | Text environment with an optional language code and a required title argument |
+| `passage`, `passage*` | Normal or alternate-style passage with an optional language code and a required title argument |
 | `lilywrap` | Wrapped LilyPond environment delimiters |
 | `begin{ulSongs}` | Book-level song collection with its required index-list argument |
 | `ulMelodyPrimaryPosition`, `ulMelodySecondaryPosition`, `ulMelodyStyleMapping` | Scoped melody-placement/style commands |
 | `ulTagFile` | Preamble-only tag filename setter with its required argument |
 | `ulNewIndex`, `ulNewAuthorIndex`, `ulNewTagIndex` | Title/author/tag index declaration with identifier and filename-stem arguments |
 | `ulIndexTagFont` | Tag-index heading font customization |
+| `variants` | Literal `variants={default,lyric,charango,bassclef}` class option |
+| `ulLocalShow` | Scoped visibility request with all 21 canonical feature choices and `true`/`false` |
+| `ulIfVariant` | Immutable variant-identity test with yes/no branches |
+| `ulIfMusical` | Effective musical-visibility test with yes/no branches |
+| `ulVerseBaseline`, `ulVerseSeparation` | Natural/stretch/shrink spacing scalars, applied after font setup |
+| `ulVerseMinimumGap` | Minimum lyric-line clearance as a dimension |
+| `ulVerseSpacingScale` | Read a stored spacing scalar for relative calculations |
+
+Place `variants={default,lyric,charango,bassclef}` literally in the main document's
+`\documentclass[...]` options and remove unwanted companion variants, keeping
+`default`. Omitting the option declares only `default`, not an implicit lyric
+variant. Availability does not select the current variant; choose it through
+the compiler profile.
+
+`\ulLocalShow{translation}{false}` changes a local request until its enclosing
+TeX group ends; `true` cannot override a book-wide prohibition. Its `notes` key
+means inline pitches and `scores` means whole scores. `\ulIfVariant{name}{yes}{no}`
+tests identity independently of visibility. `\ulIfMusical{yes}{no}` tests effective
+chords OR inline pitches OR whole scores at the call site, excluding beats and
+measure bars; it does not test whether the song actually contains music.
 
 Snippets provide a starting point, not a complete song or score. Fill in any
 required arguments and music using the writing guide's examples.
-The `ulSongs` snippet and template suggest `titleidx,authidx,tagidx`; this required list
-actively routes automatic records, rather than merely selecting displayed indices.
-Leave the braces empty to collect no automatic records (explicit entry overrides
-remain available). Author indices are generated from `by=` fields just like title
-and tag indices, without a manual fragment or external indexer. These names
-are identifiers, not filename stems or fixed keywords. Reuse an identifier to
-accumulate across blocks, or declare separate IDs/stems for separate indices.
-`\ulShowIndex` displays the full previous-pass destination regardless of position;
-numbering restarts at 1 in each block and reference-label overrides are available.
-Likewise, keep `{}` for an untitled `passage` rather
-than deleting its title argument.
+The `ulSongs` snippet and template suggest `titleidx,authidx,tagidx`, routing title,
+author and tag index records. Leave the required braces empty to collect none.
+Likewise, keep `{}` for an untitled `passage` rather than deleting its title argument.
+The `passage*` prefix inserts `\begin{passage}*[LANG]{Title}` with the same
+`\end{passage}` closing command.
 
-Tag definitions use ordered UTF-8 `.txt` files with one `canonical|alias|alias`
-line per tag, trimmed whitespace, blank lines and full-line `#`/`%` comments, and
-no legacy `1` count lines. Default lookup checks `include/tags.txt` first, then
-`tags.txt` through TeX lookup. `\ulTagFile{my-tags.txt}` selects an explicit file
-in the preamble; a missing configured file fails without fallback. Convert legacy
-files explicitly with v2's `--tags-file FILE` and a required
-`--check`/`--diff`/`--write` mode; the editor does not migrate them.
-`\ulSongIndexes{false}` disables index collection and display;
-`\ulShowTags{false}` hides prelude badges only.
+Verse clearance is automatic. Baseline and separation snippets use nonnegative
+scalars multiplying the lyric font's capital-`A` height; their sample values are
+not defaults. The baseline is the total nominal distance, not an addition to the
+font size. Apply these
+setters after font customization and keep grouped overrides around the verses
+they affect. Actual ink may require extra clearance.
 
-Completions and the new-book template use the current naming API: short lowercase
-song-content commands, `ulCamelCase` settings, and explicit boolean setters such
-as `\ulShowTags{false}`. The editor does not migrate sources or supply old runtime
-aliases. Review existing books with
+The extension targets the current ULSBS API and does not migrate sources.
+Review existing books with
 [`ulsbs-migrate-syntax-v2`](https://github.com/unilaiva/ulsbs/blob/main/README.md#ulsbs-migrate-syntax-v2);
 older melody syntax needs v1 first, then v2.
 
@@ -298,47 +297,6 @@ run LaTeX or LilyPond in the browser.
   first workspace folder and will not overwrite an existing filename.
 - **Profile is missing:** define it under `[profiles.NAME]` in the project-root
   config, then choose the profile again.
-
-## Development
-
-From this extension directory, run `npm ci` to install development tooling.
-Open the directory itself in VS Code and press **F5** to launch an Extension
-Development Host. `npm run compile-web` builds the browser bundle;
-`npm run watch-web` rebuilds it while developing.
-
-Run the focused regression checks:
-
-```sh
-npm run test:grammar
-npm run test:songbooks
-npm run test:verse
-```
-
-The verse checks also cover current assembly/melody names, required environment
-arguments, and public heading outline entries. After changing source files,
-rebuild the web bundle with `npm run compile-web`, or run `npm run package` to
-rebuild it and create a fresh VSIX. Existing bundles and VSIX files are generated
-artifacts and are not updated by editing the sources alone.
-
-Source navigation:
-
-| Area | Files |
-|---|---|
-| Entry point and settings | `extension.js`, `package.json`, `core/config.js` |
-| Static snippets and contextual completions | `snippets/latex.json`, `core/completions.js` |
-| LaTeX injection grammar | `syntaxes/ulsbs-chord.injection.tmLanguage.json` |
-| Indentation and folding | `language-configuration.json` |
-| Tokens and structural parsing | `core/songsyntax.js`, `core/parser.js` |
-| Issues and VS Code diagnostics | `core/issues.js`, `core/diagnostics.js` |
-| Outline symbols and region tracking | `core/symbols.js`, `core/regions.js` |
-| Detection, indexing, and file selection | `core/workspace.js`, `core/songbooks.js`, `core/filetypes.js` |
-| Songbooks sidebar and build actions | `core/tree.js`, `core/compile.js`, `core/ui.js` |
-| Decorations and shared editor updates | `core/chords.js`, `core/measures.js`, `core/editor-updater.js` |
-| New-book template | `assets/songbook-template_A5.tex` |
-
-When adding ULSBS syntax, update the tokenizer and parser first, then any issue
-handling, outline mapping, completions, snippets, grammar, and tests affected by
-the change. Keep author-facing syntax aligned with the ULSBS writing guide.
 
 See the [extension changelog](CHANGELOG.md) for release history.
 

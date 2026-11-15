@@ -6,13 +6,14 @@
 % See ulsbs/WRITING_SONGBOOKS.md for document class options and song syntax.
 
 \documentclass[
+  variants={default}, % Add lyric, charango or bassclef to make them available.
   paper={a5paper},
   maintitle={My Songbook},
   author={Songbook Author},
   subject={Songbook}
 ]{ulsbs-songbook}
 
-% Icon for the default variant (can have multiple: [foo][bar][etc])
+% Optional source cover icons (can have multiple: [foo][bar][etc]).
 \ulSetVariableCoverIcons[ulsbs-tag-icon-chords_EN_512x512px]
 
 \renewcommand{\ulImprintPageFootnote}{%
@@ -21,6 +22,9 @@
 
 % For visibility switches and fonts, see the layout and style reference in
 % ulsbs/WRITING_SONGBOOKS.md. Put preamble settings here, after the class loads.
+% Select variants through the compiler configuration, not in this source.
+% Use \ulLocalShow{feature}{true|false} for grouped requests in song content;
+% a local true cannot override a book-wide false.
 
 \begin{document}
 

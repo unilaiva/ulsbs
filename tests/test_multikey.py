@@ -12,10 +12,9 @@ import unittest
 
 import test_song_lifecycle as song_helpers
 from test_pdf_transposition_layers import PdfStructure
-from test_tex_integration import ROOT, TEX_ASSETS
+from test_tex_integration import ROOT
 
 
-ADAPTER = TEX_ASSETS / "ulsbs-multikey.code.tex"
 PREAMBLE = r"""
 \ExplSyntaxOn
 \int_if_exist:NF \l__ulsbs_music_transpose_int
@@ -79,9 +78,6 @@ class MultikeyTests(unittest.TestCase):
 
     def metadata(self):
         return json.loads((self.book / "book.ulsbs-multikey.json").read_text())["multikey_info"]
-
-    def test_adapter_has_no_vendor_private_consumers(self):
-        self.assertNotIn("SB@", ADAPTER.read_text())
 
     def test_alternate_geometry_and_original_once(self):
         output = self.compile_source(document(r"""
