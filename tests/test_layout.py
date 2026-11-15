@@ -23,6 +23,37 @@ class LayoutTests(unittest.TestCase):
     compile_source = lifecycle.SongLifecycleTests.compile_source
     pdf_text = lifecycle.SongLifecycleTests.pdf_text
 
+    def test_toc_three_digit_page_numbers_fit(self):
+        body = r"""
+\ulToc
+\setcounter{page}{102}
+\begin{ulSongs}{}
+\beginsong{First TOC entry}
+\beginverse*
+First lyric.
+\endverse
+\endsong
+\end{ulSongs}
+\clearpage
+\setcounter{page}{999}
+\begin{ulSongs}{}
+\beginsong{Second TOC entry}
+\beginverse*
+Second lyric.
+\endverse
+\endsong
+\end{ulSongs}
+"""
+        for variant in ("default", "lyric"):
+            with self.subTest(variant=variant):
+                output = self.compile_source(document(body, variant=variant),
+                                             label=variant, passes=2)
+                self.assertNotIn("Overfull \\hbox", output)
+                toc = (self.book / "book.toc").read_text()
+                for page in ("102", "999"):
+                    self.assertIn("}{" + page + "}{", toc)
+                    self.assertIn(page, self.pdf_text())
+
     def test_two_column_output_preserves_intentional_colors(self):
         import pikepdf
 
