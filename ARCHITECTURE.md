@@ -827,6 +827,12 @@ nested or continuing segments, and zero disables it. `\prep` uses the highest
 occupied reference bottom with its authored fallback. Retained meter boxes are
 consumed once; geometry repair never re-renders their tokens.
 
+When a repeat's final paragraph wraps, `\endrep` emits an attributed zero-extent
+continuation box for the remaining bar fragment. Trailing `\hss` absorbs the
+content and verse insets without moving the ink or producing an overfull hbox.
+The retained attributes and source-line depth still drive geometry repair and
+shipout coalescing.
+
 Inline `\lrep`/`\rrep` signs remain music-owned. Lyric-row dots/bars always print;
 only effective chords add upper dots at `\ulChordLineBaselineSkip`. The common
 height helper uses the current baseline plus the WithChords adjustment when chords

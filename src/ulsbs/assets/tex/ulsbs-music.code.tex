@@ -536,8 +536,9 @@
     {\ifnum\ulsbs@prevparlines>1\relax
         \advance\ulsbs@prevparlines by -1\relax
         \dim_set:Nn \l_tmpa_dim {\prevdepth}\nointerlineskip
+          % Absorb the positive insets without moving the zero-width overlay ink.
           \hbox~attr~\c__ulsbs_music_end_fragment_attribute_int~\number\l_tmpa_dim~to~0pt{\kern\l__ulsbs_verse_indent_dim
-           \raisebox{\l_tmpa_dim}[0pt][0pt]{\ulsbs@rep@drawbars}}
+           \raisebox{\l_tmpa_dim}[0pt][0pt]{\ulsbs@rep@drawbars}\hss}
      \fi
      \ulsbs@rep@endmarker\ulBoolSetFalse{g__ulsbs_repeat_cont_prop}{\the\ulsbs@rep@level}
      \global\advance\ulsbs@rep@level -1\relax}

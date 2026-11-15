@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Lari Natri <lari.natri@iki.fi>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Repeat-box diagnostics are observable even for unselected source songs."""
+"""Wrapped repeat overlays preserve layout without spurious box diagnostics."""
 
 import json
 import os
@@ -11,6 +11,7 @@ import unittest
 
 import test_song_lifecycle as lifecycle
 import test_song_order as order
+from test_pdf_transposition_layers import rendered_pages, words_and_geometry
 from test_tex_integration import ROOT
 
 
@@ -28,8 +29,8 @@ class RepeatDiagnosticsTests(unittest.TestCase):
 
     def check(self, *, selected, mode):
         # Each final source paragraph wraps, so endrep must emit the remaining
-        # repeat-bar fragment. Its zero-width box deliberately has positive
-        # natural width: content inset plus the optional verse inset.
+        # repeat-bar fragment. Its zero-width overlay must accommodate the
+        # content inset plus the optional verse inset without a warning.
         body = "\\begin{ulSongs}{titleidx,authidx,tagidx}\n"
         body += "\\beginsong{Wrapped}[id={wrapped},by={Author},tags={fire}]\n"
         for option in ("", "[1]"):
@@ -54,8 +55,6 @@ class RepeatDiagnosticsTests(unittest.TestCase):
                                     variant="lyric" if mode == "lyrics" else "default")
         label = f"{mode}-{'selected' if selected else 'excluded'}"
         outputs = self.compile_checked(source, label)
-        expected_lines = [n for n, line in enumerate(source.splitlines(), 1)
-                          if line.strip() == r"\endrep"] * 2
         report = {}
         for result, output in outputs.items():
             compiled = source
@@ -73,12 +72,7 @@ class RepeatDiagnosticsTests(unittest.TestCase):
         path = self.diagnostics / self._testMethodName / label / "warnings.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        self.assertEqual([row["line"] for row in report["output"]["source_lines"]],
-                         expected_lines, str(path))
-        widths = [float(re.search(r"\(([\d.]+)pt", warning).group(1))
-                  for warning in report["output"]["warnings"]]
-        self.assertTrue(all(width > 0 for width in widths), str(path))
-        self.assertGreater(widths[1], widths[0], str(path))
+        self.assertEqual(report["output"]["warnings"], [], str(path))
         self.assertEqual(report["output"]["effects"], ["3", "3"], str(path))
 
     def test_excluded_wrapped_repeat_diagnostics(self):
@@ -90,6 +84,50 @@ class RepeatDiagnosticsTests(unittest.TestCase):
         for mode in ("chorded", "hidden", "lyrics"):
             with self.subTest(mode=mode):
                 self.check(selected=True, mode=mode)
+
+    def test_wrapped_repeat_overlays_preserve_legacy_output(self):
+        body = r"\begin{ulSongs}{}\beginsong{Wrapped repeats}[id={wrapped},by={Author},key={C}]"
+        for option in ("", "[1]"):
+            body += ("\n\\beginverse" + option + "\n\\beginrep\n\\Effect |\\[C]"
+                     + "wrapped words " * 18 + "\n\\endrep\n\\endverse\n")
+        body += ("\\beginverse[1]\n\\beginrep\nOpening repeat line.\n\\beginrep\n\\Effect |\\[C]"
+                 + "nested words " * 18
+                 + "\n\\endrep\n\\endrep\n\\endverse\n"
+                 + r"\beginverse*AFTERMARK\endverse\endsong\end{ulSongs}"
+                 + r"\typeout{REPEAT-EFFECTS:\the\Effects}")
+        legacy_patch = r"""
+\makeatletter\ExplSyntaxOn
+% Preserve literal spaces in the primitive hbox attr syntax while patching.
+\char_set_catcode_space:n {32}
+\patchcmd{\endrep}{\hss}{}{}{\errmessage{Repeat overlay glue not found}}
+\ExplSyntaxOff\makeatother
+"""
+        modes = (("chorded", "default", "", False),
+                 ("hidden", "default", r"\chordsoff", False),
+                 ("lyrics", "lyric", "", False),
+                 ("layered", "default", "", True))
+        for mode, variant, setting, layers in modes:
+            with self.subTest(mode=mode):
+                snapshots = []
+                for label, patch in (("current", ""), ("legacy", legacy_patch)):
+                    preamble = (r"\ulSongPosition{0}\newcount\Effects"
+                                r"\def\Effect{\global\advance\Effects1\relax}"
+                                + setting + patch)
+                    source = (r"\def\ulPdfTranspositionLayers{" + str(layers).lower() + "}"
+                              + lifecycle.document(body, preamble, variant=variant))
+                    output = self.compile_source(source, label=f"{mode}-{label}", passes=2)
+                    if label == "current":
+                        self.assertNotIn("Overfull \\hbox", output)
+                    else:
+                        self.assertIn("Overfull \\hbox (7.33pt too wide)", output)
+                        self.assertIn("Overfull \\hbox (17.33pt too wide)", output)
+                    self.assertEqual(re.findall(r"REPEAT-EFFECTS:(\d+)", output), ["3", "3"])
+                    pdf = (self.book / "book.pdf").read_bytes()
+                    anchors = [line for line in (self.book / "book.ulsbs.psv").read_text().splitlines()
+                               if line.startswith("ID-NR-PAGE-Y|")]
+                    self.assertTrue(anchors)
+                    snapshots.append((words_and_geometry(pdf), rendered_pages(pdf), anchors))
+                self.assertEqual(*snapshots)
 
     def test_configured_gap_reaches_real_adjacent_source_sections(self):
         capture = r"""\directlua{
