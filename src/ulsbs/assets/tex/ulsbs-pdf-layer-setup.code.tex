@@ -313,7 +313,7 @@
 % Optional generated-score fallback: #1/#2 are ignored, #3 is the graphic file.
 % A generated score-layer file may replace this when interactive layers are on.
 \ifdefstring{\ulMultikeyLilypondScores}{true}{%
-  \providecommand{\ulScoreSystem}[3]{\includegraphics{#3}}%
+  \providecommand{\ulScoreSystem}[3]{\ulsbs@scoregraphic{#3}}%
   \ifulsbs@pdflayers\input{ulsbs-score-layers.tex}\fi
 }{}
 

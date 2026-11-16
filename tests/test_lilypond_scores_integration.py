@@ -22,6 +22,7 @@ from unittest.mock import Mock, patch
 import pikepdf
 
 from test_multikey_metadata import layer_page_dependencies
+from test_pdf_transposition_layers import rendered_pages, words_and_geometry
 from test_tex_integration import compile_fixture
 
 from ulsbs import lilypond_scores, pipeline, resultlist
@@ -66,6 +67,150 @@ def score_layer_drawings(pdf, *, generic=False):
 
 
 class LilyPondScoreIntegrationTests(unittest.TestCase):
+    def test_score_width_limit_preserves_natural_and_alternative_fitting(self):
+        for tool in ('lualatex', 'pdftoppm'):
+            if shutil.which(tool) is None:
+                self.skipTest(f'{tool} is not installed')
+        files = {}
+        for name, width in (('original', 60), ('wide', 349), ('alternative', 100)):
+            with pikepdf.Pdf.new() as graphic:
+                page = graphic.add_blank_page(page_size=(width, 30))
+                page.Contents = pikepdf.Stream(
+                    graphic, f'0.2 0.4 0.6 rg 0 0 {width} 30 re f\n'.encode())
+                buffer = io.BytesIO()
+                graphic.save(buffer)
+                files[name + '-1.pdf'] = buffer.getvalue()
+        prefix = 'ulsbs:transpose:v1:id:width-limit'
+        files['source-effects.ulsbs-score-variants.tex'] = (
+            lilypond_scores._minimum_scale_tex()
+            + rf'\expandafter\def\csname ULScoreVariant:{prefix}:cccccc:0-0-0:t01\endcsname'
+            + '{alternative}\n').encode()
+        snapshots = []
+        for multikey in (False, True):
+            with self.subTest(multikey=multikey):
+                for name, identity, graphic in (('fit', 'aaaaaa', 'original'),
+                                                 ('wide', 'bbbbbb', 'wide'),
+                                                 ('narrow', 'cccccc', 'original')):
+                    inclusion = (rf'\ulScoreSystem{{{identity}}}{{1}}{{{graphic}-1}}'
+                                 if multikey else rf'\includegraphics{{{graphic}-1}}')
+                    files[name + '-systems.tex'] = (
+                        r'\global\advance\ScoreEffects1 ' + inclusion + '%\n').encode()
+                source = (rf'\def\ulPdfTranspositionLayers{{{str(multikey).lower()}}}'
+                          + rf'\def\ulMultikeyLilypondScores{{{str(multikey).lower()}}}'
+                          + r'''
+\documentclass[oneside,openany]{ulsbs-songbook}
+\ulSongColumns{1}\ulSongPosition{0}
+\newcount\ScoreEffects\newbox\ScoreProbe\newbox\NaturalProbe
+\ExplSyntaxOn
+\cs_if_exist:NT \__ulsbs_score_alternative:nnn
+ {\cs_new_eq:NN \OriginalAlternative \__ulsbs_score_alternative:nnn
+  \cs_set_protected:Npn \__ulsbs_score_alternative:nnn #1#2#3
+   {\OriginalAlternative{#1}{#2}{#3}
+    \int_compare:nNnT {#3}={1}
+     {\iow_term:x {WIDTH-ALT-SCALE:#1/\fp_to_decimal:N\l__ulsbs_score_scale_fp}}}}
+\ExplSyntaxOff
+\begin{document}
+\begin{ulSongs}{}
+\beginsong{Score widths}[id={width-limit},key={C}]
+\beginverse*BEFOREMARK\endverse
+{\hsize=100pt\linewidth=100pt
+ \setbox\NaturalProbe=\hbox{\includegraphics{original-1}}
+ \setbox\ScoreProbe=\hbox{\input{fit-systems.tex}}
+ \typeout{WIDTH-FIT:\the\wd\ScoreProbe/\the\ht\ScoreProbe/\the\dp\ScoreProbe}
+ \typeout{WIDTH-NATURAL:\the\wd\NaturalProbe/\the\ht\NaturalProbe/\the\dp\NaturalProbe}
+ \noindent\box\ScoreProbe\par}
+{\hsize=349.96893pt\linewidth=349.96893pt
+ \setbox\ScoreProbe=\hbox{\input{wide-systems.tex}}
+ \typeout{WIDTH-WIDE:\the\wd\ScoreProbe/\the\ht\ScoreProbe/\the\dp\ScoreProbe}
+ \noindent\box\ScoreProbe\par}
+{\hsize=40pt
+ \setbox\ScoreProbe=\hbox{\input{narrow-systems.tex}}
+ \typeout{WIDTH-NARROW:\the\wd\ScoreProbe/\the\ht\ScoreProbe/\the\dp\ScoreProbe}
+ \noindent\box\ScoreProbe\par
+ \setbox\ScoreProbe=\hbox{\includegraphics{wide-1}}
+ \typeout{WIDTH-UNRELATED:\the\wd\ScoreProbe}}
+\beginverse*AFTERMARK\endverse
+\endsong\end{ulSongs}
+\typeout{WIDTH-EFFECTS:\the\ScoreEffects}
+\end{document}
+''')
+                files['source-effects.tex'] = source.encode()
+                output, contents = compile_fixture('source-effects', files=files, passes=3,
+                                                   draft_passes=1, multikey=None)
+                self.assertNotIn('Overfull \\hbox', output)
+                self.assertNotIn('is too small', output)
+                self.assertIn('WIDTH-EFFECTS:3', output)
+                metrics = {name: tuple(float(value.removesuffix('pt')) for value in values.split('/'))
+                           for name, values in re.findall(r'WIDTH-(FIT|NATURAL|WIDE|NARROW):([\d.pt/]+)', output)}
+                self.assertEqual(metrics['FIT'], metrics['NATURAL'])
+                self.assertAlmostEqual(metrics['WIDE'][0], 349.96893, places=3)
+                self.assertAlmostEqual(metrics['NARROW'][0], 40, places=3)
+                self.assertAlmostEqual(metrics['NARROW'][1] / metrics['FIT'][1],
+                                       40 / metrics['FIT'][0], places=4)
+                self.assertGreater(float(re.search(r'WIDTH-UNRELATED:([\d.]+)pt', output)[1]), 350)
+                if multikey:
+                    scales = dict(re.findall(r'WIDTH-ALT-SCALE:([a-f0-9]+)/([\d.]+)', output))
+                    self.assertAlmostEqual(float(scales['cccccc']), .60, places=6)
+                    with pikepdf.open(io.BytesIO(contents)) as pdf:
+                        drawings = score_layer_drawings(pdf, generic=True)
+                    self.assertNotEqual(drawings[prefix + ':t00'], drawings[prefix + ':t01'])
+                snapshots.append((metrics, rendered_pages(contents), words_and_geometry(contents)))
+        self.assertEqual(len(snapshots), 2)
+        self.assertEqual(snapshots[0], snapshots[1])
+
+    def test_score_file_width_limit_is_scoped_and_preserves_graphics_arguments(self):
+        if shutil.which('lualatex') is None:
+            self.skipTest('lualatex is not installed')
+        with pikepdf.Pdf.new() as graphic:
+            page = graphic.add_blank_page(page_size=(80, 30))
+            page.Contents = pikepdf.Stream(graphic, b'0.2 0.4 0.6 rg 0 0 80 30 re f\n')
+            buffer = io.BytesIO()
+            graphic.save(buffer)
+            image = buffer.getvalue()
+        source = r'''
+\documentclass{ulsbs-songbook}
+\newcount\ImageEffects\newcount\FileEffects\newbox\ScoreProbe
+\let\NativeGraphics\includegraphics
+\renewcommand\includegraphics{\global\advance\ImageEffects1\relax\NativeGraphics}
+\def\ScoreFile{score-1}
+\begin{document}
+{\hsize=50pt\linewidth=70pt
+ \setbox\ScoreProbe=\hbox{\includegraphics{\ScoreFile}}
+ \typeout{ARG-BEFORE:\the\wd\ScoreProbe}
+ \input{outer-systems.tex}
+ \setbox\ScoreProbe=\hbox{\includegraphics{\ScoreFile}}
+ \typeout{ARG-AFTER:\the\wd\ScoreProbe}}
+\typeout{ARG-EFFECTS:\the\ImageEffects/\the\FileEffects}
+Unrelated text.
+\end{document}
+'''
+        outer = r'''
+\global\advance\FileEffects1\relax
+\setbox\ScoreProbe=\hbox{\includegraphics{\ScoreFile}}
+\typeout{ARG-PLAIN:\the\wd\ScoreProbe}
+\setbox\ScoreProbe=\hbox{\includegraphics*[width=40pt]{\ScoreFile}}
+\typeout{ARG-OPTIONS:\the\wd\ScoreProbe}
+\input{inner-systems.tex}
+\setbox\ScoreProbe=\hbox{\includegraphics{\ScoreFile}}
+\typeout{ARG-NESTED:\the\wd\ScoreProbe}
+'''
+        inner = r'''
+\global\advance\FileEffects1\relax
+\setbox\ScoreProbe=\hbox{\includegraphics[0,0][80,30]{\ScoreFile}}
+\typeout{ARG-LEGACY:\the\wd\ScoreProbe}
+'''
+        files = {'source-effects.tex': source.encode(), 'score-1.pdf': image,
+                 'outer-systems.tex': outer.encode(), 'inner-systems.tex': inner.encode()}
+        output, _ = compile_fixture('source-effects', files=files, passes=2, multikey=False)
+        self.assertNotIn('Overfull \\hbox', output)
+        widths = {name: float(value) for name, value in re.findall(r'ARG-([A-Z]+):([\d.]+)pt', output)}
+        self.assertEqual(widths['BEFORE'], widths['AFTER'])
+        self.assertGreater(widths['BEFORE'], 80)
+        for name in ('PLAIN', 'NESTED', 'LEGACY'):
+            self.assertAlmostEqual(widths[name], 50, places=3)
+        self.assertAlmostEqual(widths['OPTIONS'], 40, places=3)
+        self.assertIn('ARG-EFFECTS:6/2', output)
+
     def test_score_visibility_gates_generated_inclusions_layers_and_geometry(self):
         if shutil.which('lualatex') is None:
             self.skipTest('lualatex is not installed')

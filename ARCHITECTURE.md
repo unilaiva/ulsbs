@@ -1362,6 +1362,21 @@ Originals still use the normal LilyPond pipeline. The focused
 snippet identities while preserving their existing inter-system break tokens.
 Repeated references to the same system retain their original placements.
 
+Generated `*-systems.tex` inputs install a scoped graphics adapter through the
+LaTeX file hooks in `ulsbs.sty`. It retains each included system once, preserving
+the authored graphics command, star and optional arguments. The shared emitter
+shrinks a retained box proportionally only if it exceeds the smaller of
+`\linewidth` and `\hsize`; fitting systems remain unchanged. The override ends
+with the system file, so unrelated images retain their original behavior. This
+also covers bare LilyPond-file output outside `lilywrap` without changing generated
+files or relying on graphic filename hashes.
+
+The layered renderer bypasses this adapter while measuring the original and
+alternative graphics at natural size. After applying the existing alternative
+acceptance policy and assembling all layers, it applies the same display-width
+limit to the complete system box. Ordinary and layered editions therefore retain
+the same displayed dimensions without weakening the alternative-scale threshold.
+
 The existing first LuaLaTeX draft pass writes `<job>.ulsbs-scores.json` through
 `ulsbs-score-layers.tex` and `ulsbs-score-layers.lua`. This private request
 manifest contains the runtime song occurrence, effective tonic/mode, and twelve
@@ -1406,7 +1421,8 @@ TeX allows at most one scaled point of dimension-conversion noise per axis at
 the exact threshold. The applied scale is never rounded up; Python and cache
 validation still check the original PDF dimensions against the policy directly.
 Standalone TeX without bindings has no generated alternatives and retains the
-original notation at unity; that fallback is not a second shrinking policy.
+original notation instead of introducing another alternative-scale policy. The
+shared display-width limit applies independently.
 
 An omitted-tab diagnostic rejects that candidate even when LilyPond exits zero.
 A successful octave retry is normal operation, not a warning. If all candidates

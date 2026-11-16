@@ -623,6 +623,9 @@ select tuning, clef and tablature; bass-clef scores retain chord names even thou
 their preset hides inline chords. Use the compiler to build instrument variants
 with their matching scores.
 
+Score systems that are wider than the available line are automatically reduced
+to fit. Smaller systems keep their original size.
+
 ### Converting LilyPond lyrics
 
 The [`ulsbs-ly2tex` utility](README.md#ulsbs-ly2tex) helps convert ULSBS-style

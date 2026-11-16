@@ -255,8 +255,8 @@
     {\legacy_if:nTF {ulsbs@pdfsong}
       {\bool_if:NTF \g__ulsbs_song_active_bool
         {\__ulsbs_score_system:nnn {##1}{##2}{##3}}
-        {\includegraphics{##3}}}
-      {\includegraphics{##3}}}}
+        {\__ulsbs_score_graphic:n {##3}}}
+      {\__ulsbs_score_graphic:n {##3}}}}
 % Variant setup can load the score layer module after the private renderer.
 \AddToHook{file/ulsbs-score-layers.tex/after}{\__ulsbs_multikey_score_adapter:}
 \cs_if_exist:NT \__ulsbs_score_system:nnn {\__ulsbs_multikey_score_adapter:}

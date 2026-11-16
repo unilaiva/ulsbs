@@ -844,6 +844,52 @@
   \fi%
 }
 
+% Generated system files own score graphics, including bare lilypondfile output.
+% Keep the graphics override local; unrelated images retain graphicx's behavior.
+\ExplSyntaxOn
+\box_new:N \l__ulsbs_score_graphic_box
+\tl_new:N \l__ulsbs_score_graphic_args_tl
+\bool_new:N \l__ulsbs_score_graphics_active_bool
+\bool_new:N \l__ulsbs_score_graphics_raw_bool
+% Shrink retained score boxes uniformly only when wider than the current line.
+% Layered callers fit alternatives first, keeping their scale policy unchanged.
+\cs_new_protected:Npn \__ulsbs_score_emit:N #1
+  {\dim_compare:nNnT {\dim_min:nn {\linewidth}{\hsize}}>{0pt}
+    {\dim_compare:nNnT {\box_wd:N #1}>{\dim_min:nn {\linewidth}{\hsize}}
+      {\box_resize_to_wd:Nn #1 {\dim_min:nn {\linewidth}{\hsize}}}}
+   \leavevmode\box_use_drop:N #1}
+\cs_new_protected:Npn \__ulsbs_score_graphic:n #1
+  {\group_begin:
+   \bool_set_true:N \l__ulsbs_score_graphics_raw_bool
+   \hbox_set:Nn \l__ulsbs_score_graphic_box {\includegraphics{#1}}
+   \__ulsbs_score_emit:N \l__ulsbs_score_graphic_box
+   \group_end:}
+\cs_new_eq:NN \ulsbs@scoregraphic \__ulsbs_score_graphic:n
+\NewDocumentCommand \__ulsbs_score_includegraphics {s o o m}
+  {\group_begin:
+   \tl_clear:N \l__ulsbs_score_graphic_args_tl
+   \IfBooleanT{#1}{\tl_put_right:Nn \l__ulsbs_score_graphic_args_tl {*}}
+   \IfValueT{#2}{\tl_put_right:Nn \l__ulsbs_score_graphic_args_tl {[#2]}}
+   \IfValueT{#3}{\tl_put_right:Nn \l__ulsbs_score_graphic_args_tl {[#3]}}
+   \tl_put_right:Nn \l__ulsbs_score_graphic_args_tl {{#4}}
+   \bool_if:NTF \l__ulsbs_score_graphics_raw_bool
+     {\exp_after:wN \__ulsbs_score_raw_graphics: \l__ulsbs_score_graphic_args_tl}
+     {\hbox_set:Nn \l__ulsbs_score_graphic_box
+       {\exp_after:wN \__ulsbs_score_raw_graphics: \l__ulsbs_score_graphic_args_tl}
+      \__ulsbs_score_emit:N \l__ulsbs_score_graphic_box}
+   \group_end:}
+\cs_new_protected:Npn \__ulsbs_score_graphics_begin:
+  {\group_begin:
+   \bool_if:NF \l__ulsbs_score_graphics_active_bool
+     {\bool_set_true:N \l__ulsbs_score_graphics_active_bool
+      \cs_set_eq:NN \__ulsbs_score_raw_graphics: \includegraphics
+      \cs_set_eq:NN \includegraphics \__ulsbs_score_includegraphics}}
+\cs_new_protected:Npn \__ulsbs_score_file:n #1
+  {\exp_args:Nne \regex_match:nnT {-systems\.tex\Z}{\CurrentFile}{#1}}
+\AddToHook{file/before}{\__ulsbs_score_file:n {\__ulsbs_score_graphics_begin:}}
+\AddToHook{file/after}{\__ulsbs_score_file:n {\group_end:}}
+\ExplSyntaxOff
+
 % Whole-score display gate, after LilyPond preprocessing. Capture without expansion
 % and guard lazily: hidden bodies never start blocks, request layers or change fill.
 % Unlike environ's cleanup stream, +b keeps unmatched hidden conditionals opaque.
