@@ -661,6 +661,11 @@ Useful environment variables:
 | `ULSBS_MAX_PARALLEL` | Upper bound for parallel jobs; unset or `0` means automatic |
 | `ULSBS_MAX_CONTAINER_MEM_GB` | Container memory limit in GiB; `0` means no limit |
 | `ULSBS_USE_SYSTEM_TMP_FOR_TEMP` | `true` uses system `/tmp` for intermediate files |
+| `NO_COLOR` | Any non-empty value disables colored output, without disabling the spinner |
+| `ULSBS_NOSPINNER` | Any non-empty value disables the animated status spinner |
+
+The spinner is automatically disabled when stdout is redirected or `TERM=dumb`,
+including when compiling inside a container.
 
 If raising parallelism, also provide enough container memory. Roughly 1-2 GiB
 per job is a starting point, not a guarantee. A memory-backed `/tmp` can improve

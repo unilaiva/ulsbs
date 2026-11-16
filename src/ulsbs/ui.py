@@ -361,9 +361,10 @@ def _spinner_thread_main() -> None:
 
 @dataclass
 class UI:
-    """Small helper for colored, prefixed console messages."""
+    """Prefixed console messages with independently controllable colors and spinner."""
 
     use_colors: bool = True
+    use_spinner: bool = True
     run_diagnostics: list[Diagnostic] = field(default_factory=list, init=False)
 
     @contextmanager
@@ -651,19 +652,19 @@ class UI:
     def start_spinner(self, txt: str | None = None, spin: bool = True) -> None:
         """Start or update a status spinner on the last output line.
 
-        When enabled and supported by the current TTY, this shows an
-        animated dotted spinner (0..5 dots) after the given text. The
+        When use_spinner is enabled and supported by the current TTY, this shows an
+        animated dotted spinner (0..9 dots) after the given text. The
         spinner line is kept at the bottom of the output while other
         threads print lines using either this UI or plain print().
 
-        If output is not a TTY or the spinner cannot be used, this is a
-        no-op. Any internal errors while starting the spinner are
+        If use_spinner is False, output is not a TTY, or the spinner cannot be
+        used, this is a no-op. Any internal errors while starting the spinner are
         swallowed so that they never crash the program.
         """
         global _spinner_active, _spinner_text, _spinner_spin, _spinner_dots
         global _spinner_thread, _spinner_stop_event, _spinner_last_width, _spinner_saved_state, _spinner_generation
 
-        if not _detect_spinner_supported():
+        if not self.use_spinner or not _detect_spinner_supported():
             return
 
         with _output_lock:

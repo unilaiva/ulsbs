@@ -19,7 +19,7 @@ import ulsbs  # for getting version (though we are already inside the package)
 
 from .config import Config
 from .engine_assets import EngineAssets
-from .ui import UI
+from .ui import UI, _detect_spinner_supported
 from .util import sh_quote, which
 
 _CONTAINER_IMAGE_NAME = "ulsbs-compiler"
@@ -237,6 +237,10 @@ def run_self_in_container(
         ]
         if no_color_env is not None:
             env_args.extend(["-e", f"NO_COLOR={no_color_env}"])
+        # The container's pseudo-TTY hides host redirection and terminal limits.
+        # Forward spinner suppression independently of the color policy.
+        if not ui.use_spinner or not _detect_spinner_supported():
+            env_args.extend(["-e", "ULSBS_NOSPINNER=1"])
 
         bind_py = f"type=bind,src={str(py_root)},dst=/ulsbs-py,ro"
         bind_root = f"type=bind,src={str(mount_root)},dst={container_workdir}"

@@ -58,6 +58,14 @@ The executable wrappers are `ulsbs-compile`, `ulsbs-bookmeta`,
 The [README](README.md) documents their author-facing use; release procedures
 are in [MAINTAINERS.md](MAINTAINERS.md).
 
+Compiler output policy belongs to `ui.py`, independently of build configuration.
+The CLI bootstraps `--plain-output` before creating the UI and full parser, so
+colors and the spinner are disabled even for help and argument errors. This
+CLI-only policy overrides environment/TTY detection without changing the process
+environment. Container delegation preserves the flag and forwards disabled colors
+and spinner state via `NO_COLOR` and `ULSBS_NOSPINNER`, since its pseudo-TTY hides
+host redirection. Without the flag, `NO_COLOR` remains color-only.
+
 ## Song Engine
 
 `ulsbs-songbook.cls` and `ulsbs.sty` are the public entries. Both reject engines

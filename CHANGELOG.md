@@ -63,6 +63,10 @@
 
 ### Other highlights
 
+- Container builds now honor host spinner suppression, keeping redirected output
+  free of spinner frames and forwarding `ULSBS_NOSPINNER` independently of color settings.
+- Added `--plain-output` argument: disables colors and the status spinner on the host
+  and in the container, overriding environment settings.
 - Fixed duplicate transparency groups in imported PDF graphics. PDF optimization
   now requires `pikepdf` 10+ for host builds; rebuild older compiler images.
 - Updated editor syntax help and snippets for the current public API, and

@@ -44,6 +44,9 @@ def build_arg_parser(ui: UI) -> argparse.ArgumentParser:
         ),
         formatter_class=ArgFormatter,
     )
+    # Python 3.14+ argparse has its own color policy; keep it aligned with the UI.
+    if hasattr(p, "color"):
+        p.color = ui.use_colors
 
     p.add_argument(
         "files",
@@ -58,6 +61,8 @@ def build_arg_parser(ui: UI) -> argparse.ArgumentParser:
 
     p.add_argument("-q", "--quick", action="store_true", help="Quick dev build: default variant only, no extras, no deploy, keep temp")
     p.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+    p.add_argument("--plain-output", action="store_true",
+                   help="Disable colors and the status spinner")
 
     p.add_argument("-p", "--profile", default="default", help=f"Choose profile defined in {CONFIG_FILENAME} to use")
     p.add_argument("--variants", default=None, metavar="all|NAME,...",
@@ -536,7 +541,14 @@ def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
 def main(argv: List[str] | None = None) -> int:
     """CLI entrypoint. Returns process exit code."""
 
-    ui = UI(use_colors=True)
+    # Read output policy before constructing the UI/parser so help and errors
+    # are plain too. The full parser still validates all arguments in _run_cli.
+    output_parser = argparse.ArgumentParser(prog="ulsbs-compile", add_help=False)
+    if hasattr(output_parser, "color"):
+        output_parser.color = False
+    output_parser.add_argument("--plain-output", action="store_true")
+    output_args, _ = output_parser.parse_known_args(argv)
+    ui = UI(use_colors=not output_args.plain_output, use_spinner=not output_args.plain_output)
     assets = EngineAssets()
     try:
         # Delegate to the inner implementation so we can centralize
