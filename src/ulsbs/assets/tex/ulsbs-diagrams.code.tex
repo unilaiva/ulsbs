@@ -15,11 +15,13 @@
 % resulting data, not the original specification. Titles use source transposition
 % but diagrams are not twelve alternative fingerings for interactive PDF keys.
 %
-% The exceptional global state is pending lyric inset: a diagram rendered inside
+% Pending lyric inset is global: a diagram rendered inside
 % an annotation records grid alignment through inner box groups. The next
 % independent chord begin snapshots and clears it, and its emit wrapper prepends
 % a kern before the lyric is typeset. Adjacent annotations do not begin a new
 % independent anchor. This deferred state has no reset hook in this module.
+% The grid also retains finished boxes in a global frame across per-item groups;
+% output clears the frame, while allocated register slots are reused.
 
 \ProvidesFile{ulsbs-diagrams.code.tex}[Guitar diagrams]
 
@@ -47,10 +49,25 @@
 \box_new:N \l__ulsbs_diagram_title_box
 \box_new:N \l__ulsbs_diagram_base_box
 \box_new:N \l__ulsbs_diagram_top_box
+\box_new:N \l__ulsbs_diagram_body_box
+\box_new:N \l__ulsbs_diagram_box
+\dim_new:N \l__ulsbs_diagram_nut_depth_dim
+\bool_new:N \l__ulsbs_diagram_grid_bool
+\seq_new:N \g__ulsbs_diagram_grid_items_seq
+\int_new:N \g__ulsbs_diagram_grid_item_int
+\int_new:N \l__ulsbs_diagram_grid_columns_int
+\int_new:N \l__ulsbs_diagram_grid_column_int
+\int_new:N \l__ulsbs_diagram_grid_rows_int
+\dim_new:N \l__ulsbs_diagram_grid_width_dim
+\dim_new:N \l__ulsbs_diagram_grid_gap_dim
+\dim_new:N \g__ulsbs_diagram_grid_max_dim
+\dim_new:N \l__ulsbs_diagram_grid_cell_dim
+\tl_new:N \l__ulsbs_diagram_grid_row_tl
 \bool_new:N \l__ulsbs_diagram_annotation_bool
 \dim_new:N \g__ulsbs_diagram_pending_indent_dim
 \dim_new:N \l__ulsbs_diagram_lyric_indent_dim
 \msg_new:nnn {ulsbs-diagrams}{syntax}{Invalid~guitar~diagram:~#1.}
+\msg_new:nnn {ulsbs-diagrams}{grid}{Invalid~chord~diagram~grid:~#1.}
 
 % #1 is syntax detail; abort rather than render a partially parsed specification.
 \cs_new_protected:Npn \__ulsbs_diagram_fail:n #1
@@ -217,39 +234,50 @@
   {\group_begin:
    \__ulsbs_diagram_parse:n {#2}
    \mode_leave_vertical:
-   \vbox{\normalfont\normalsize
+    \normalfont\normalsize
+     % Grid column gaps replace the title's standalone outer thin spaces.
      \hbox_set:Nn \l__ulsbs_diagram_title_box
-       {\thinspace{\ulPrintChord{\transposehere{#1}\strut}}\thinspace}
-     \hbox_set:Nn \l__ulsbs_diagram_base_box
-       {{\sffamily\fontsize{10}{10}\selectfont\l__ulsbs_diagram_base_tl}}
-     \hbox_set:Nn \l__ulsbs_diagram_top_box
-       {\seq_map_function:NN \l__ulsbs_diagram_strings_seq \__ulsbs_diagram_top:n}
-     \dim_set:Nn \l__ulsbs_diagram_width_dim
-       {\dim_max:nn {\box_wd:N \l__ulsbs_diagram_title_box}
-          {\box_wd:N \l__ulsbs_diagram_base_box+\l__ulsbs_diagram_grid_dim}}
-     \bool_if:NT \l__ulsbs_diagram_annotation_bool
-       {\dim_gset:Nn \g__ulsbs_diagram_pending_indent_dim
-          {\box_wd:N \l__ulsbs_diagram_base_box+2.5pt}
-        \dim_set:Nn \l_tmpa_dim {\l__ulsbs_diagram_width_dim
-          -\box_wd:N \l__ulsbs_diagram_base_box-\l__ulsbs_diagram_grid_dim}
-        \tex_divide:D \l_tmpa_dim by 2\scan_stop:
-        \dim_gadd:Nn \g__ulsbs_diagram_pending_indent_dim {\l_tmpa_dim}}
-     \hbox_to_wd:nn {\l__ulsbs_diagram_width_dim}
-       {\hfil\hbox_unpack_drop:N \l__ulsbs_diagram_title_box\hfil}
-     \kern-1pt\nointerlineskip
-     \hbox_to_wd:nn {\l__ulsbs_diagram_width_dim}
-       {\hfil\vtop{\kern3pt\box_use_drop:N \l__ulsbs_diagram_base_box}
-        \vtop{\box_use_drop:N \l__ulsbs_diagram_top_box
-          \int_step_inline:nn {\l__ulsbs_diagram_rows_int}
-            {\int_set:Nn \l__ulsbs_diagram_row_int {##1}
-             \__ulsbs_diagram_rule:\hbox{\__ulsbs_diagram_row:}}
-          \__ulsbs_diagram_rule:
-          \kern1.5pt
-          \hbox{\tl_map_inline:Nn \l__ulsbs_diagram_fingers_tl
-            {\hbox_to_wd:nn {6pt}{\hfil
-              \str_if_in:nnF {X0O}{##1}{\sffamily\fontsize{6}{6}\selectfont##1}\hfil}}}}
-        \hfil}
-     \kern3pt}
+       {\bool_if:NF \l__ulsbs_diagram_grid_bool {\thinspace}
+        {\ulPrintChord{\transposehere{#1}\strut}}
+        \bool_if:NF \l__ulsbs_diagram_grid_bool {\thinspace}}
+    \hbox_set:Nn \l__ulsbs_diagram_base_box
+      {{\sffamily\fontsize{10}{10}\selectfont\l__ulsbs_diagram_base_tl}}
+    \hbox_set:Nn \l__ulsbs_diagram_top_box
+      {\seq_map_function:NN \l__ulsbs_diagram_strings_seq \__ulsbs_diagram_top:n}
+    \dim_set:Nn \l__ulsbs_diagram_width_dim
+      {\dim_max:nn {\box_wd:N \l__ulsbs_diagram_title_box}
+         {\box_wd:N \l__ulsbs_diagram_base_box+\l__ulsbs_diagram_grid_dim}}
+    \bool_if:NT \l__ulsbs_diagram_annotation_bool
+      {\dim_gset:Nn \g__ulsbs_diagram_pending_indent_dim
+         {\box_wd:N \l__ulsbs_diagram_base_box+2.5pt}
+       \dim_set:Nn \l_tmpa_dim {\l__ulsbs_diagram_width_dim
+         -\box_wd:N \l__ulsbs_diagram_base_box-\l__ulsbs_diagram_grid_dim}
+       \tex_divide:D \l_tmpa_dim by 2\scan_stop:
+       \dim_gadd:Nn \g__ulsbs_diagram_pending_indent_dim {\l_tmpa_dim}}
+    \dim_set:Nn \l__ulsbs_diagram_nut_depth_dim {\box_dp:N \l__ulsbs_diagram_top_box}
+    \hbox_set_to_wd:Nnn \l__ulsbs_diagram_body_box {\l__ulsbs_diagram_width_dim}
+      {\hfil\vtop{\kern3pt\box_use_drop:N \l__ulsbs_diagram_base_box}
+       \vtop{\box_use_drop:N \l__ulsbs_diagram_top_box
+         \int_step_inline:nn {\l__ulsbs_diagram_rows_int}
+           {\int_set:Nn \l__ulsbs_diagram_row_int {##1}
+            \__ulsbs_diagram_rule:\hbox{\__ulsbs_diagram_row:}}
+         \__ulsbs_diagram_rule:
+         \kern1.5pt
+         \hbox{\tl_map_inline:Nn \l__ulsbs_diagram_fingers_tl
+           {\hbox_to_wd:nn {6pt}{\hfil
+             \str_if_in:nnF {X0O}{##1}{\sffamily\fontsize{6}{6}\selectfont##1}\hfil}}}}
+       \hfil}
+    % Reference the nut rule, not the variable-height open/mute markers above it.
+    \dim_set:Nn \l__ulsbs_diagram_nut_depth_dim
+       {\box_dp:N \l__ulsbs_diagram_body_box+3pt-\l__ulsbs_diagram_nut_depth_dim}
+    \vbox_set:Nn \l__ulsbs_diagram_box
+      {\hbox_to_wd:nn {\l__ulsbs_diagram_width_dim}
+         {\hfil\hbox_unpack_drop:N \l__ulsbs_diagram_title_box\hfil}
+       \kern-1pt\nointerlineskip
+        \box_use_drop:N \l__ulsbs_diagram_body_box\kern3pt}
+    \bool_if:NTF \l__ulsbs_diagram_grid_bool
+      {\tex_lower:D \l__ulsbs_diagram_nut_depth_dim\box_use_drop:N \l__ulsbs_diagram_box}
+      {\box_use_drop:N \l__ulsbs_diagram_box}
    \group_end:\bool_set_false:N \l__ulsbs_diagram_annotation_bool}
 
 % #1/#2 are name/specification. Default non-octave source-transposition fallback
@@ -273,11 +301,96 @@
 % the diagram; otherwise call gtabtrans with a local direct-draw gtab binding so
 % a custom fallback can emit a replacement without recursively testing offsets.
 \cs_new_protected:Npn \__ulsbs_diagram_args:nn #1#2
-  {\group_end:
-   \int_compare:nNnTF {\int_mod:nn {\l__ulsbs_music_transpose_int}{12}}={0}
+   {\group_end:
+    \bool_if:NTF \l__ulsbs_diagram_grid_bool
+      {\__ulsbs_diagram_grid_item:nn {#1}{#2}}
+      {\__ulsbs_diagram_dispatch:nn {#1}{#2}}}
+
+\cs_new_protected:Npn \__ulsbs_diagram_dispatch:nn #1#2
+   {\int_compare:nNnTF {\int_mod:nn {\l__ulsbs_music_transpose_int}{12}}={0}
      {\__ulsbs_diagram_draw:nn {#1}{#2}}
      {\group_begin:\cs_set_eq:NN \gtab \__ulsbs_diagram_draw:nn
-      \gtabtrans{#1}{#2}\group_end:}}
+       \gtabtrans{#1}{#2}\group_end:}}
+
+% The global frame survives grouped per-item settings; nested grids are forbidden.
+% Only finished nodes are retained, and the environment clears them after output.
+\cs_new_protected:Npn \__ulsbs_diagram_grid_item:nn #1#2
+  {\int_gincr:N \g__ulsbs_diagram_grid_item_int
+   \tl_set:Nx \l_tmpa_tl
+     {g__ulsbs_diagram_grid_item_\int_use:N\g__ulsbs_diagram_grid_item_int _box}
+   \box_if_exist:cF {\l_tmpa_tl}{\exp_args:Nc \box_new:N {\l_tmpa_tl}}
+   \exp_args:Nc \hbox_gset:Nn {\l_tmpa_tl}{\__ulsbs_diagram_dispatch:nn {#1}{#2}}
+   % Resize finished nodes only; the nut baseline and single source evaluation survive.
+   \dim_compare:nNnT {\box_wd:c {\l_tmpa_tl}}>{\l__ulsbs_diagram_grid_width_dim}
+     {\exp_args:Nc \box_gresize_to_wd:Nn {\l_tmpa_tl}{\l__ulsbs_diagram_grid_width_dim}}
+   \dim_gset:Nn \g__ulsbs_diagram_grid_max_dim
+     {\dim_max:nn {\g__ulsbs_diagram_grid_max_dim}{\box_wd:c {\l_tmpa_tl}}}
+   \seq_gput_right:Nx \g__ulsbs_diagram_grid_items_seq {\int_use:N\g__ulsbs_diagram_grid_item_int}}
+
+\cs_new_protected:Npn \__ulsbs_diagram_grid_flush:
+  {\int_compare:nNnT {\l__ulsbs_diagram_grid_column_int}>{0}
+     {\int_compare:nNnT {\l__ulsbs_diagram_grid_rows_int}>{0}
+        {\penalty0\vskip\l__ulsbs_diagram_grid_gap_dim}
+      \nointerlineskip\noindent
+      \hbox_to_wd:nn {\l__ulsbs_diagram_grid_width_dim}
+        {\tl_use:N \l__ulsbs_diagram_grid_row_tl\hfil}\par
+      \int_incr:N \l__ulsbs_diagram_grid_rows_int
+      \int_zero:N \l__ulsbs_diagram_grid_column_int
+      \tl_clear:N \l__ulsbs_diagram_grid_row_tl}}
+
+\cs_new_protected:Npn \__ulsbs_diagram_grid_emit:
+  {\int_compare:nNnT {\g__ulsbs_diagram_grid_item_int}>{0}
+     {\int_set:Nn \l__ulsbs_diagram_grid_columns_int {1}
+      \dim_compare:nNnT {\g__ulsbs_diagram_grid_max_dim}>{0pt}
+       {\int_set:Nn \l__ulsbs_diagram_grid_columns_int
+        {\int_max:nn {1}{\int_div_truncate:nn
+          {\dim_to_decimal_in_sp:n {\l__ulsbs_diagram_grid_width_dim+\l__ulsbs_diagram_grid_gap_dim}}
+          {\dim_to_decimal_in_sp:n {\g__ulsbs_diagram_grid_max_dim+\l__ulsbs_diagram_grid_gap_dim}}}}}
+       % Spread once for the whole grid, so short rows keep the same columns.
+       % Round down to scaled points to avoid overrunning the available width.
+       \dim_set:Nn \l__ulsbs_diagram_grid_cell_dim
+         {\int_div_truncate:nn
+           {\dim_to_decimal_in_sp:n {\l__ulsbs_diagram_grid_width_dim
+             -\l__ulsbs_diagram_grid_gap_dim*(\l__ulsbs_diagram_grid_columns_int-1)}}
+           {\l__ulsbs_diagram_grid_columns_int}sp}
+      \seq_map_inline:Nn \g__ulsbs_diagram_grid_items_seq
+        {\int_compare:nNnTF {##1}={0}{\__ulsbs_diagram_grid_flush:}
+          {\int_compare:nNnT {\l__ulsbs_diagram_grid_column_int}>{0}
+             {\tl_put_right:Nn \l__ulsbs_diagram_grid_row_tl {\kern\l__ulsbs_diagram_grid_gap_dim}}
+           \tl_put_right:Nx \l__ulsbs_diagram_grid_row_tl
+             {\exp_not:N \hbox_to_wd:nn {\dim_use:N\l__ulsbs_diagram_grid_cell_dim}
+               {\exp_not:N\hfil\exp_not:N\box_use_drop:c {g__ulsbs_diagram_grid_item_##1_box}\exp_not:N\hfil}}
+           \int_incr:N \l__ulsbs_diagram_grid_column_int
+           \int_compare:nNnT {\l__ulsbs_diagram_grid_column_int}={\l__ulsbs_diagram_grid_columns_int}
+             {\__ulsbs_diagram_grid_flush:}}}
+      \__ulsbs_diagram_grid_flush:}}
+
+\NewDocumentEnvironment {ulChordDiagramGrid} {O{1.5pt}}
+  {\bool_if:NT \l__ulsbs_diagram_grid_bool
+     {\msg_fatal:nnn {ulsbs-diagrams}{grid}{grids~cannot~be~nested}}
+   \par\bool_set_true:N \l__ulsbs_diagram_grid_bool
+   \dim_set:Nn \l__ulsbs_diagram_grid_width_dim {\dim_min:nn {\linewidth}{\hsize}}
+   \dim_set:Nn \l__ulsbs_diagram_grid_gap_dim {#1}
+   \dim_compare:nNnF {\l__ulsbs_diagram_grid_width_dim}>{0pt}
+     {\msg_fatal:nnn {ulsbs-diagrams}{grid}{available~width~must~be~positive}}
+   \dim_compare:nNnT {\l__ulsbs_diagram_grid_gap_dim}<{0pt}
+     {\msg_fatal:nnn {ulsbs-diagrams}{grid}{gap~cannot~be~negative}}
+   \hsize=\l__ulsbs_diagram_grid_width_dim\relax\linewidth=\hsize
+   \parindent=0pt\relax\parskip=0pt\relax\leftskip=0pt\relax\rightskip=0pt\relax
+   \parfillskip=0pt plus1fil\relax
+   \seq_gclear:N \g__ulsbs_diagram_grid_items_seq
+   \int_gzero:N \g__ulsbs_diagram_grid_item_int
+   \int_zero:N \l__ulsbs_diagram_grid_column_int
+   \int_zero:N \l__ulsbs_diagram_grid_rows_int
+   \dim_gzero:N \g__ulsbs_diagram_grid_max_dim
+   \tl_clear:N \l__ulsbs_diagram_grid_row_tl
+   \cs_set_protected:Npn \\ {\seq_gput_right:Nn \g__ulsbs_diagram_grid_items_seq {0}}}
+  {\par\__ulsbs_diagram_grid_emit:
+   \int_step_inline:nn {\g__ulsbs_diagram_grid_item_int}
+     {\exp_args:Nc \box_gclear:N {g__ulsbs_diagram_grid_item_##1_box}}
+   \seq_gclear:N \g__ulsbs_diagram_grid_items_seq
+   \int_gzero:N \g__ulsbs_diagram_grid_item_int
+   \dim_gzero:N \g__ulsbs_diagram_grid_max_dim}
 
 % Mark only the annotation-rendering phase as an inset producer. Saving the
 % existing music definition preserves multikey behavior and avoids recursion.

@@ -13,6 +13,7 @@ customization, use [Writing Songbooks](WRITING_SONGBOOKS.md).
   - [Prelude layout](#prelude-layout)
   - [Annotation scanner contract](#annotation-scanner-contract)
   - [Retained geometry and spacing](#retained-geometry-and-spacing)
+  - [Chord diagrams for guitar](#chord-diagrams-for-guitar)
 - [Index Lifecycle](#index-lifecycle)
 - [Fixed Policies and Version Ownership](#fixed-policies-and-version-ownership)
 - [PDF Font Sharing](#pdf-font-sharing)
@@ -863,6 +864,56 @@ measurements, early verse indent and later passage `em` captures retain their
 respective font contexts. Feature switches do not reallocate fonts or recapture
 unrelated dimensions. Live defaults belong in `ulsbs.sty` and the selected presets,
 not duplicated numeric tables here.
+
+### Chord diagrams for guitar
+
+`ulsbs-diagrams.code.tex` owns `\gtab{name}{spec}`, its source-transposition
+fallback and deferred chord-annotation insets. `ulChordDiagramGrid` is a reusable
+layout environment around ordinary `\gtab` calls. Its sole optional argument is
+the dimension used for the row gap and minimum column gap, defaulting to `1.5pt`:
+`\begin{ulChordDiagramGrid}[1.5pt] ... \end{ulChordDiagramGrid}`. There is no
+author-facing column-count setting.
+
+The environment consumes input incrementally rather than capturing its whole
+body. Each `\gtab` must establish its accidental catcode scope before reading
+the name, and its colon scope before reading the specification; raw `#` and `&`
+therefore retain their ordinary diagram-name meaning inside the grid. Each item
+is measured and rendered exactly once, and its finished box is retained for
+layout rather than replaying source tokens or invoking the renderer again.
+The collection frame uses global assignments so grouped per-item font, fret-count
+and transposition settings do not discard collected entries. Nested grids are
+rejected. Output clears the frame and retained nodes; register slots are reused
+across subsequent grids instead of allocating a new set each time.
+
+Available width is the smaller of the current `\linewidth` and `\hsize`.
+The widest retained item determines the minimum cell width; available width and
+gap determine how many columns fit. Spare line width is distributed into equal
+cells once for the whole grid, rounded down to scaled points to prevent overruns.
+Partial rows use the same cells, leaving later columns empty instead of spreading
+their entries independently. This horizontal spreading does not change row gaps.
+In grids only, titles omit their outer thin spaces. The existing `3pt` bottom
+padding remains; standalone diagrams keep their historical metrics. The row gap
+and minimum column gap are added once. A diagram
+wider than the available line is proportionally reduced and placed alone;
+diagrams that fit keep their native size. Plain `\\` forces the following item
+onto a new row, preserving authored chord-family boundaries. Leading, repeated
+and trailing breaks do not create empty rows. Rows are emitted with page-break
+opportunities between them rather than enclosing the whole grid in an unbreakable
+box.
+
+Each grid item's baseline is the fretboard's nut/top-fret rule, not its title,
+open/mute marks or overall box edge. Row layout preserves that reference across
+different fret counts and finger-label/title extents, so neighboring fretboards
+do not shift vertically. This alignment is local to the grid; existing
+standalone and inline `\gtab` appearance and annotation-inset behavior remain
+unchanged.
+
+Source-transposition dispatch is unchanged: offsets congruent to zero modulo
+12 retain the diagram; other offsets invoke `\gtabtrans{name}{spec}`, whose
+default emits only the transposed name. The fallback's local direct-draw
+`\gtab` binding still permits a custom replacement without recursive dispatch.
+The grid is layout, not a set of twelve interactive fingerings: diagrams remain
+outside multikey PDF switching.
 
 ## Index Lifecycle
 

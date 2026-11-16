@@ -19,6 +19,7 @@ commands documented here when writing new sources; see
 - [Verses](#verses)
 - [Chords](#chords)
   - [Alternate chord sets](#alternate-chord-sets)
+  - [Chord diagrams for guitar](#chord-diagrams-for-guitar)
 - [Measure bars](#measure-bars)
 - [Repeats](#repeats)
 - [Page and line breaks](#page-and-line-breaks)
@@ -197,13 +198,51 @@ an uppercase `A`--`G` could be read as a note. Do not put ordinary `\[ ... ]`
 blocks inside `\altchords`: they participate in chord placement, memorization,
 and replay rather than forming a standalone set.
 
+### Chord diagrams for guitar
+
+Use `\gtab{name}{spec}` for a guitar chord diagram. The specification lists
+strings from lowest to highest: `X` mutes a string, `0` leaves it open, and
+digits give frets. An optional colon-separated field supplies finger numbers.
+Chord names accept raw `#` for sharps and `&` for flats.
+
+For a collection of diagrams, use `ulChordDiagramGrid`:
+
+```tex
+\begin{ulChordDiagramGrid}
+  \gtab{C}{X32010:032010}
+  \gtab{Am}{X02210:002310}
+  \\
+  \gtab{F#m}{244222:134111}
+  \gtab{B&}{X13331:013331}
+\end{ulChordDiagramGrid}
+```
+
+The grid chooses equal-width columns automatically to fit the available width;
+there is no column-count setting. Plain `\\` starts the next row, useful for
+grouping chord families; empty or repeated breaks do not create empty rows.
+The default row gap and minimum column gap are `1.5pt`. Change them with, for
+example, `\begin{ulChordDiagramGrid}[3pt]`. Columns spread across the available
+width. Short rows keep the same column positions, leaving the remaining cells
+empty rather than spreading their diagrams farther apart.
+
+Neighboring fretboards align at their nut/top-fret rule even when titles,
+open/mute marks, fret counts or finger labels differ. Rows can break across
+pages. Diagrams keep their normal size unless a diagram is wider than the
+available line, in which case it is proportionally reduced to fit on its own.
+Standalone and inline `\gtab` appearance is unchanged.
+
+The grid does not generate alternative fingerings for interactive PDF keys.
+Source `\transpose` keeps the existing `\gtab` behavior: octave-equivalent
+offsets retain the diagram; other offsets use `\gtabtrans`, which by default
+prints only the transposed chord name.
+
 ## Measure bars
 
 Use `|` at the **beginning** of each measure, not the end. A line ending does
 not itself mean the end of a measure. Use one bar marker per measure.
 
-For a measure with no lyrics at that spot, use `\e`, a plain end dash unrelated
-to vertical spacing:
+For a measure with no lyrics after it on the same line, use `\e`, a plain end
+dash unrelated to vertical spacing:
 
 ```tex
 \beginverse
@@ -255,6 +294,7 @@ same source line as the lyrics when it should follow their annotation height.
 Its position follows the highest occupied reference on its physical line, with
 a fallback when no higher reference exists. A marker on its own source line uses
 that fallback rather than looking ahead to the next lyric line.
+
 `\goto{Beginning words of the verse}` marks a jump target by text.
 
 Use verses for all lyric stanzas and explicit repeat regions within them for
@@ -266,6 +306,7 @@ Within a verse, each source newline ends a lyric line; long source lines can wra
 Braces, spaces and `%` comments affect how the source is read and spaced, so take
 care when reformatting lyrics. Chord placement and minimum annotation widths also
 affect where lyrics wrap.
+
 Hidden alternate PDF layers in optional MULTIKEY editions never reserve extra
 space: the effective original notation alone determines line and page geometry.
 

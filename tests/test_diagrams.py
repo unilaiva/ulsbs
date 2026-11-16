@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 import unittest
 
-from test_pdf_transposition_layers import PdfStructure, words_and_geometry
+from test_pdf_transposition_layers import PdfStructure, rendered_pages, words_and_geometry
 from test_tex_integration import ROOT, TEX_ASSETS
 
 
@@ -48,6 +48,66 @@ CORPUS_DIAGRAMS = r"""
 """
 DIAGRAM_PATTERN = r"\\gtab\{([^{}]*)\}\{([^{}]*)\}"
 
+LEGACY_DIAGRAM_DRAW = r"""
+\makeatletter\ExplSyntaxOn
+\cs_set_protected:Npn \__ulsbs_diagram_draw:nn #1#2
+ {\group_begin:
+  \__ulsbs_diagram_parse:n {#2}\mode_leave_vertical:
+  \vbox{\normalfont\normalsize
+   \hbox_set:Nn \l__ulsbs_diagram_title_box
+    {\thinspace{\ulPrintChord{\transposehere{#1}\strut}}\thinspace}
+   \hbox_set:Nn \l__ulsbs_diagram_base_box
+    {{\sffamily\fontsize{10}{10}\selectfont\l__ulsbs_diagram_base_tl}}
+   \hbox_set:Nn \l__ulsbs_diagram_top_box
+    {\seq_map_function:NN \l__ulsbs_diagram_strings_seq \__ulsbs_diagram_top:n}
+   \dim_set:Nn \l__ulsbs_diagram_width_dim
+    {\dim_max:nn {\box_wd:N \l__ulsbs_diagram_title_box}
+     {\box_wd:N \l__ulsbs_diagram_base_box+\l__ulsbs_diagram_grid_dim}}
+   \bool_if:NT \l__ulsbs_diagram_annotation_bool
+    {\dim_gset:Nn \g__ulsbs_diagram_pending_indent_dim
+      {\box_wd:N \l__ulsbs_diagram_base_box+2.5pt}
+     \dim_set:Nn \l_tmpa_dim {\l__ulsbs_diagram_width_dim
+      -\box_wd:N \l__ulsbs_diagram_base_box-\l__ulsbs_diagram_grid_dim}
+     \tex_divide:D \l_tmpa_dim by 2\scan_stop:
+     \dim_gadd:Nn \g__ulsbs_diagram_pending_indent_dim {\l_tmpa_dim}}
+   \hbox_to_wd:nn {\l__ulsbs_diagram_width_dim}
+    {\hfil\hbox_unpack_drop:N \l__ulsbs_diagram_title_box\hfil}
+   \kern-1pt\nointerlineskip
+   \hbox_to_wd:nn {\l__ulsbs_diagram_width_dim}
+    {\hfil\vtop{\kern3pt\box_use_drop:N \l__ulsbs_diagram_base_box}
+     \vtop{\box_use_drop:N \l__ulsbs_diagram_top_box
+      \int_step_inline:nn {\l__ulsbs_diagram_rows_int}
+       {\int_set:Nn \l__ulsbs_diagram_row_int {##1}
+        \__ulsbs_diagram_rule:\hbox{\__ulsbs_diagram_row:}}
+      \__ulsbs_diagram_rule:\kern1.5pt
+      \hbox{\tl_map_inline:Nn \l__ulsbs_diagram_fingers_tl
+       {\hbox_to_wd:nn {6pt}{\hfil
+        \str_if_in:nnF {X0O}{##1}{\sffamily\fontsize{6}{6}\selectfont##1}\hfil}}}}
+     \hfil}\kern3pt}
+  \group_end:\bool_set_false:N \l__ulsbs_diagram_annotation_bool}
+\ExplSyntaxOff\makeatother
+"""
+
+NUT_POSITION_PROBE = r"""
+\newwrite\NutPositions\immediate\openout\NutPositions=\jobname.nut\relax
+\newcount\NutIndex
+\makeatletter\ExplSyntaxOn
+\bool_new:N \l__probe_nut_bool
+\cs_new_eq:NN \ProbeDraw \__ulsbs_diagram_draw:nn
+\cs_set_protected:Npn \__ulsbs_diagram_draw:nn #1#2
+ {\group_begin:\bool_set_false:N \l__probe_nut_bool
+  \global\advance\NutIndex1\relax\edef\NutItem{\the\NutIndex}
+  \ProbeDraw{#1}{#2}\group_end:}
+\cs_new_eq:NN \ProbeRule \__ulsbs_diagram_rule:
+\cs_set_protected:Npn \__ulsbs_diagram_rule:
+ {\bool_if:NF \l__probe_nut_bool
+   {\bool_set_true:N \l__probe_nut_bool\savepos
+    \edef\NutWrite{\noexpand\write\NutPositions
+     {NUT:\NutItem/\noexpand\the\noexpand\lastxpos/\noexpand\the\noexpand\lastypos}}\NutWrite}
+  \ProbeRule}
+\ExplSyntaxOff\makeatother
+"""
+
 
 class DiagramTests(unittest.TestCase):
     @classmethod
@@ -67,7 +127,7 @@ class DiagramTests(unittest.TestCase):
     def setUp(self):
         self.addCleanup(shutil.rmtree, self.work / self._testMethodName, ignore_errors=True)
 
-    def compile_checked(self, body, preamble="", *, lyric=False, multikey=False, offsets=(None,), effects=None):
+    def compile_checked(self, body, preamble="", *, lyric=False, multikey=False, offsets=(None,), effects=None, label=None):
         target = self.diagnostics / self._testMethodName
         source = (r"\documentclass[variants={default,lyric},oneside,openany,maintitle={Guitar diagrams}]{ulsbs-songbook}"
                   + "\n" + r"\ulShowTags{false}\ulShowPhase{false}" + "\n" + preamble
@@ -75,6 +135,9 @@ class DiagramTests(unittest.TestCase):
                   + "\n" + r"\typeout{DIAGRAM-COUNTERS:\arabic{ulSongNumber}:\arabic{ulVerseNumber}:\the\ulMinFrets}"
                   + "\n" + r"\end{document}" + "\n")
         work = self.work / self._testMethodName
+        if label:
+            work /= label
+            target /= label
         work.mkdir(parents=True)
         options = r"\def\ulBuildVariant{lyric}" + "\n" if lyric else ""
         if multikey:
@@ -85,8 +148,10 @@ class DiagramTests(unittest.TestCase):
                    LUAINPUTS=f"{TEX_ASSETS}//{os.pathsep}", TEXMFVAR=str(self.cache),
                    TEXMFCACHE=str(self.cache))
         output = []
+        # Match production reruns so ocgx2 references include the outline objects.
+        passes = 3 if multikey else 2
         try:
-            for _ in range(2):
+            for _ in range(passes):
                 result = subprocess.run(
                     ["lualatex", "-interaction=nonstopmode", "-halt-on-error", "book.tex"],
                     cwd=work, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -105,7 +170,224 @@ class DiagramTests(unittest.TestCase):
                     self.assertTrue(any(name.endswith(f":t{offset:02d}") for name in names))
         if effects is not None:
             self.assertEqual(re.findall(r"DIAGRAM-EFFECTS:(\d+)", "\n".join(output)),
-                             [str(effects)] * 2)
+                              [str(effects)] * passes)
+        return "\n".join(output), pdf
+
+    def test_grid_wraps_at_available_width_with_uniform_columns(self):
+        body = r"""
+\begin{ulChordDiagramGrid}
+{\gtab{C}{X32010}} \gtab{D}{XX0232} \gtab{E}{022100}
+\gtab{F}{133211} \gtab{G}{320033} \gtab{A}{X02220}
+\end{ulChordDiagramGrid}
+\noindent Z
+"""
+        for width, columns in ((150, 4), (100, 2), (40, 1), (20, 1)):
+            with self.subTest(width=width):
+                # Check row packing exactly, retaining the legacy symbol-cell tolerance.
+                preamble = rf"\setlength\textwidth{{{width}pt}}" + r"""
+\ExplSyntaxOn
+\cs_new_eq:NN \ProbeGridEmit \__ulsbs_diagram_grid_emit:
+\cs_set_protected:Npn \__ulsbs_diagram_grid_emit: {\hfuzz=0pt\ProbeGridEmit}
+\ExplSyntaxOff
+"""
+                output, pdf = self.compile_checked(body, preamble, label=str(width))
+                self.assertNotIn("Overfull \\hbox", output)
+                words = {row[1]: row for row in words_and_geometry(pdf) if len(row) == 6}
+                rows = [[words[name] for name in "CDE FGA".replace(" ", "")[i:i + columns]]
+                        for i in range(0, 6, columns)]
+                self.assertEqual(len({row[0][3] for row in rows}), len(rows))
+                for row in rows:
+                    for left, right in zip(row, row[1:]):
+                        self.assertLess(left[4], right[2])
+                self.assertGreater(words["Z"][3], max(word[5] for row in rows for word in row))
+
+    def test_grid_aligns_nut_rules_not_titles_markers_or_bottoms(self):
+        body = r"""
+\begin{ulChordDiagramGrid}
+\\
+\gtab{C}{X32010:032010}
+\gtab{F}{133211:134211}
+\gtab{\Huge D}{4:XX0987:001324}
+\gtab{G}{XXXXXX}
+\\\\
+{\ulMinFrets=1\gtab{E}{6:111111}}
+\gtab{A}{OOOOOO}
+\\
+\end{ulChordDiagramGrid}
+\noindent Z
+"""
+        output, _ = self.compile_checked(body, NUT_POSITION_PROBE)
+        self.assertNotIn("Overfull \\hbox", output)
+        positions = [tuple(map(int, row)) for row in re.findall(
+            r"NUT:(\d+)/(-?\d+)/(-?\d+)",
+            (self.work / self._testMethodName / "book.nut").read_text())]
+        self.assertEqual([row[0] for row in positions], list(range(1, 7)))
+        self.assertEqual(len({row[2] for row in positions[:4]}), 1)
+        self.assertEqual(len({row[2] for row in positions[4:]}), 1)
+        self.assertLess(positions[4][2], positions[0][2])
+
+    def test_grid_spreads_columns_consistently_without_doubling_row_gaps(self):
+        entries = r"""
+\gtab{C}{X32010:032010}\gtab{F}{133211:134211}\\
+\gtab{A}{X02220:001230}\\
+\gtab{G}{320033:210034}\gtab{Am}{X02210:002310}
+"""
+        body = (r"\begin{ulChordDiagramGrid}" + entries + r"\end{ulChordDiagramGrid}"
+                + r"\begin{ulChordDiagramGrid}[6pt]" + entries + r"\end{ulChordDiagramGrid}")
+        output, pdf = self.compile_checked(body, NUT_POSITION_PROBE + r"\setlength\textwidth{80pt}")
+        self.assertNotIn("Overfull", output)
+        positions = [tuple(map(int, row)) for row in re.findall(
+            r"NUT:(\d+)/(-?\d+)/(-?\d+)",
+            (self.work / self._testMethodName / "book.nut").read_text())]
+        self.assertEqual([row[0] for row in positions], list(range(1, 11)))
+        self.assertAlmostEqual((positions[1][1] - positions[0][1]) / 65536, 40.75, places=4)
+        self.assertAlmostEqual((positions[6][1] - positions[5][1]) / 65536, 43, places=4)
+        for first_column, second_column in (((0, 2, 3), (1, 4)), ((5, 7, 8), (6, 9))):
+            self.assertEqual(len({positions[index][1] for index in first_column}), 1)
+            self.assertEqual(len({positions[index][1] for index in second_column}), 1)
+        default_row_distance = positions[0][2] - positions[2][2]
+        custom_row_distance = positions[5][2] - positions[7][2]
+        self.assertAlmostEqual((custom_row_distance - default_row_distance) / 65536, 4.5, places=4)
+        words = [row for row in words_and_geometry(pdf) if len(row) == 6]
+        first_c = next(row for row in words if row[1] == "C")
+        first_a = next(row for row in words if row[1] == "A")
+        fingers = [row for row in words if row[1].isdigit() and first_c[5] < row[3] < first_a[3]]
+        visible_gap = (first_a[3] - max(row[5] for row in fingers)) * 72.27 / 72
+        self.assertGreaterEqual(visible_gap, 3)
+        self.assertLessEqual(visible_gap, 5)
+
+    def test_grid_preserves_grouped_settings_catcodes_and_source_effects(self):
+        body = r"""
+\newcount\DiagramEffects
+\newcommand\DiagramEffect{\global\advance\DiagramEffects1\relax}
+\let\DiagramPrintChord\ulPrintChord
+\renewcommand\ulPrintChord[1]{\global\advance\DiagramEffects1\relax\DiagramPrintChord{#1}}
+\begin{ulChordDiagramGrid}
+\gtab{\DiagramEffect A6}{X02222:001111}
+{\ulMinFrets=7\gtab{\DiagramEffect C#sus4}{4:XX3341}}
+{\transpose{2}\gtab{\DiagramEffect G}{320033:210034}}
+{\renewcommand\gtabtrans[2]{\gtab{#1}{#2}}\transpose{-3}
+ \gtab{\DiagramEffect F}{133211:134211}}
+\end{ulChordDiagramGrid}
+\begin{ulChordDiagramGrid}\gtab{B&}{X13331}\end{ulChordDiagramGrid}
+{\transpose{2}\begin{ulChordDiagramGrid}[0pt]\gtab{}{}\end{ulChordDiagramGrid}}
+\begin{ulChordDiagramGrid}\\\\\end{ulChordDiagramGrid}
+\gtab{C}{X32010}\par
+\typeout{DIAGRAM-EFFECTS:\the\DiagramEffects}
+\ExplSyntaxOn
+\int_compare:nNnF {\g__ulsbs_diagram_grid_item_int}={0}{\errmessage{Grid items leaked}}
+\seq_if_empty:NF \g__ulsbs_diagram_grid_items_seq {\errmessage{Grid sequence leaked}}
+\dim_compare:nNnF {\g__ulsbs_diagram_grid_max_dim}={0pt}{\errmessage{Grid width leaked}}
+\int_step_inline:nn {4}
+ {\exp_args:Nc \box_if_empty:NF {g__ulsbs_diagram_grid_item_#1_box}{\errmessage{Grid nodes leaked}}}
+\ExplSyntaxOff
+"""
+        # The last explicit grid and standalone chord add two print-chord calls.
+        output, pdf = self.compile_checked(body, effects=9)
+        self.assertNotIn("Overfull \\hbox", output)
+        text = " ".join(row[1] for row in words_and_geometry(pdf) if len(row) == 6)
+        self.assertIn("A6", text)
+        self.assertIn("sus4", text)
+
+    def test_grid_rows_can_split_across_pages(self):
+        body = (r"\begin{ulChordDiagramGrid}" + "\n"
+                + "\n".join(r"\gtab{C}{X32010}\\" for _ in range(15))
+                + "\n" + r"\end{ulChordDiagramGrid}\noindent Z")
+        output, pdf = self.compile_checked(body, r"\setlength\textheight{160pt}")
+        self.assertNotIn("Overfull", output)
+        words = [row for row in words_and_geometry(pdf) if len(row) == 6]
+        self.assertEqual(sum(row[1] == "C" for row in words), 15)
+        self.assertGreater(len({row[0] for row in words if row[1] == "C"}), 1)
+
+    def test_grid_reference_refactor_preserves_standalone_and_annotation_ink(self):
+        if shutil.which("pdftoppm") is None:
+            self.skipTest("pdftoppm is not installed")
+        body = r"""
+\gtab{C}{X32010:032010} \gtab{F}{133211:134211} \gtab{D}{4:XX0987}\par
+{\ulMinFrets=1\gtab{Open}{OOOOOO}\gtab{Base}{6:111111}}\par
+""" + self.song_body()
+        snapshots = []
+        for label, preamble in (("current", ""), ("legacy", LEGACY_DIAGRAM_DRAW)):
+            _, pdf = self.compile_checked(body, preamble, label=label)
+            snapshots.append((words_and_geometry(pdf), rendered_pages(pdf)))
+        self.assertEqual(snapshots[0], snapshots[1])
+
+    def test_grid_rejects_invalid_gap_width_and_nesting(self):
+        from test_tex_integration import compile_fixture
+        cases = ((r"\begin{ulChordDiagramGrid}[-1pt]\end{ulChordDiagramGrid}",
+                  "gap cannot be negative"),
+                 (r"\hsize=0pt\begin{ulChordDiagramGrid}\end{ulChordDiagramGrid}",
+                  "available width must be positive"),
+                 (r"\begin{ulChordDiagramGrid}\begin{ulChordDiagramGrid}"
+                  r"\end{ulChordDiagramGrid}\end{ulChordDiagramGrid}",
+                  "grids cannot be nested"))
+        for body, message in cases:
+            with self.subTest(message=message):
+                source = r"\documentclass{ulsbs-songbook}\begin{document}" + body + r"\end{document}"
+                output, _ = compile_fixture("source-effects", expect_success=False,
+                                            files={"source-effects.tex": source.encode()}, multikey=False)
+                diagnostic = " ".join(output.replace("(ulsbs-diagrams)", "").split())
+                self.assertTrue(message in diagnostic, output[-3000:])
+
+    def test_grid_works_with_direct_package_loading(self):
+        from test_tex_integration import compile_fixture
+        source = r"""
+\documentclass{book}\usepackage{ulsbs}
+\setlength\textwidth{100pt}
+\begin{document}
+\begin{ulChordDiagramGrid}
+\gtab{C#}{X46664}\gtab{B&}{X13331}\gtab{F}{133211}
+\end{ulChordDiagramGrid}
+\noindent Z
+\end{document}
+"""
+        output, pdf = compile_fixture("source-effects", files={"source-effects.tex": source.encode()},
+                                       multikey=False, passes=2)
+        self.assertNotIn("Overfull", output)
+        self.assertTrue(words_and_geometry(pdf))
+
+    def test_grid_in_songs_preserves_lyric_and_multikey_contracts(self):
+        body = r"""
+\newcount\DiagramEffects
+\newcommand\DiagramEffect{\global\advance\DiagramEffects1\relax}
+\begin{ulSongs}{}
+\beginsong{Chord chart}[id={grid},key={C},by={Author}]
+\beginverse*
+\[C]BEFOREMARK
+\endverse
+\begin{ulChordDiagramGrid}
+\gtab{\DiagramEffect C}{X32010:032010}
+\gtab{\DiagramEffect F}{133211:134211}
+\gtab{\DiagramEffect A}{X02220:001230}
+\end{ulChordDiagramGrid}
+\beginverse*
+\[C]AFTERMARK
+\endverse
+\endsong\end{ulSongs}
+\typeout{DIAGRAM-EFFECTS:\the\DiagramEffects}
+"""
+        snapshots = {}
+        for mode in ("chorded", "lyric", "multikey", "two-column"):
+            with self.subTest(mode=mode):
+                preamble = r"\ulSongColumns{2}" if mode == "two-column" else ""
+                output, pdf = self.compile_checked(body, preamble, lyric=mode == "lyric", multikey=mode == "multikey",
+                                                   offsets=range(12), effects=3, label=mode)
+                self.assertNotIn("Overfull", output)
+                if mode == "multikey":
+                    original = PdfStructure(pdf).selected_pdf(pdf, {1: 0})
+                    snapshots[mode] = words_and_geometry(original)
+                    chart_f, = [row for row in snapshots[mode] if len(row) == 6 and row[1] == "F"]
+                    def chart_words(words):
+                        return [row for row in words if len(row) == 6 and row[1] in {"C", "F", "A"}
+                                and chart_f[3] - 10 <= row[3] <= chart_f[5] + 10]
+                    expected = chart_words(snapshots[mode])
+                    self.assertEqual(len(expected), 3)
+                    for offset in range(1, 12):
+                        selected = PdfStructure(pdf).selected_pdf(pdf, {1: offset})
+                        self.assertEqual(chart_words(words_and_geometry(selected)), expected)
+                else:
+                    snapshots[mode] = words_and_geometry(pdf)
+        self.assertEqual(snapshots["chorded"], snapshots["multikey"])
 
     def test_complete_real_corpus_diagram_catalogue(self):
         corpus = Path(os.environ.get("ULSBS_CORPUS_ROOT", ROOT.parent)) / "content"
