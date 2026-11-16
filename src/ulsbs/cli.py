@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import time
 from pathlib import Path
 from typing import List
 
@@ -26,6 +27,7 @@ from .paths import ProjectPaths
 from .pipeline import require_tools, run_jobs_parallel
 from .tempdir import setup_temp_dir, clear_temp_dir_if_no_locks
 from .ui import UI
+from .timing import Timings, collect, measure, format_minutes
 from .util import ensure_dir, run_cmd, which, create_unique_id
 
 class ArgFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
@@ -175,12 +177,12 @@ def print_variant_selections(ui: UI, cfg: Config, jobs: list[Job]) -> None:
                      + (f"; skipped {', '.join(skipped)} (unavailable)" if skipped else ""))
 
 
-def print_run_summary(ui, cfg, result, jobs_count):
+def print_run_summary(ui, cfg, result, jobs_count, elapsed_seconds):
     """Name affected editions without conflating warnings and job failures."""
     succeeded = [item for item in result.successes if not item.skipped]
     warned = [item for item in succeeded if item.warning_count]
     ui.plain("")
-    text = (f"Finished: {jobs_count} jobs; {len(succeeded)} succeeded "
+    text = (f"Finished in {format_minutes(elapsed_seconds)}: {jobs_count} jobs; {len(succeeded)} succeeded "
             f"({len(warned)} with warnings), {len(result.errors)} failed, "
             f"{len(result.blocked)} blocked, {len(result.skipped)} skipped.")
     if result.failures:
@@ -209,6 +211,8 @@ def print_run_summary(ui, cfg, result, jobs_count):
 
 def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
     """Inner implementation for main(); may raise KeyboardInterrupt."""
+    started = time.perf_counter()
+    timings = Timings()
 
     def post_compile():
         """Run post-compile actions that need to happen on the host.
@@ -486,15 +490,18 @@ def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
 
     try:
         ui.start_spinner(ui.colorize("", ui.C_DGRAY))
-        result = run_jobs_parallel(
-            ui=ui,
-            jobs=jobs,
-            assets=assets,
-            cfg=cfg,
-        )
+        with collect(timings), measure("run.jobs"):
+            result = run_jobs_parallel(
+                ui=ui,
+                jobs=jobs,
+                assets=assets,
+                cfg=cfg,
+            )
         ui.stop_spinner()
     except KeyboardInterrupt:
         ui.stop_spinner()
+        timings.write(proj.temp_dir / (unique_id + ".ulsbs-timings.json"),
+                      elapsed_seconds=time.perf_counter() - started, kind="run", status="interrupted")
         # Mark result list and copy the resultlist into result/ so host-side
         # deploy tooling can see it, and exit quietly
         try:
@@ -510,9 +517,11 @@ def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
 
     resultlist.finalize(dst_dir=proj.result_dir, runresult=result, delete_existing_resultlists_in_dst=True)
 
+    temp_cleared = False
     if cfg.clean_temp and not result.failures:
         try:
             if clear_temp_dir_if_no_locks(proj.temp_dir):
+                temp_cleared = True
                 ui.info_line("Temp cleared")
             else:
                 ui.info_line("Temp not cleared due to other jobs still running")
@@ -521,7 +530,11 @@ def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
     else:
         ui.info_line("Temp is kept.")
 
-    print_run_summary(ui, cfg, result, len(jobs))
+    elapsed = time.perf_counter() - started
+    if not temp_cleared and proj.temp_dir.is_dir():
+        timings.write(proj.temp_dir / (unique_id + ".ulsbs-timings.json"), elapsed_seconds=elapsed,
+                      kind="run", status="failed" if result.failures else "success", jobs=len(jobs))
+    print_run_summary(ui, cfg, result, len(jobs), elapsed)
 
     if result.failures:
         if cfg.deploy:

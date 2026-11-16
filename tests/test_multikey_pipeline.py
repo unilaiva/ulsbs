@@ -1054,8 +1054,9 @@ class MultikeyPipelineTests(unittest.TestCase):
                                          for call in self.ui.space_line.call_args_list))
                 else:
                     self.ui.success_line.assert_called_once()
-                    self.assertIn("MULTIKEY packaging successful with 3 warnings",
-                                  self.ui.success_line.call_args.args[0])
+                    self.assertRegex(self.ui.success_line.call_args.args[0],
+                                     r"Compilation and MULTIKEY packaging successful in "
+                                     r"[0-9]+,[0-9]{2} s with 3 warnings!")
                     self.ui.space_line.assert_any_call("-> result/multikey/book_A5_MULTIKEY_RANGES.json")
                 released = JobLock(multikey.compile_dir)
                 released.acquire()

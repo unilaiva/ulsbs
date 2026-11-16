@@ -1421,6 +1421,66 @@ Private `*.ulsbs-score-results.json` diagnostics separately record
 times, including scheduling contention, not isolated CPU measurements. They do
 not enter the published manifest or change its reproducibility.
 
+#### Compiler timing diagnostics
+
+`timing.py` provides `measure(name)` as a context manager or decorator and
+`collect(Timings())` as an explicit worker-local collection scope. Timers use
+`time.perf_counter()`, aggregate call counts, elapsed seconds and escaping
+exceptions by stage, and are no-ops outside a collection scope. Nested stages
+are **inclusive**: never sum parent and child totals. Exceptions handled inside
+a stage (for example a recoverable cache miss) do not imply a failed build.
+There are no per-call progress lines, raw event traces, CPU sampling or new
+dependencies. Diagnostic write failures do not change compilation outcomes.
+
+Each compiler job writes `<basename>.ulsbs-timings.json` in its compile directory.
+MULTIKEY compilation passes the same collector to its later packaging worker;
+that worker updates the report, including failed or skipped packaging. The
+top-level `elapsed_seconds` and job success duration sum `job.compile` and
+`job.packaging`, excluding initial scheduler queue time and dependency/packaging
+queue waits. Stage time includes any tool contention or job-lock waits within
+that stage. Failed/interrupted workers retain completed and unwound stage data
+when their compile directory is writable. A compiled companion blocked by an
+ordinary failure can retain status `compiled`: timing status is a phase status,
+not the authoritative final run outcome.
+
+The run report is `<unique-id>.ulsbs-timings.json` in the temp root. It records
+`run.jobs` and total compiler-process elapsed time from CLI entry through output
+finalization and cleanup, just before the final summary. This includes queue
+waits, but excludes host-side container image/startup time and deployment after
+the compiler summary. Parallel job durations overlap and must not be summed to
+infer run time. The summary rounds to whole seconds with minute carry; job
+messages use two decimal places and a locale-independent decimal comma.
+
+These reports are private schema-version-1 JSON diagnostics with `clock`,
+`kind`, `status`, `elapsed_seconds` and a `stages` mapping whose entries contain
+`calls`, `elapsed_seconds` and `failures`; run reports also record `jobs` when
+available. They are never copied into result inventories, caches or published
+metadata. Normal successful temp cleanup removes them; use `--keep-temp` to
+inspect or compare them. Do not recreate a cleaned temp directory just to write
+a run report. Interrupted compiler runs retain a run report where possible.
+
+Instrumented boundaries include original LilyPond processing, each numbered
+LuaLaTeX pass (including convergence retries), PDF font optimization, exports,
+diagnostic analysis and multikey packaging. Supplemental score stages separate
+`scores.generate`, `scores.toolchain`, `scores.source-fingerprint`,
+`scores.candidate`, `scores.cache.restore`, `scores.cache.load`,
+`scores.cache.publish`, `scores.validate`, `scores.dimensions` and
+`scores.engrave`. Restore includes cache load; candidate includes restore or
+engraving/validation; dimensions includes calls from variant validation. Read
+the existing score-results counters alongside these timings to distinguish
+cache hits from newly engraved and rejected candidates.
+
+For an optimization experiment, use a small independent representative fixture,
+the same sources/toolchain/parallelism, and equivalent cold or warmed caches.
+For a normal parent build, explicitly pass `--plain-output --no-deploy
+--keep-temp`; select variants and multikey behavior deliberately (`--quick`
+excludes multikey). Compare repeated alternating baseline/candidate runs using
+medians and end-to-end cost as well as the affected stage. These wall-time
+aggregates locate promising boundaries, not individual TeX/Lua hotspots; add
+only narrowly scoped temporary profiling when a candidate requires it. Retain
+no benchmark archive by default. Tests for the collector/reporting contract
+live in `tests/test_timing.py` and the compiler reporting/scheduler tests.
+
 The renderer uses `ocgx2`/`ocgbase` named `/Properties` resources for marked
 content. Every `/OC` marked-content name must resolve to an actual catalog OCG.
 An experimental inline OCMD approach with indirect references embedded in content

@@ -302,8 +302,7 @@ to `deploy/` by default, not an upload to a web server. Disable it with
 `deploy = false` or `--no-deploy`. An explicitly configured `deploy-dir` or
 `--deploy-dir` must already exist on the host.
 
-ULSBS automatically optimizes PDF size, including in quick builds, without
-changing appearance or multikey controls.
+ULSBS automatically optimizes PDF size, including in quick builds.
 
 ### Warnings and partial builds
 
@@ -311,6 +310,7 @@ Each job is one book, variant, and ordinary or multikey edition. Successful jobs
 remain `SUCCESS` even with warnings. Their completion block prints a compact
 warning breakdown and `SEE` paths before `SUCCESS ... with N warnings` and the
 output path. Related lines print together, without interleaving other jobs.
+
 Use `--verbose` for individual diagnostics and detailed score-fallback information.
 
 The summary groups repeated warnings and shows occurrence or affected-item counts

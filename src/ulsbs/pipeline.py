@@ -31,7 +31,7 @@ import warnings
 from collections import Counter
 from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import List
 from fnmatch import fnmatch
@@ -68,6 +68,7 @@ from .lock import JobLock
 from .songdb import build_song_database, SongbookData
 import ulsbs.resultlist as resultlist
 from .ui import UI
+from .timing import Timings, collect, measure, format_seconds
 from .util import (
     ensure_dir,
     ensure_symlink,
@@ -133,6 +134,7 @@ class CompilationResult:
     warning_count: int
     next_step: int
     diagnostics: tuple[Diagnostic, ...] = ()
+    timings: Timings | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -323,13 +325,13 @@ def _report_warnings(ui, cfg, job, diagnostics):
         ui.see_line(_diagnostic_path(report, cfg))
 
 
-def _report_success(ui, cfg, job, diagnostics, *, multikey=False):
+def _report_success(ui, cfg, job, diagnostics, *, elapsed_seconds, multikey=False):
     with _output_block(ui):
         _report_warnings(ui, cfg, job, diagnostics)
         count = _warning_count(diagnostics)
         suffix = f" with {count} warning{'s' if count != 1 else ''}" if count else ""
         action = "Compilation and MULTIKEY packaging" if multikey else "Compilation"
-        ui.success_line(f"{ui.fmt_doc(job)} {action} successful{suffix}!")
+        ui.success_line(f"{ui.fmt_doc(job)} {action} successful in {format_seconds(elapsed_seconds)}{suffix}!")
         basename = build_job_basename(job)
         path = cfg.runtime.project_paths.result_dir / (
             f"multikey/{basename}_RANGES.json" if multikey else f"{basename}.pdf")
@@ -570,6 +572,7 @@ def _midi_audio_enabled(cfg: Config, job: Job) -> tuple[bool, bool]:
     )
 
 
+@measure("job.prepare")
 def prepare_compile_dir(ui: UI, assets: EngineAssets, cfg: Config, job: Job) -> None:
     """Create job workdir and populate engine assets and stable aliases.
     """
@@ -687,6 +690,7 @@ def make_variant_tex(job: Job, cfg: Config) -> Path:
     return out_path
 
 
+@measure("lilypond.original")
 def step_lilypond_book(
     ui: UI,
     job: Job,
@@ -861,7 +865,8 @@ def step_lualatex_pass(
 
     started = time.perf_counter()
     try:
-        run_cmd(args, cwd=cwd, stdout_path=log_path, stderr_to_stdout=True, check=True, env=env)
+        with measure(f"lualatex.pass{pass_no}"):
+            run_cmd(args, cwd=cwd, stdout_path=log_path, stderr_to_stdout=True, check=True, env=env)
     except Exception:
         raise CompileError(f"Compilation error running {label}!", log_path) from None
 
@@ -872,6 +877,7 @@ def step_lualatex_pass(
     return log_path, step + 1
 
 
+@measure("pdf.fonts")
 def step_pdf_fonts(ui: UI, cfg: Config, job: Job, basename: str, step: int) -> int:
     """Deduplicate font programs using the optimizer's validated atomic replacement."""
     txt_doc = ui.fmt_doc(job)
@@ -894,6 +900,7 @@ def step_pdf_fonts(ui: UI, cfg: Config, job: Job, basename: str, step: int) -> i
     return step + 1
 
 
+@measure("exports.printouts")
 def step_context_printouts(
     ui: UI, cfg: Config, job: Job, basename: str, env: dict[str, str], step: int
 ) -> int:
@@ -959,6 +966,7 @@ def step_context_printouts(
     return step
 
 
+@measure("exports.covers")
 def step_coverimage_extraction(
     ui: UI, cfg: Config, job: Job, basename: str, env: dict[str, str], step: int
 ) -> int:
@@ -1112,6 +1120,7 @@ def step_coverimage_extraction(
     return step
 
 
+@measure("exports.songdb")
 def step_build_song_db(
     ui: UI,
     cfg: Config,
@@ -1201,6 +1210,7 @@ def step_build_song_db(
     return db, step
 
 
+@measure("exports.json")
 def step_write_song_db_json(
     ui: UI,
     cfg: Config,
@@ -1249,6 +1259,7 @@ def step_write_song_db_json(
     return step + 1
 
 
+@measure("exports.media")
 def step_midi_audio(
     ui: UI,
     assets: EngineAssets,
@@ -1462,6 +1473,7 @@ def step_midi_audio(
     return step
 
 
+@measure("diagnostics.analyze")
 def analyze_warnings(
     ui: UI, cfg: Config, job: Job, lilypond_log: Path | None, last_lualatex_log: Path | None
 ) -> int:
@@ -1548,6 +1560,7 @@ def step_lualatex_convergence(
     raise AssertionError("Unreachable LuaLaTeX convergence state")
 
 
+@measure("multikey.ranges")
 def step_multikey_ranges(
     ui: UI, cfg: Config, job: Job, basename: str, ordinary_job: Job | None, step: int,
 ) -> tuple[Path | None, int]:
@@ -1877,30 +1890,66 @@ def _compile_one_job(
 
 
 def compile_one_job(ui: UI, assets: EngineAssets, cfg: Config, job: Job) -> CompilationResult:
+    """Collect independent compilation timings and retain them for later packaging."""
     worker_ui = _JobUI(ui, job)
-    with resultlist.job_scope(job), _capture_library_warnings(worker_ui):
-        try:
-            result = _compile_one_job(worker_ui, assets, cfg, job)
-        except Exception as error:
-            if not worker_ui.analyzed:
-                analyze_warnings(worker_ui, cfg, job, None, worker_ui.last_tex_log)
-            failure = error if isinstance(error, CompileError) else CompileError(str(error))
-            failure.diagnostics = tuple(worker_ui.diagnostics)
-            resultlist.discard_job(job)
-            write_diagnostic_report(cfg, job, failure.diagnostics, "failed", error=failure)
-            if failure is error:
-                raise
-            raise failure from error
-        result = replace(result, diagnostics=tuple(worker_ui.diagnostics),
-                         warning_count=_warning_count(worker_ui.diagnostics))
-        if not job.multikey:
-            write_diagnostic_report(cfg, job, result.diagnostics, "success")
-            resultlist.commit_job(job)
-            _report_success(ui, cfg, job, result.diagnostics)
-        return result
+    timings = Timings()
+    status = "interrupted"
+    try:
+        with resultlist.job_scope(job), _capture_library_warnings(worker_ui), collect(timings):
+            try:
+                with measure("job.compile"):
+                    result = _compile_one_job(worker_ui, assets, cfg, job)
+            except Exception as error:
+                status = "failed"
+                if not worker_ui.analyzed:
+                    analyze_warnings(worker_ui, cfg, job, None, worker_ui.last_tex_log)
+                failure = error if isinstance(error, CompileError) else CompileError(str(error))
+                failure.diagnostics = tuple(worker_ui.diagnostics)
+                resultlist.discard_job(job)
+                write_diagnostic_report(cfg, job, failure.diagnostics, "failed", error=failure)
+                if failure is error:
+                    raise
+                raise failure from error
+            result = replace(result, diagnostics=tuple(worker_ui.diagnostics), timings=timings,
+                             warning_count=_warning_count(worker_ui.diagnostics))
+            status = "compiled" if job.multikey else "success"
+            if not job.multikey:
+                write_diagnostic_report(cfg, job, result.diagnostics, "success")
+                resultlist.commit_job(job)
+                _report_success(ui, cfg, job, result.diagnostics,
+                                elapsed_seconds=timings.seconds("job.compile"))
+            return result
+    finally:
+        timings.write(job.compile_dir / (build_job_basename(job) + ".ulsbs-timings.json"),
+                      elapsed_seconds=timings.seconds("job.compile"), kind="job", status=status)
 
 
 def finish_multikey_job(
+    ui: UI, cfg: Config, job: Job, ordinary_job: Job, compilation: CompilationResult,
+) -> PackagingResult:
+    """Time packaging separately; final duration excludes dependency/queue waits."""
+    timings = compilation.timings or Timings()
+    status = "interrupted"
+    try:
+        with collect(timings):
+            try:
+                with measure("job.packaging"):
+                    result = _finish_multikey_job(ui, cfg, job, ordinary_job, compilation)
+            except Exception:
+                status = "failed"
+                raise
+            status = "skipped" if result.skipped else "success"
+            if not result.skipped:
+                _report_success(ui, cfg, job, result.diagnostics, multikey=True,
+                                elapsed_seconds=timings.seconds("job.compile", "job.packaging"))
+            return result
+    finally:
+        timings.write(job.compile_dir / (build_job_basename(job) + ".ulsbs-timings.json"),
+                      elapsed_seconds=timings.seconds("job.compile", "job.packaging"),
+                      kind="job", status=status)
+
+
+def _finish_multikey_job(
     ui: UI, cfg: Config, job: Job, ordinary_job: Job, compilation: CompilationResult,
 ) -> PackagingResult:
     """Publish a compiled MULTIKEY job after its ordinary counterpart succeeds.
@@ -1948,8 +1997,6 @@ def finish_multikey_job(
                 with _output_block(ui):
                     _report_warnings(ui, cfg, job, diagnostics)
                     ui.noexec_line(f"{ui.fmt_doc(job)} Multikey companion skipped: source disables PDF layers")
-            else:
-                _report_success(ui, cfg, job, diagnostics, multikey=True)
             return PackagingResult(count, diagnostics, skipped=output is None)
         finally:
             lock.release()

@@ -28,6 +28,7 @@ import pikepdf
 from . import lilypond_score_cache as cache
 from .constants import LILYPOND_SCORE_MIN_SCALE
 from .util import read_text, run_cmd, write_text
+from .timing import measure
 
 
 _NATURAL = (0, 2, 4, 5, 7, 9, 11)
@@ -67,6 +68,7 @@ def _minimum_scale_tex() -> str:
     return rf"\def\ulScoreMinimumScale{{{LILYPOND_SCORE_MIN_SCALE}}}" + "\n"
 
 
+@measure("scores.prepare")
 def prepare_scores(directory: Path, basename: str) -> dict[str, Score]:
     """Reset dispatch/status, write draft fitting policy, and wrap score inclusions.
 
@@ -241,6 +243,7 @@ def interval(source: dict, target: dict, semitones: int) -> tuple[str, str]:
     return original, destination
 
 
+@measure("scores.dimensions")
 def _dimensions(path: Path) -> tuple[float, float]:
     """Return the validated crop-box or media-box size of a single-page PDF."""
     with pikepdf.open(path) as pdf:
@@ -267,6 +270,7 @@ def _valid_key(key: object, *, mode: bool = False) -> bool:
             and (not mode or type(key.get("minor")) is int and key["minor"] in (0, 1)))
 
 
+@measure("scores.generate")
 def generate_scores(ui, job, basename: str, scores: dict[str, Score],
                     env: dict[str, str], include_args: list[str], *, verbose: bool = False) -> None:
     """Render requested alternatives and write final dispatch plus fitting policy.
@@ -431,6 +435,7 @@ def generate_scores(ui, job, basename: str, scores: dict[str, Score],
                       f"{successes} successful offsets, {fallbacks} fallbacks")
 
 
+@measure("scores.candidate")
 def _engrave(score: Score, key: dict, target: dict, signed: int, offset: int,
              original: tuple[tuple[float, float], ...], directory: Path, env: dict[str, str],
              include_args: list[str], *, fingerprint: str | None = None,
@@ -483,11 +488,12 @@ def _engrave(score: Score, key: dict, target: dict, signed: int, offset: int,
             statistics["engravings"] += 1
         # Omitted-tab warnings are a validity check, including with exit zero.
         # Keep their language stable even on a localized host.
-        result = run_cmd([
-            "lilypond", *include_args, "-dno-point-and-click", "-dbackend=eps",
-            "-dseparate-page-formats=pdf", "-dinclude-eps-fonts", "-dgs-load-fonts",
-            "-o", str(stem), str(stem.with_suffix(".ly")),
-        ], cwd=directory, env={**env, "LC_ALL": "C", "LANGUAGE": "C"}, stdout_path=log, check=False)
+        with measure("scores.engrave"):
+            result = run_cmd([
+                "lilypond", *include_args, "-dno-point-and-click", "-dbackend=eps",
+                "-dseparate-page-formats=pdf", "-dinclude-eps-fonts", "-dgs-load-fonts",
+                "-o", str(stem), str(stem.with_suffix(".ly")),
+            ], cwd=directory, env={**env, "LC_ALL": "C", "LANGUAGE": "C"}, stdout_path=log, check=False)
         if result.returncode:
             return None, "LilyPond engraving failed", relative_log
         failure = _validate_variant(stem, score, original)
@@ -500,6 +506,7 @@ def _engrave(score: Score, key: dict, target: dict, signed: int, offset: int,
         return None, str(error), relative_log
 
 
+@measure("scores.validate")
 def _validate_variant(stem: Path, score: Score, original) -> str | None:
     """Return a diagnostic for invalid notation, boundaries, or fit, else None."""
     diagnostic = _BAD_CONTENT.search(read_text(stem.with_suffix(".log")))

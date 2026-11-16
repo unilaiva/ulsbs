@@ -146,9 +146,9 @@ class CompilerReportingTests(unittest.TestCase):
                 self.assertEqual(count, 3)
                 self.assertEqual({item.category for item in worker.diagnostics}, {"other"})
                 with self.capture() as (stdout, stderr):
-                    pipeline._report_success(self.ui, cfg, self.job, worker.diagnostics)
+                    pipeline._report_success(self.ui, cfg, self.job, worker.diagnostics, elapsed_seconds=12.34)
                 text = stdout.getvalue() + stderr.getvalue()
-                self.assertIn("successful with 3 warnings!", text)
+                self.assertIn("Compilation successful in 12,34 s with 3 warnings!", text)
                 self.assertIn("compile/final.log", text)
                 self.assertIn("compile/lilypond.log", text)
                 self.assertNotIn("earlier unfamiliar", text)
@@ -185,9 +185,9 @@ class CompilerReportingTests(unittest.TestCase):
             worker.warning_line("Score omitted", source="Scores", category="omitted-score", affected_count=6)
             with self.capture() as (stdout, stderr):
                 count = pipeline.analyze_warnings(worker, cfg, self.job, lily, tex)
-                pipeline._report_success(self.ui, cfg, self.job, tuple(worker.diagnostics))
+                pipeline._report_success(self.ui, cfg, self.job, tuple(worker.diagnostics), elapsed_seconds=12.34)
             self.assertEqual(count, 4)
-            self.assertIn("successful with 4 warnings!", stdout.getvalue() + stderr.getvalue())
+            self.assertIn("Compilation successful in 12,34 s with 4 warnings!", stdout.getvalue() + stderr.getvalue())
             self.assertNotIn("Unable to auto-detect", stdout.getvalue() + stderr.getvalue())
             records.append(tuple(worker.diagnostics))
         self.assertEqual(records[0], records[1])
@@ -200,11 +200,11 @@ class CompilerReportingTests(unittest.TestCase):
         self.assertEqual(worker.diagnostics[0].category, "unreadable-log")
         self.assertEqual(worker.diagnostics[0].log_path, missing)
         with self.capture() as (stdout, stderr):
-            pipeline._report_success(self.ui, self.cfg, self.job, tuple(worker.diagnostics))
+            pipeline._report_success(self.ui, self.cfg, self.job, tuple(worker.diagnostics), elapsed_seconds=12.34)
         text = stdout.getvalue() + stderr.getvalue()
         self.assertIn("Cannot inspect TeX log", text)
-        self.assertIn("successful with 1 warning!", text)
-        self.assertNotIn("Compilation successful!", text)
+        self.assertIn("Compilation successful in 12,34 s with 1 warning!", text)
+        self.assertNotIn("Compilation successful in 12,34 s!", text)
 
     def test_warning_details_and_paths_precede_success_at_both_verbosity_levels(self):
         tex = self.log("final.log", "details\n")
@@ -216,24 +216,25 @@ class CompilerReportingTests(unittest.TestCase):
         )
         for verbose in (False, True):
             with self.subTest(verbose=verbose), self.capture() as (stdout, stderr):
-                pipeline._report_success(self.ui, replace(self.cfg, verbose=verbose), self.job, diagnostics)
+                pipeline._report_success(self.ui, replace(self.cfg, verbose=verbose), self.job, diagnostics,
+                                         elapsed_seconds=12.34)
             text = stdout.getvalue() + stderr.getvalue()
             self.assertIn("4 warnings", text)
-            self.assertIn("Compilation successful with 4 warnings!", text)
+            self.assertIn("Compilation successful in 12,34 s with 4 warnings!", text)
             self.assertLess(text.index("WARNING"), text.index("SUCCESS"))
             self.assertLess(text.index("Some scores omitted"), text.index("SUCCESS"))
             self.assertLess(text.index("SEE"), text.index("SUCCESS"))
             self.assertLess(text.index("compile/final.log"), text.index("SUCCESS"))
             self.assertEqual(text.count("compile/scores.log"), 1)
             self.assertLess(text.index("SUCCESS"), text.index(f"result/{self.basename}.pdf"))
-            self.assertNotIn("Compilation successful!", text)
+            self.assertNotIn("Compilation successful in 12,34 s!", text)
             self.assertEqual(self.ui.run_diagnostics, [])
 
     def test_clean_success_has_no_warning_qualifier(self):
         with self.capture() as (stdout, stderr):
-            pipeline._report_success(self.ui, self.cfg, self.job, ())
+            pipeline._report_success(self.ui, self.cfg, self.job, (), elapsed_seconds=12.34)
         text = stdout.getvalue() + stderr.getvalue()
-        self.assertIn("Compilation successful!", text)
+        self.assertIn("Compilation successful in 12,34 s!", text)
         self.assertNotIn("WARNING", text)
         self.assertNotIn("0 warnings", text)
 
@@ -251,10 +252,10 @@ class CompilerReportingTests(unittest.TestCase):
                 self.assertTrue(all(record.log_path == tex for record in worker.diagnostics))
                 pipeline.write_diagnostic_report(cfg, self.job, worker.diagnostics, "success")
                 with self.capture() as (stdout, stderr):
-                    pipeline._report_success(self.ui, cfg, self.job, worker.diagnostics)
+                    pipeline._report_success(self.ui, cfg, self.job, worker.diagnostics, elapsed_seconds=12.34)
                 text = stdout.getvalue() + stderr.getvalue()
                 self.assertIn("3 spacing advisories (not counted as warnings)", text)
-                self.assertIn("Compilation successful!", text)
+                self.assertIn("Compilation successful in 12,34 s!", text)
                 self.assertNotIn("WARNING", text)
                 self.assertNotIn("0 warnings", text)
                 self.assertEqual(text.count("compile/final.log"), 1)
@@ -279,9 +280,9 @@ class CompilerReportingTests(unittest.TestCase):
                 cfg = replace(self.cfg, verbose=verbose)
                 self.assertEqual(pipeline.analyze_warnings(worker, cfg, self.job, None, tex), 5)
                 with self.capture() as (stdout, stderr):
-                    pipeline._report_success(self.ui, cfg, self.job, worker.diagnostics)
+                    pipeline._report_success(self.ui, cfg, self.job, worker.diagnostics, elapsed_seconds=12.34)
                 text = stdout.getvalue() + stderr.getvalue()
-                self.assertIn("successful with 5 warnings!", text)
+                self.assertIn("Compilation successful in 12,34 s with 5 warnings!", text)
                 self.assertIn("compile/final.log", text)
                 self.assertIn("1 spacing advisory (not counted as warnings)", text)
                 if verbose:
@@ -299,7 +300,7 @@ class CompilerReportingTests(unittest.TestCase):
             Diagnostic("LilyPond", "layout", "warning: Unexpected page break"),
         )
         with self.capture() as (stdout, stderr):
-            pipeline._report_success(self.ui, self.cfg, self.job, diagnostics)
+            pipeline._report_success(self.ui, self.cfg, self.job, diagnostics, elapsed_seconds=12.34)
         text = stdout.getvalue() + stderr.getvalue()
         self.assertIn("TeX: 2 layout (2 overfull)", text)
         self.assertIn("LilyPond: 1 layout", text)
@@ -323,7 +324,7 @@ class CompilerReportingTests(unittest.TestCase):
                         worker, cfg, self.job, self.basename, {}, initial, 4,
                     )
                     count = pipeline.analyze_warnings(worker, cfg, self.job, None, latest)
-                    pipeline._report_success(self.ui, cfg, self.job, tuple(worker.diagnostics))
+                    pipeline._report_success(self.ui, cfg, self.job, tuple(worker.diagnostics), elapsed_seconds=12.34)
                 text = stdout.getvalue() + stderr.getvalue()
                 self.assertEqual(step, 5)
                 self.assertEqual(worker.last_tex_log, latest)
@@ -331,7 +332,7 @@ class CompilerReportingTests(unittest.TestCase):
                 self.assertIn("Rerunning LuaLaTeX pass 4", text)
                 self.assertNotIn("LaTeX Warning", text)
                 self.assertNotIn("Label(s) may have changed", text)
-                self.assertIn("Compilation successful!", text)
+                self.assertIn("Compilation successful in 12,34 s!", text)
 
     def test_tex_log_is_tracked_before_subprocess_failure(self):
         worker = pipeline._JobUI(self.ui, self.job)
@@ -366,7 +367,8 @@ class CompilerReportingTests(unittest.TestCase):
             result = pipeline.compile_one_job(self.ui, object(), self.cfg, self.job)
         self.assertEqual((result.warning_count, result.next_step), (3, 17))
         self.assertEqual(len(result.diagnostics), 3)
-        self.assertIn("successful with 3 warnings!", stdout.getvalue() + stderr.getvalue())
+        self.assertRegex(stdout.getvalue() + stderr.getvalue(),
+                         r"Compilation successful in [0-9]+,[0-9]{2} s with 3 warnings!")
         self.assertTrue(any(f"{self.basename}.pdf" in line for line in resultlist.lines()))
         shutil.rmtree(self.compile_dir)
         report = self.report()
@@ -626,13 +628,14 @@ class CompilerReportingTests(unittest.TestCase):
                     diagnostic = Diagnostic("TeX", "other", "Example warning", log)
                     report = pipeline.write_diagnostic_report(cfg, job, (diagnostic,), "success")
                     with self.capture() as (stdout, stderr):
-                        pipeline._report_success(self.ui, cfg, job, (diagnostic,), multikey=multikey)
+                        pipeline._report_success(self.ui, cfg, job, (diagnostic,),
+                                                 elapsed_seconds=12.34, multikey=multikey)
                         pipeline._report_failure(self.ui, cfg, pipeline.JobFailure(
                             job, "Example failure", log_path=log,
                         ), {})
                         cli.print_run_summary(self.ui, cfg, pipeline.ParallelRunResult(
                             successes=[pipeline.JobSuccess(job, 1)], failures=[], total_warnings=1,
-                        ), 1)
+                        ), 1, elapsed_seconds=65.2)
                     text = stdout.getvalue() + stderr.getvalue()
                     basename = build_job_basename(job)
                     output = f"result/multikey/{basename}_RANGES.json" if multikey else f"result/{basename}.pdf"
@@ -775,7 +778,7 @@ class CompilerReportingTests(unittest.TestCase):
 
         def reporting_worker():
             try:
-                pipeline._report_success(self.ui, self.cfg, self.job, diagnostics)
+                pipeline._report_success(self.ui, self.cfg, self.job, diagnostics, elapsed_seconds=12.34)
             except Exception as error:
                 errors.append(error)
 
@@ -836,7 +839,7 @@ class CompilerReportingTests(unittest.TestCase):
             try:
                 if job == other:
                     second_attempted.set()
-                pipeline._report_success(self.ui, self.cfg, job, diagnostics)
+                pipeline._report_success(self.ui, self.cfg, job, diagnostics, elapsed_seconds=12.34)
             except Exception as error:
                 errors.append(error)
             finally:

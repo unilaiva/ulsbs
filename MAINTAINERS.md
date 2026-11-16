@@ -76,6 +76,8 @@ Before distributing an engine change:
 - Compare wall time and peak memory with matching toolchain, hardware,
   parallelism and cold/warm caches. Keep evidence of material regressions before
   optimizing. A concurrent wall-clock measurement is not isolated CPU cost.
+  Use temporary [compiler timing diagnostics](ARCHITECTURE.md#compiler-timing-diagnostics)
+  with `--keep-temp` to locate expensive stages; nested stage totals are inclusive.
 - Preserve the finite collation policy: add reviewed weights and fixtures for a
   newly supported character rather than falling back to the host locale. All
   declared title/author/tag `.sbx` paths are generated job-local outputs. Keep

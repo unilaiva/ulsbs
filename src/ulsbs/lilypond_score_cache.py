@@ -44,6 +44,8 @@ from typing import Mapping, Sequence
 
 import pikepdf
 
+from .timing import measure
+
 # Storage format and key namespace are owned by this cache implementation, not
 # shared build settings. Incompatible changes must invalidate existing entries.
 SCHEMA_VERSION = 1
@@ -253,6 +255,7 @@ class ToolchainFingerprint:
     datadir: Path
 
 
+@measure("scores.toolchain")
 def toolchain_fingerprint(*, env: Mapping[str, str] | None = None,
                           cwd: Path | None = None,
                           asset_paths: Sequence[Path] = ()) -> ToolchainFingerprint | None:
@@ -321,6 +324,7 @@ def _clean(text: str) -> str:
     return "".join(result)
 
 
+@measure("scores.source-fingerprint")
 def source_fingerprint(source: Path, include_args: Sequence[str], *, cwd: Path,
                        env: Mapping[str, str] | None = None,
                        toolchain: ToolchainFingerprint | None) -> str | None:
@@ -490,6 +494,7 @@ def _artifacts(files: dict[str, bytes], original: Sequence, minimum_scale: float
             "musical_boundaries": boundaries, "minimum_scale": minimum_scale}
 
 
+@measure("scores.cache.load")
 def _load(root: Path, key: str) -> tuple[dict, dict[str, bytes]]:
     """Load an entry after checking its manifest, artifact hashes and geometry."""
     entry = root / key
@@ -519,6 +524,7 @@ def _load(root: Path, key: str) -> tuple[dict, dict[str, bytes]]:
     return manifest, files
 
 
+@measure("scores.cache.publish")
 def publish(key: str | None, stem: Path, *, success: bool,
             original_dimensions: Sequence, minimum_scale: float,
             metadata: object = None, env: Mapping[str, str] | None = None) -> bool:
@@ -582,6 +588,7 @@ def publish(key: str | None, stem: Path, *, success: bool,
             shutil.rmtree(temporary, ignore_errors=True)
 
 
+@measure("scores.cache.restore")
 def restore(key: str | None, stem: Path, *, env: Mapping[str, str] | None = None) -> dict | None:
     """Copy validated artifacts to a job-local stem; return validation/metadata.
 

@@ -63,6 +63,8 @@
 
 ### Other highlights
 
+- Compiler success messages now show per-edition compilation/packaging time and
+  total compiler-run duration.
 - Container builds now honor host spinner suppression, keeping redirected output
   free of spinner frames and forwarding `ULSBS_NOSPINNER` independently of color settings.
 - Added `--plain-output` argument: disables colors and the status spinner on the host

@@ -327,9 +327,10 @@ class PartialDeploymentTests(unittest.TestCase):
         output = io.StringIO()
         with redirect_stdout(output), redirect_stderr(output):
             ui.warning_line("Optional tool unavailable", source="Environment")
-            cli.print_run_summary(ui, self.cfg, result, jobs_count=4)
+            cli.print_run_summary(ui, self.cfg, result, jobs_count=4, elapsed_seconds=65.2)
         text = output.getvalue()
-        self.assertIn("2 succeeded (1 with warnings), 1 failed, 1 blocked, 0 skipped", text)
+        self.assertIn("Finished in 1 min 5 sec: 4 jobs; 2 succeeded (1 with warnings), "
+                      "1 failed, 1 blocked, 0 skipped.", text)
         self.assertIn("3 warning diagnostics across all job outcomes", text)
         self.assertNotIn("2 warnings", text)
         self.assertIn("FAILED", text)
@@ -348,9 +349,9 @@ class PartialDeploymentTests(unittest.TestCase):
             with self.subTest(verbose=verbose):
                 ui = Mock()
                 ui.fmt_doc.return_value = "warned-book"
-                cli.print_run_summary(ui, replace(self.cfg, verbose=verbose), result, 1)
+                cli.print_run_summary(ui, replace(self.cfg, verbose=verbose), result, 1, elapsed_seconds=65.2)
                 ui.success_line.assert_called_once_with(
-                    "Finished: 1 jobs; 1 succeeded (1 with warnings), 0 failed, 0 blocked, 0 skipped."
+                    "Finished in 1 min 5 sec: 1 jobs; 1 succeeded (1 with warnings), 0 failed, 0 blocked, 0 skipped."
                 )
                 ui.warning_line.assert_called_once_with(
                     "2 warning diagnostics across all job outcomes.", record=False,
@@ -368,7 +369,7 @@ class PartialDeploymentTests(unittest.TestCase):
             successes=[pipeline.JobSuccess(self.job("warned"), 1)],
             failures=[], total_warnings=1,
         )
-        cli.print_run_summary(self.ui, cfg, result, 1)
+        cli.print_run_summary(self.ui, cfg, result, 1, elapsed_seconds=65.2)
         self.ui.see_line.assert_called_once_with("result/diagnostics")
 
     def test_summary_advisory_only_success_is_not_warned_at_either_verbosity(self) -> None:
@@ -383,9 +384,9 @@ class PartialDeploymentTests(unittest.TestCase):
             with self.subTest(verbose=verbose):
                 ui = Mock()
                 cli.print_run_summary(ui, replace(self.cfg, verbose=verbose, clean_temp=True),
-                                      result, 1)
+                                      result, 1, elapsed_seconds=65.2)
                 ui.success_line.assert_called_once_with(
-                    "Finished: 1 jobs; 1 succeeded (0 with warnings), 0 failed, 0 blocked, 0 skipped."
+                    "Finished in 1 min 5 sec: 1 jobs; 1 succeeded (0 with warnings), 0 failed, 0 blocked, 0 skipped."
                 )
                 ui.warning_line.assert_not_called()
                 ui.info_line.assert_called_once_with(
@@ -414,9 +415,9 @@ class PartialDeploymentTests(unittest.TestCase):
             with self.subTest(verbose=verbose):
                 ui = Mock()
                 cli.print_run_summary(ui, replace(self.cfg, verbose=verbose, clean_temp=True),
-                                      result, 2)
+                                      result, 2, elapsed_seconds=65.2)
                 ui.fail_line.assert_called_once_with(
-                    "Finished: 2 jobs; 1 succeeded (0 with warnings), 1 failed, 0 blocked, 0 skipped."
+                    "Finished in 1 min 5 sec: 2 jobs; 1 succeeded (0 with warnings), 1 failed, 0 blocked, 0 skipped."
                 )
                 ui.warning_line.assert_called_once_with(
                     "3 warning diagnostics across all job outcomes.", record=False,
@@ -471,7 +472,7 @@ class PartialDeploymentTests(unittest.TestCase):
                 ), in_container=in_container))
                 with redirect_stdout(output), redirect_stderr(output):
                     ui.warning_line("Optional tool unavailable", source="Environment")
-                    cli.print_run_summary(ui, summary_cfg, result, 1)
+                    cli.print_run_summary(ui, summary_cfg, result, 1, elapsed_seconds=65.2)
                 text = output.getvalue()
                 self.assertIn("2 spacing advisories across all job outcomes", text)
                 self.assertIn("Run-level advisories: 1 (separate from job warnings)", text)
