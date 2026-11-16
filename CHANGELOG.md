@@ -37,6 +37,12 @@
 - PDF titles now reflect the selected variant and final preamble metadata;
   explicit `\hypersetup` metadata takes precedence. Covers and badges keep
   variant-specific presentation even when visibility settings are customized.
+- Improved narrow-layout typesetting: song titles wrap with configurable badge
+  overlap (`\ulTitleBadgeOverlap`, default `false`), and `ulChordDiagramGrid`
+  provides width-aware, nut-aligned diagrams. Fixed TOC, song-number and repeat-bar
+  overfull warnings; oversized LilyPond systems shrink consistently across
+  ordinary and multikey editions. Underfull boxes now have separate advisory
+  counts, verbose details and retained JSON reports.
 
 ### Source and toolchain upgrade
 
