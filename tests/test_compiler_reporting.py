@@ -237,6 +237,34 @@ class CompilerReportingTests(unittest.TestCase):
         self.assertNotIn("WARNING", text)
         self.assertNotIn("0 warnings", text)
 
+    def test_spacing_advisories_are_visible_but_not_counted_as_warnings(self):
+        self.log("01_lualatex-pass1.log", "Underfull \\hbox (badness 1111) at line 1\n")
+        tex = self.log("final.log", "Underfull \\hbox (badness 10000) at line 9\n" * 2
+                       + "Underfull \\vbox (badness 2229) detected at line 10\n")
+        for verbose in (False, True):
+            with self.subTest(verbose=verbose):
+                cfg = replace(self.cfg, verbose=verbose)
+                worker = pipeline._JobUI(self.ui, self.job)
+                self.assertEqual(pipeline.analyze_warnings(worker, cfg, self.job, None, tex), 0)
+                self.assertEqual(len(worker.diagnostics), 2)
+                self.assertEqual(pipeline._advisory_count(worker.diagnostics), 3)
+                self.assertTrue(all(record.log_path == tex for record in worker.diagnostics))
+                pipeline.write_diagnostic_report(cfg, self.job, worker.diagnostics, "success")
+                with self.capture() as (stdout, stderr):
+                    pipeline._report_success(self.ui, cfg, self.job, worker.diagnostics)
+                text = stdout.getvalue() + stderr.getvalue()
+                self.assertIn("3 spacing advisories (not counted as warnings)", text)
+                self.assertIn("Compilation successful!", text)
+                self.assertNotIn("WARNING", text)
+                self.assertNotIn("0 warnings", text)
+                self.assertEqual(text.count("compile/final.log"), 1)
+                self.assertLess(text.index("3 spacing advisories"), text.index("SUCCESS"))
+                self.assertEqual("Underfull \\hbox" in text, verbose)
+                self.assertEqual("(2 occurrences)" in text, verbose)
+                self.assertEqual(self.ui.run_diagnostics, [])
+                self.assertEqual(self.report()["warnings"], [])
+                self.assertEqual(sum(item["occurrences"] for item in self.report()["advisories"]), 3)
+
     def test_layout_summary_includes_overfull_subset_without_changing_totals(self):
         tex = self.log("final.log", (
             "Overfull \\hbox (2.0pt too wide) at line 4\n" * 2
@@ -255,12 +283,15 @@ class CompilerReportingTests(unittest.TestCase):
                 text = stdout.getvalue() + stderr.getvalue()
                 self.assertIn("successful with 5 warnings!", text)
                 self.assertIn("compile/final.log", text)
+                self.assertIn("1 spacing advisory (not counted as warnings)", text)
                 if verbose:
                     self.assertIn("Overfull \\hbox", text)
                     self.assertIn("Overfull \\vbox", text)
+                    self.assertIn("Underfull \\hbox", text)
                 else:
                     self.assertIn("TeX: 4 layout (3 overfull)", text)
                     self.assertIn("TeX: 1 fonts", text)
+                    self.assertNotIn("Underfull \\hbox", text)
 
     def test_layout_overfull_subset_is_source_local_and_zero_is_omitted(self):
         diagnostics = (
@@ -319,7 +350,8 @@ class CompilerReportingTests(unittest.TestCase):
         self.assertEqual(worker.last_tex_log, expected)
 
     def test_success_wrapper_keeps_diagnostics_after_compile_directory_cleanup(self):
-        latest = self.log("final.log", "LaTeX Font Warning: Font shape `example' undefined.\n" * 2)
+        latest = self.log("final.log", "LaTeX Font Warning: Font shape `example' undefined.\n" * 2
+                          + "Underfull \\hbox (badness 10000) at line 9\n" * 2)
 
         def compile_synthetic(worker, _assets, cfg, job):
             worker.warning_line("Supplemental score omitted", source="Scores",
@@ -333,7 +365,7 @@ class CompilerReportingTests(unittest.TestCase):
         with self.capture() as (stdout, stderr), patch.object(pipeline, "_compile_one_job", side_effect=compile_synthetic):
             result = pipeline.compile_one_job(self.ui, object(), self.cfg, self.job)
         self.assertEqual((result.warning_count, result.next_step), (3, 17))
-        self.assertEqual(len(result.diagnostics), 2)
+        self.assertEqual(len(result.diagnostics), 3)
         self.assertIn("successful with 3 warnings!", stdout.getvalue() + stderr.getvalue())
         self.assertTrue(any(f"{self.basename}.pdf" in line for line in resultlist.lines()))
         shutil.rmtree(self.compile_dir)
@@ -346,6 +378,36 @@ class CompilerReportingTests(unittest.TestCase):
         self.assertEqual(report["warnings"][1]["log"], str(latest))
         self.assertIn("Font shape", report["warnings"][1]["message"])
         self.assertEqual(result.diagnostics[1].occurrences, 2)
+        self.assertEqual(result.diagnostics[2].severity, "advisory")
+        self.assertEqual(report["advisories"][0]["occurrences"], 2)
+        self.assertEqual(report["advisories"][0]["log"], str(latest))
+
+    def test_failed_job_retains_spacing_advisories_without_warning_inflation(self):
+        header = "Underfull \\hbox (badness 10000) in paragraph at lines 123456789--123456790\n"
+        log = self.log("error.log", header * 2
+                       + "./content/song.tex:7: Undefined control sequence.\nl.7 \\unknown\n")
+
+        def compile_failure(worker, *_args):
+            worker.last_tex_log = log
+            raise pipeline.CompileError("Synthetic failure", log)
+
+        with self.capture(), patch.object(pipeline, "_compile_one_job", side_effect=compile_failure):
+            with self.assertRaises(pipeline.CompileError) as caught:
+                pipeline.compile_one_job(self.ui, object(), self.cfg, self.job)
+        failure = pipeline.JobFailure(self.job, "Synthetic failure", caught.exception.diagnostics, log)
+        self.assertEqual(failure.warning_count, 0)
+        self.assertEqual(pipeline._advisory_count(failure.diagnostics), 2)
+        report = self.report()
+        self.assertEqual(report["warnings"], [])
+        self.assertEqual(report["advisories"][0]["occurrences"], 2)
+        self.assertEqual(report["error"]["line"], 7)
+        with self.capture() as (stdout, stderr):
+            pipeline._report_failure(self.ui, self.cfg, failure, {})
+        output = stdout.getvalue() + stderr.getvalue()
+        self.assertIn("2 spacing advisories", output)
+        self.assertIn("content/song.tex:7", output)
+        self.assertNotIn("WARNING", output)
+        self.assertNotIn("Underfull", output)
 
     def test_failure_retains_final_and_tracked_diagnostics_but_discards_inventory(self):
         early = self.log("01_lualatex-pass1.log", "LaTeX Warning: EARLY reference undefined.\n")

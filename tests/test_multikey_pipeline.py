@@ -1012,7 +1012,10 @@ class MultikeyPipelineTests(unittest.TestCase):
 
     def test_finish_uses_frozen_compilation_result_and_success_only_after_index(self) -> None:
         ordinary, multikey = self.job(), self.job(multikey=True)
-        diagnostics = (Diagnostic("TeX", "fonts", "Font substitution", occurrences=3),)
+        diagnostics = (
+            Diagnostic("TeX", "fonts", "Font substitution", occurrences=3),
+            Diagnostic("TeX", "spacing", "Underfull \\hbox", occurrences=2, severity="advisory"),
+        )
         compilation = pipeline.CompilationResult(warning_count=3, next_step=17,
                                                  diagnostics=diagnostics)
         with self.assertRaises(FrozenInstanceError):
@@ -1043,6 +1046,8 @@ class MultikeyPipelineTests(unittest.TestCase):
                                      (build_job_basename(multikey) + "_DIAGNOSTICS.json")).read_text())
                 self.assertEqual(report["status"], "skipped" if output is None else "success")
                 self.assertEqual(report["warnings"][0]["occurrences"], 3)
+                self.assertEqual(report["advisories"][0]["occurrences"], 2)
+                self.assertEqual(pipeline._advisory_count(count.diagnostics), 2)
                 if output is None:
                     self.ui.success_line.assert_not_called()
                     self.assertFalse(any("->" in call.args[0]

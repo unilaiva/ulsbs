@@ -7,7 +7,7 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 import unittest
 
-from ulsbs.diagnostics import Diagnostic, parse_tool_warnings
+from ulsbs.diagnostics import Diagnostic, parse_tool_warnings, strip_tex_warnings
 
 
 class DiagnosticsTests(unittest.TestCase):
@@ -16,6 +16,7 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(diagnostic.occurrences, 1)
         self.assertIsNone(diagnostic.log_path)
         self.assertIsNone(diagnostic.affected_count)
+        self.assertEqual(diagnostic.severity, "warning")
         with self.assertRaises(FrozenInstanceError):
             diagnostic.message = "changed"
 
@@ -46,11 +47,13 @@ LaTeX Warning: An unfamiliar future diagnostic.
         results = parse_tool_warnings(text, "lualatex")
         self.assertEqual([item.category for item in results], [
             "fonts", "references", "package", "package", "other", "fonts",
-            "missing-glyph", "layout", "layout", "other",
+            "missing-glyph", "layout", "layout", "spacing", "other",
         ])
         self.assertTrue(all(item.source == "TeX" for item in results))
         self.assertIn("Using the default instead.", results[2].message)
         self.assertNotIn("(example)", results[2].message)
+        self.assertEqual(results[-2].severity, "advisory")
+        self.assertEqual(results[-1].severity, "warning")
 
     def test_multiline_records_and_duplicate_grouping(self):
         text = """Package demo Warning: A warning containing the word warning
@@ -148,7 +151,7 @@ unrelated: warning: not from converter
         result, = parse_tool_warnings("score.ly:4:2: warning: barcheck failed\n", "LilyPond")
         self.assertEqual(result.category, "barcheck")
 
-    def test_false_positives_and_informational_boxes(self):
+    def test_false_positives_and_source_scoped_spacing_advisories(self):
         text = r"""(./warning.tex)
 warning.tex
 /tmp/warning:notes.ly
@@ -161,8 +164,40 @@ Underfull \vbox (badness 10000) detected at line 9
 """
         for source in ("TeX", "LilyPond", "converter"):
             with self.subTest(source=source):
-                self.assertEqual(parse_tool_warnings(text, source), ())
+                results = parse_tool_warnings(text, source)
+                if source == "TeX":
+                    self.assertEqual(len(results), 2)
+                    self.assertTrue(all(item.severity == "advisory" and item.category == "spacing"
+                                        for item in results))
+                else:
+                    self.assertEqual(results, ())
                 self.assertEqual(parse_tool_warnings("", source), ())
+
+    def test_spacing_advisories_group_occurrences_and_do_not_reclassify_warnings(self):
+        text = (r"Underfull \hbox (badness 10000) in paragraph at lines 32--32" + "\n\n") * 2
+        text += (r"Underfull \vbox (badness 2229) has occurred while \output is active [436]" + "\n\n"
+                 + r"Overfull \hbox (1pt too wide) in paragraph at lines 2--3" + "\n\n"
+                 + "Package demo Warning: An underfull box was detected by a package.\n")
+        for source in ("TeX", "lualatex", "LuaHBTeX", "xelatex"):
+            with self.subTest(source=source):
+                records = parse_tool_warnings(text, source, Path("final.log"))
+                self.assertEqual([record.severity for record in records],
+                                 ["advisory", "advisory", "warning", "warning"])
+                self.assertEqual([record.occurrences for record in records], [2, 1, 1, 1])
+                self.assertEqual([record.category for record in records],
+                                 ["spacing", "spacing", "layout", "package"])
+                self.assertTrue(all(record.source == "TeX" and record.log_path == Path("final.log")
+                                    for record in records))
+
+    def test_box_diagnostics_do_not_swallow_following_tex_errors(self):
+        header = r"Underfull \hbox (badness 10000) in paragraph at lines 123456789--123456790" + "\n"
+        for error in ("! Undefined control sequence.\nl.9 \\bad\n",
+                      "content/song.tex:9: Undefined control sequence.\nl.9 \\bad\n"):
+            with self.subTest(error=error):
+                self.assertEqual(strip_tex_warnings(header + error), error)
+                record, = parse_tool_warnings(header + error, "TeX")
+                self.assertEqual(record.message, header.strip())
+                self.assertEqual(record.severity, "advisory")
 
 
 if __name__ == "__main__":

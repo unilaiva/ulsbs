@@ -1,13 +1,14 @@
 # SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Standalone, record-based compiler warning parsing."""
+"""Standalone, record-based compiler warning and advisory parsing."""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -18,14 +19,16 @@ class Diagnostic:
     log_path: Path | None = None
     occurrences: int = 1
     affected_count: int | None = None
+    severity: Literal["warning", "advisory"] = "warning"
 
 
 _TEX_HEADER = re.compile(
     r"^(?:LaTeX(?: Font)? Warning\b|(?:Package|Class) \S+ Warning\b|"
     r"(?:pdfTeX|LuaTeX|LuaHBTeX|XeTeX|TeX|dvipdfmx|Fontconfig) warning\b|"
     r"warning\s+\([^\n)]+\)\s*:|"
-    r"Missing character:|Overfull \\[hv]box\b)", re.IGNORECASE,
+    r"Missing character:|(?:Overfull|Underfull) \\[hv]box\b)", re.IGNORECASE,
 )
+_UNDERFULL = re.compile(r"^Underfull \\[hv]box\b", re.IGNORECASE)
 _CONTINUATION = re.compile(r"^\((?:[^()\s]+)\)\s+")
 _REF_RECAP = re.compile(r"\bThere were undefined (?:references|citations)\b", re.IGNORECASE)
 _FONT_RECAP = re.compile(
@@ -34,6 +37,8 @@ _FONT_RECAP = re.compile(
 
 
 def _category(message: str) -> str:
+    if _UNDERFULL.match(message):
+        return "spacing"
     if re.search(r"\bbarcheck\b", message, re.I):
         return "barcheck"
     if re.search(r"missing character:|missing[- ]glyph|no glyph|glyph .+ (?:missing|not found)", message, re.I):
@@ -56,11 +61,12 @@ def _continues(raw: str, previous: str, source: str) -> bool:
         or (raw[:1].isspace() and not line.startswith(("[", "[]", "!")))
         or (source == "TeX" and len(previous) >= 70
             and not previous.rstrip().endswith((".", "!", "?")))
-    ) and not re.match(r"(?:Underfull|Overfull) \\[hv]box|(?:warning|error|info):", line, re.I))
+    ) and not re.match(r"!|l\.\d+\b|[^\r\n]+:\d+:|"
+                       r"(?:Underfull|Overfull) \\[hv]box|(?:warning|error|info):", line, re.I))
 
 
 def strip_tex_warnings(text: str) -> str:
-    """Remove TeX warning records from error excerpts, preserving actual errors.
+    """Remove TeX diagnostic records from error excerpts, preserving actual errors.
 
     Warning reporting uses only the last engine invocation; an arbitrary step's
     error log may instead contain a preflight or otherwise superseded run.
@@ -79,14 +85,14 @@ def strip_tex_warnings(text: str) -> str:
 def parse_tool_warnings(
     text: str, source: str, log_path: Path | None = None,
 ) -> tuple[Diagnostic, ...]:
-    """Parse warnings in encounter order, grouping identical normalized records.
+    """Parse diagnostics in encounter order, grouping identical normalized records.
 
-    Underfull boxes are informational. Closing TeX recaps are omitted only
-    when their specific warning records are present in this same text.
+    Underfull boxes are spacing advisories, not warnings. Closing recaps are
+    omitted only when their specific warning records are present in this text.
     ``affected_count`` is reserved for callers with artifact-level knowledge.
     """
     name = source.casefold()
-    if name in {"tex", "latex", "pdflatex", "lualatex", "xelatex", "pdftex", "luatex", "xetex"}:
+    if name in {"tex", "latex", "pdflatex", "lualatex", "xelatex", "pdftex", "luatex", "luahbtex", "xetex"}:
         source = "TeX"
     elif name == "lilypond":
         source = "LilyPond"
@@ -148,5 +154,6 @@ def parse_tool_warnings(
             old = grouped[record]
             grouped[record] = replace(old, occurrences=old.occurrences + 1)
         else:
-            grouped[record] = Diagnostic(source, _category(record), record, log_path)
+            severity = "advisory" if source == "TeX" and _UNDERFULL.match(record) else "warning"
+            grouped[record] = Diagnostic(source, _category(record), record, log_path, severity=severity)
     return tuple(grouped.values())

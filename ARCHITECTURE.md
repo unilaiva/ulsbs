@@ -1113,12 +1113,13 @@ duplication; substantial distinct-subset overhead may remain.
 ## Build Diagnostics
 
 `src/ulsbs/diagnostics.py` parses source-aware `Diagnostic` records with a message,
-category, log path, occurrence count and optional affected-item count. Multiline
-continuations form one record; whitespace-normalized identical messages are
-grouped with their occurrence counts. Job warning totals sum occurrences, not
-distinct messages, log lines or raw matches of the word "warning". Callers with
-artifact-level knowledge may attach `affected_count` (for example, eight songs
-missing IDs); that count is separate from the warning total. Compact output
+category, log path, occurrence count, optional affected-item count and a final
+`severity` field defaulting to `warning`. Multiline continuations form one
+record; whitespace-normalized identical messages are grouped with their
+occurrence counts. Job warning totals sum only `warning`
+occurrences, not distinct messages, log lines or raw matches of the word "warning".
+Callers with artifact-level knowledge may attach `affected_count` (for example,
+eight songs missing IDs); that count is separate from the warning total. Compact output
 aggregates by source/category; verbose output shows messages and occurrences.
 
 `pipeline.py:analyze_warnings` collects selected tool logs, including LilyPond,
@@ -1126,9 +1127,24 @@ and only the final LuaLaTeX invocation, not superseded typesetting passes.
 Convergence reruns respond to specific recognized requests in the latest TeX log,
 not arbitrary warnings. Closing TeX reference/font recaps are suppressed only
 when their corresponding specific warnings occur in the same parsed text.
-Missing glyphs and overfull boxes count as warnings; underfull boxes are
-informational. Configuration, resource and cleanup advisories remain separate
-from per-job warning totals.
+Missing glyphs and overfull boxes retain `warning` severity. Underfull horizontal
+and vertical boxes have category `spacing` and severity `advisory`. Advisory
+totals also sum occurrences, not distinct grouped records; the computed
+`ParallelRunResult.total_advisories` includes successful and failed job diagnostics
+without changing the result constructor, warning totals or success status.
+Both ordinary and multikey jobs classify their own final typesetting diagnostics
+independently. Each job prints an informational spacing-advisory count at either
+verbosity, with grouped messages only in verbose output and shared log links
+printed once across warning and advisory levels. The CLI reports a separate run
+total and links retained reports even for advisory-only runs. Configuration,
+resource and cleanup advisories recorded by the run-level UI remain independent
+of both per-job classifications and their totals.
+
+Per-job `<book-basename>_DIAGNOSTICS.json` reports retain the existing warning-only
+`warnings` array and add a separate `advisories` array with the same record fields,
+occurrence counts and host-mapped message/log paths. Reports remain under
+`result/diagnostics/` after successful temporary-directory cleanup; full tool logs
+still require `--keep-temp`.
 
 Recognition of warning headers is distinct from message categorization: unfamiliar
 messages matching supported TeX or generic tool-header patterns are retained

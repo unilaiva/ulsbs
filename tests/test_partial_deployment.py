@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -369,6 +370,115 @@ class PartialDeploymentTests(unittest.TestCase):
         )
         cli.print_run_summary(self.ui, cfg, result, 1)
         self.ui.see_line.assert_called_once_with("result/diagnostics")
+
+    def test_summary_advisory_only_success_is_not_warned_at_either_verbosity(self) -> None:
+        job = self.job("spacing")
+        advisory = Diagnostic("TeX", "spacing", "Underfull \\hbox", occurrences=3,
+                              severity="advisory")
+        result = pipeline.ParallelRunResult(
+            successes=[pipeline.JobSuccess(job, 0, (advisory,))], failures=[],
+        )
+        self.assertEqual(result.total_advisories, 3)
+        for verbose in (False, True):
+            with self.subTest(verbose=verbose):
+                ui = Mock()
+                cli.print_run_summary(ui, replace(self.cfg, verbose=verbose, clean_temp=True),
+                                      result, 1)
+                ui.success_line.assert_called_once_with(
+                    "Finished: 1 jobs; 1 succeeded (0 with warnings), 0 failed, 0 blocked, 0 skipped."
+                )
+                ui.warning_line.assert_not_called()
+                ui.info_line.assert_called_once_with(
+                    "3 spacing advisories across all job outcomes (not counted as warnings)."
+                )
+                ui.see_line.assert_called_once_with("result/diagnostics")
+                ui.space_line.assert_called_once_with(
+                    "Diagnostic reports are retained; use --keep-temp for full tool logs."
+                )
+
+    def test_summary_counts_advisory_occurrences_across_mixed_outcomes(self) -> None:
+        successful, failed = self.job("successful"), self.job("failed")
+        advisory = Diagnostic("TeX", "spacing", "Underfull \\vbox", occurrences=2,
+                              severity="advisory")
+        warning = Diagnostic("TeX", "fonts", "Font warning", occurrences=3)
+        result = pipeline.ParallelRunResult(
+            successes=[pipeline.JobSuccess(successful, 0, (advisory,))],
+            failures=[pipeline.JobFailure(failed, "compile failed", (
+                replace(advisory, occurrences=4), warning,
+            ))],
+            total_warnings=3,
+        )
+        self.assertEqual(result.total_advisories, 6)
+        self.assertEqual(result.failures[0].warning_count, 3)
+        for verbose in (False, True):
+            with self.subTest(verbose=verbose):
+                ui = Mock()
+                cli.print_run_summary(ui, replace(self.cfg, verbose=verbose, clean_temp=True),
+                                      result, 2)
+                ui.fail_line.assert_called_once_with(
+                    "Finished: 2 jobs; 1 succeeded (0 with warnings), 1 failed, 0 blocked, 0 skipped."
+                )
+                ui.warning_line.assert_called_once_with(
+                    "3 warning diagnostics across all job outcomes.", record=False,
+                )
+                ui.info_line.assert_called_once_with(
+                    "6 spacing advisories across all job outcomes (not counted as warnings)."
+                )
+                ui.see_line.assert_called_once_with("result/diagnostics")
+                details = [call.args[0] for call in ui.space_line.call_args_list]
+                self.assertFalse(any("reports are retained" in text for text in details))
+
+    def test_advisory_reports_use_host_paths_and_keep_run_level_advisories_separate(self) -> None:
+        original = self.job("spacing")
+        for in_container in (False, True):
+            with self.subTest(in_container=in_container):
+                root = Path("/songbook-data") if in_container else self.root
+                paths = SimpleNamespace(project_root=root, host_project_root=self.root,
+                                        result_dir=self.result_dir)
+                cfg = replace(self.cfg, clean_temp=True, runtime=SimpleNamespace(
+                    project_paths=paths, in_container=in_container,
+                ))
+                job = replace(original, doc_tex_abs=root / "spacing.tex",
+                              compile_dir=root / "temp/spacing/default")
+                log = job.compile_dir / "final.log"
+                diagnostics = (
+                    Diagnostic("TeX", "fonts", "Font warning", log),
+                    Diagnostic("TeX", "spacing", f"Underfull \\hbox in {root / 'content/song.tex'}",
+                               log, occurrences=2, severity="advisory"),
+                )
+                report = pipeline.write_diagnostic_report(cfg, job, diagnostics, "success")
+                data = json.loads(report.read_text(encoding="utf-8"))
+                self.assertEqual(len(data["warnings"]), 1)
+                self.assertEqual(len(data["advisories"]), 1)
+                self.assertEqual(data["warnings"][0]["category"], "fonts")
+                self.assertEqual(data["advisories"][0]["category"], "spacing")
+                self.assertEqual(data["advisories"][0]["occurrences"], 2)
+                self.assertEqual(set(data["warnings"][0]), set(data["advisories"][0]))
+                self.assertEqual(data["advisories"][0]["log"],
+                                 str(self.root / "temp/spacing/default/final.log"))
+                self.assertIn(str(self.root / "content/song.tex"),
+                              data["advisories"][0]["message"])
+                self.assertNotIn("/songbook-data/", json.dumps(data))
+                result = pipeline.ParallelRunResult(
+                    successes=[pipeline.JobSuccess(job, 1, diagnostics)], failures=[],
+                    total_warnings=1,
+                )
+                ui = UI(use_colors=False)
+                output = io.StringIO()
+                # Reports are written on the host; the CLI sees container-local paths.
+                summary_cfg = replace(cfg, runtime=SimpleNamespace(project_paths=SimpleNamespace(
+                    project_root=root, result_dir=root / "result",
+                ), in_container=in_container))
+                with redirect_stdout(output), redirect_stderr(output):
+                    ui.warning_line("Optional tool unavailable", source="Environment")
+                    cli.print_run_summary(ui, summary_cfg, result, 1)
+                text = output.getvalue()
+                self.assertIn("2 spacing advisories across all job outcomes", text)
+                self.assertIn("Run-level advisories: 1 (separate from job warnings)", text)
+                self.assertIn("result/diagnostics", text)
+                self.assertIn("Diagnostic reports are retained", text)
+                self.assertEqual(len(ui.run_diagnostics), 1)
+                self.assertEqual(result.total_advisories, 2)
 
 
 if __name__ == "__main__":

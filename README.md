@@ -317,15 +317,19 @@ The summary groups repeated warnings and shows occurrence or affected-item count
 where available, such as eight songs missing IDs. A warning spanning multiple log
 lines counts once. Typesetting warnings reflect the final LuaLaTeX run;
 intermediate rerun requests are progress messages.
-Missing glyphs and overfull boxes are warnings; underfull boxes are informational.
+Missing glyphs and overfull boxes are warnings. Underfull horizontal and vertical
+boxes are spacing advisories: their counts are visible per job and in the final
+summary, with grouped details under `--verbose`. They do not affect warning
+counts, the `SUCCESS` warning qualifier, exit status, or deployment.
 Configuration, resource, and cleanup advisories are separate from job counts.
 Some messages appear as `unclassified warnings`; use `--verbose` to read them
 or follow the `SEE` links to their logs.
 
 The final summary identifies warned jobs, failures, blocked companions, and
 intentionally skipped outputs. Per-job `<book-basename>_DIAGNOSTICS.json` reports
-remain under `result/diagnostics/`, even when temporary files are cleaned. Paths
-in these reports use host locations, including during container builds.
+remain under `result/diagnostics/`, with separate warning and advisory lists, even
+when temporary files are cleaned. Advisory-only runs also link these reports.
+Paths in these reports use host locations, including during container builds.
 Failed jobs also retain TeX error locations when available, and display
 a clickable file-and-line link independently of the log-tail limit. These lines
 refer to the file TeX actually read, which can be staged or generated TeX; they

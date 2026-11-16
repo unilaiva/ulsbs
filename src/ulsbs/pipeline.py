@@ -161,7 +161,7 @@ class JobFailure:
 
     @property
     def warning_count(self) -> int:
-        return sum(item.occurrences for item in self.diagnostics)
+        return _warning_count(self.diagnostics)
 
 
 @dataclass
@@ -183,6 +183,10 @@ class ParallelRunResult:
     @property
     def skipped(self) -> list[JobSuccess]:
         return [item for item in self.successes if item.skipped]
+
+    @property
+    def total_advisories(self) -> int:
+        return sum(_advisory_count(item.diagnostics) for item in self.successes + self.failures)
 
 
 @dataclass(frozen=True)
@@ -229,7 +233,11 @@ def _capture_library_warnings(ui):
 
 
 def _warning_count(diagnostics) -> int:
-    return sum(item.occurrences for item in diagnostics)
+    return sum(item.occurrences for item in diagnostics if item.severity == "warning")
+
+
+def _advisory_count(diagnostics) -> int:
+    return sum(item.occurrences for item in diagnostics if item.severity == "advisory")
 
 
 def _track_log(ui, path, source):
@@ -267,18 +275,22 @@ def _tex_error_location(text: str, job: Job) -> tuple[Path, int, str] | None:
 
 
 def _report_warnings(ui, cfg, job, diagnostics):
+    """Report warning and spacing-advisory groups without conflating their totals."""
     if not diagnostics:
         return
+    warnings = [item for item in diagnostics if item.severity == "warning"]
+    advisories = [item for item in diagnostics if item.severity == "advisory"]
     count = _warning_count(diagnostics)
-    ui.warning_line(f"{ui.fmt_doc(job)} {count} warning{'s' if count != 1 else ''}", record=False)
+    if count:
+        ui.warning_line(f"{ui.fmt_doc(job)} {count} warning{'s' if count != 1 else ''}", record=False)
     if cfg.verbose:
-        for item in diagnostics:
+        for item in warnings:
             repeated = f" ({item.occurrences} occurrences)" if item.occurrences > 1 else ""
             ui.space_line(f"{item.source}/{item.category}: {item.message}{repeated}")
-    else:
+    elif warnings:
         groups = Counter()
         overfull = Counter()
-        for item in diagnostics:
+        for item in warnings:
             groups[(item.source, item.category)] += item.occurrences
             if item.category == "layout" and re.match(r"Overfull \\[hv]box\b", item.message, re.I):
                 overfull[item.source] += item.occurrences
@@ -290,11 +302,19 @@ def _report_warnings(ui, cfg, job, diagnostics):
             summaries.append(f"{source}: {count} {label}")
         ui.space_line("; ".join(summaries))
         # Consequences matter more than raw package chatter in compact output.
-        details = [item for item in diagnostics if item.source not in ("TeX", "LilyPond")]
+        details = [item for item in warnings if item.source not in ("TeX", "LilyPond")]
         for item in details[:3]:
             ui.space_line(item.message)
         if len(details) > 3:
             ui.space_line(f"{len(details) - 3} additional warning groups; see diagnostic report or --verbose.")
+    advisory_count = _advisory_count(diagnostics)
+    if advisory_count:
+        label = "advisory" if advisory_count == 1 else "advisories"
+        ui.info_line(f"{ui.fmt_doc(job)} {advisory_count} spacing {label} (not counted as warnings)")
+        if cfg.verbose:
+            for item in advisories:
+                repeated = f" ({item.occurrences} occurrences)" if item.occurrences > 1 else ""
+                ui.space_line(f"{item.source}/{item.category}: {item.message}{repeated}")
     for path in dict.fromkeys(item.log_path for item in diagnostics if item.log_path is not None):
         if path.exists():
             ui.see_line(_diagnostic_path(path, cfg))
@@ -324,12 +344,13 @@ def write_diagnostic_report(cfg, job, diagnostics, status, *, error=None):
     data = {
         "book": str(_host_path(job.doc_tex_abs, cfg)), "variant": job.variant,
         "edition": "multikey" if job.multikey else "standard", "status": status,
-        "warnings": [{"source": item.source, "category": item.category,
+    }
+    for severity, key in (("warning", "warnings"), ("advisory", "advisories")):
+        data[key] = [{"source": item.source, "category": item.category,
                       "message": _host_text(item.message, cfg), "occurrences": item.occurrences,
                       "affected_count": item.affected_count,
                       "log": str(_host_path(item.log_path, cfg)) if item.log_path else None}
-                     for item in diagnostics],
-    }
+                     for item in diagnostics if item.severity == severity]
     if error is not None:
         log_path = getattr(error, "log_path", None)
         detail = {"message": _host_text(str(error), cfg),
