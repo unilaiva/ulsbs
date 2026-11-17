@@ -18,6 +18,7 @@ customization, use [Writing Songbooks](WRITING_SONGBOOKS.md).
 - [Fixed Policies and Version Ownership](#fixed-policies-and-version-ownership)
 - [PDF Font Sharing](#pdf-font-sharing)
 - [Build Diagnostics](#build-diagnostics)
+- [Performance Optimizations](#performance-optimizations)
 - [Multikey Books](#multikey-books)
   - [Build jobs and publication](#build-jobs-and-publication)
   - [PDF passes and resources](#pdf-passes-and-resources)
@@ -1166,6 +1167,79 @@ recognition and informational boxes. `tests/test_compiler_reporting.py` covers
 final-pass selection, affected-item metadata, unknown messages and summaries;
 `tests/test_reference_convergence.py` covers rerun recognition and unrelated
 warnings that must not trigger retries.
+
+## Performance Optimizations
+
+On **2026-11-17**, a performance-optimization investigation assessed ten ideas for
+reducing compilation time without changing the resulting books or media. One was
+implemented; the other nine were not retained because their measured benefit was
+too small, their correctness checks failed, or the required complexity outweighed
+the likely saving. Compiler timing reports were added separately to support the
+investigation; those reports measure performance rather than improve it.
+
+### Implemented: parallel engraving of alternative score keys
+
+MULTIKEY books need additional LilyPond scores for different transpositions.
+Previously, each book generated these alternatives sequentially, even when other
+compiler workers were idle. Independent score/transposition tasks now use spare
+workers in the compiler's existing shared pool. The owning book pauses without
+holding a worker, then resumes once its tasks finish. They share the normal worker
+and memory limits; there is no nested pool. Fallback attempts for one transposition
+remain sequential, results retain their original order, and only the owning book
+reports diagnostics. See [Build jobs and publication](#build-jobs-and-publication)
+for the scheduling and cancellation contracts.
+
+Repeated alternating before/after CLI measurements on a six-song Unilaiva book
+reduced median batch time from about **168 to 101 seconds with an empty score
+cache**, and **101 to 87 seconds with a populated score cache**. Output checks and
+representative visual inspection passed. The improvement comes from doing more
+work at once, using additional CPU and memory within the existing budget, not
+from eliminating engraving work. When all workers were already busy, or all
+requested alternatives were cache hits, measurements showed only small timing
+differences rather than a comparable speedup.
+
+### Not retained
+
+- **Skip repeated checks on cached alternative scores.** The checks cost less than
+  a millisecond per hit. Removing them offered too little benefit to justify more
+  complicated rules for deciding when a cached result is safe for the current job.
+- **Share input/toolchain fingerprints across jobs in one compiler run.** This
+  would avoid repeatedly hashing fonts, tools and dependencies, but those inputs
+  can change during a run. Safely detecting changes added complexity that was not
+  justified by the measured saving.
+- **Persistently cache original LilyPond snippets.** The tested lilypond-book cache
+  omitted required MIDI and musical-boundary files, and reused stale output after
+  an included source changed. Making reuse complete and reliable required more
+  cache machinery than the measured benefit justified.
+- **Remember rejected transpositions so later builds do not try them again.** Even
+  an ideal shortcut saved only about a second on the small parent fixture. A safe
+  implementation would also need to distinguish reproducible rejections from
+  temporary tool or resource failures; the existing warning alone was not proof.
+- **Do not draw alternative keys for songs excluded by a selection.** This had
+  useful timing potential, but changed output when notation from an excluded song
+  was saved or copied and later printed elsewhere. Excluding a song does not prove
+  that every piece of notation constructed inside it will be discarded.
+- **Cache repeated numeric key-spelling calculations.** The calculations were
+  cheap. Local savings were small, and whole-pass timing differences were too
+  variable to establish a worthwhile compilation speedup.
+- **Skip chord-fitting work when shrinking is disabled.** Savings were small, and
+  the tested shortcut produced incorrect alternative sizes when the shrinking
+  policy changed between constructing and fitting the notation.
+- **Reuse verse geometry instead of walking the retained layout repeatedly.** The
+  repeated walks cost only milliseconds. Tracking when layout nodes had changed
+  or been copied would have added more complexity than that saving justified.
+- **Extract PDF page ranges in parallel.** Actual qpdf extraction took only about
+  7 ms for the generic fixture and 89 ms for the six-song parent fixture. Both
+  produced just one range with the normal page limit. Most of the parent's roughly
+  16.3-second packaging time was resource/dependency validation, not extraction.
+  Even forcing twelve ranges spent only about 1.42 seconds in extraction plus
+  qpdf checks, too little to justify additional scheduling and cleanup machinery.
+  Extraction remains serial, with all validation intact.
+
+These conclusions apply to the bounded experiments, which used independent
+generic fixtures and small Unilaiva cases. They do not establish performance for
+every larger book or predict a speedup for the complete collection. None of the
+nine rejected shortcuts is active in the engine.
 
 ## Multikey Books
 
