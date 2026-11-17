@@ -9,6 +9,8 @@ their outputs immediately; MULTIKEY jobs retain an optimized private master.
 The coordinator schedules range packaging in the same pool only after both
 matching compilations succeed, including ordinary media and JSON exports.
 Compilation completion alone therefore does not imply MULTIKEY job success.
+Supplemental score chains suspend their parent without retaining a worker;
+only the coordinator admits chains, continuations and new jobs to this pool.
 
 This file is part of the 'ulsbs' package.
 """
@@ -28,11 +30,13 @@ import threading
 import time
 import traceback
 import warnings
-from collections import Counter
+from collections import Counter, deque
+from collections.abc import Generator
 from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from types import GeneratorType
 from typing import List
 from fnmatch import fnmatch
 
@@ -81,6 +85,7 @@ from .util import (
     append_text,
     current_time_human_readable,
     deduplicate_paths_preserve_order,
+    cancelling_commands,
 )
 
 # The subdirectory name into which asset subdirs 'assets/{tex, ly, img}' from
@@ -109,6 +114,7 @@ MULTIKEY_DISABLED_FALLBACK_TEX = r"""\AtBeginDocument{%
 
 ABORT_EVENT = threading.Event()
 _active_job_ui: ContextVar[_JobUI | None] = ContextVar("ulsbs_diagnostic_ui", default=None)
+_coordinator_stages = ContextVar("ulsbs_coordinator_stages", default=False)
 
 
 class CompileError(RuntimeError):
@@ -1661,13 +1667,13 @@ def step_multikey_ranges(
     return output_index, step + 1
 
 
-def _compile_one_job(
+def _compile_job_stages(
     ui: UI,
     assets: EngineAssets,
     cfg: Config,
     job: Job,
-) -> CompilationResult:
-    """Compile and optimize independently, retaining MULTIKEY masters privately.
+) -> Generator[list, None, CompilationResult]:
+    """Yield independent supplemental chains, then finish the private compilation.
 
     Hold the existing job lock through preparation, engraving, final pagination,
     font deduplication, optional exports, and warning analysis, releasing it on
@@ -1675,6 +1681,9 @@ def _compile_one_job(
     MULTIKEY jobs suppress those exports and report compilation completion, not
     final success; their master and fresh sidecar remain in the compile directory.
 
+    Yield one finite batch of quiet score/offset callables at the draft boundary.
+    No execution-context scope spans that yield. The scheduler resumes only once
+    children drain, or throws their error into this generator to release the lock.
     Return compiler warnings and the next log number in ``CompilationResult``.
     The scheduler supplies that small handoff to a separate packaging task once
     both matching compilations succeed. Failures retain the usual numbered-log
@@ -1765,9 +1774,23 @@ def _compile_one_job(
             die_log(ui, cfg, job, cwd=cwd, message=str(ce), log_path=ce.log_path)
 
         if score_sources is not None:
-            from .lilypond_scores import generate_scores
+            from .lilypond_scores import generate_scores_staged
 
-            generate_scores(ui, job, basename, score_sources, env, lp_include_args, verbose=cfg.verbose)
+            generation = generate_scores_staged(
+                ui, job, basename, score_sources, env, lp_include_args, verbose=cfg.verbose)
+            try:
+                with measure("scores.generate"):
+                    chains = next(generation)
+                yield chains
+                with measure("scores.generate"):
+                    try:
+                        next(generation)
+                    except StopIteration:
+                        pass
+                    else:
+                        raise RuntimeError("Supplemental generation yielded more than one batch")
+            finally:
+                generation.close()
             if isinstance(ui, _JobUI):
                 results_path = cwd / (basename + ".ulsbs-score-results.json")
                 try:
@@ -1889,16 +1912,83 @@ def _compile_one_job(
         lock.release()
 
 
-def compile_one_job(ui: UI, assets: EngineAssets, cfg: Config, job: Job) -> CompilationResult:
-    """Collect independent compilation timings and retain them for later packaging."""
-    worker_ui = _JobUI(ui, job)
-    timings = Timings()
+def _compile_one_job(ui, assets, cfg, job):
+    """Return resumable work to the coordinator, or drive it serially for direct callers."""
+    stages = _compile_job_stages(ui, assets, cfg, job)
+    if _coordinator_stages.get():
+        return stages
+    while True:
+        try:
+            chains = next(stages)
+        except StopIteration as done:
+            return done.value
+        try:
+            with measure("scores.generate"):
+                for chain in chains:
+                    chain()
+        except BaseException:
+            stages.close()
+            raise
+
+
+@dataclass
+class _CompilationHandoff:
+    """Suspended parent state, with no worker or context-variable scope retained.
+
+    The generator owns its job lock until completion/close. Only the coordinator
+    resumes or closes it, after all admitted children have released their files.
+    """
+
+    ui: _JobUI
+    timings: Timings
+    stages: Generator
+    chains: tuple
+    started: float
+    results: dict = field(default_factory=dict)
+    error: BaseException | None = None
+
+
+def compile_one_job(ui: UI, assets: EngineAssets, cfg: Config, job: Job) -> CompilationResult | _CompilationHandoff:
+    """Start compilation; coordinated callers may receive a worker-free handoff."""
+    return _advance_compilation(ui, assets, cfg, job)
+
+
+def _advance_compilation(ui, assets, cfg, job, handoff=None):
+    """Run one parent stage with fresh thread-local scopes and normal reporting."""
+    worker_ui = handoff.ui if handoff else _JobUI(ui, job)
+    timings = handoff.timings if handoff else Timings()
     status = "interrupted"
     try:
         with resultlist.job_scope(job), _capture_library_warnings(worker_ui), collect(timings):
             try:
                 with measure("job.compile"):
-                    result = _compile_one_job(worker_ui, assets, cfg, job)
+                    if handoff:
+                        elapsed = time.perf_counter() - handoff.started
+                        timings.add("scores.generate", elapsed, failed=handoff.error is not None)
+                        timings.add("job.compile", elapsed, failed=handoff.error is not None)
+                        for index in sorted(handoff.results):
+                            child_timings, diagnostics = handoff.results[index]
+                            worker_ui.diagnostics.extend(diagnostics)
+                            for name, stage in child_timings.stages.items():
+                                target = timings.stages.setdefault(name, {
+                                    "calls": 0, "elapsed_seconds": 0.0, "failures": 0})
+                                for key, value in stage.items():
+                                    target[key] += value
+                        stages = handoff.stages
+                    else:
+                        stages = _compile_one_job(worker_ui, assets, cfg, job)
+                    if isinstance(stages, GeneratorType):
+                        try:
+                            chains = (stages.throw(handoff.error) if handoff and handoff.error
+                                      else next(stages))
+                        except StopIteration as done:
+                            result = done.value
+                        else:
+                            status = "suspended"
+                            return _CompilationHandoff(worker_ui, timings, stages,
+                                                       tuple(chains), time.perf_counter())
+                    else:
+                        result = stages
             except Exception as error:
                 status = "failed"
                 if not worker_ui.analyzed:
@@ -2004,8 +2094,29 @@ def _finish_multikey_job(
 
 def _run_job_phase(function, job, *args):
     # Also scopes callers that replace a worker (e.g. tests or alternate runners).
-    with resultlist.job_scope(job):
-        return function(*args)
+    token = _coordinator_stages.set(True)
+    try:
+        with resultlist.job_scope(job), cancelling_commands(ABORT_EVENT):
+            if ABORT_EVENT.is_set():
+                raise KeyboardInterrupt()
+            return function(*args)
+    finally:
+        _coordinator_stages.reset(token)
+
+
+def _run_score_chain(chain, ui, job):
+    """Execute a quiet chain with private diagnostics/timings for parent assembly."""
+    child_ui = _JobUI(ui, job)
+    timings = Timings()
+    with _capture_library_warnings(child_ui), collect(timings):
+        try:
+            if ABORT_EVENT.is_set():
+                raise KeyboardInterrupt()
+            chain()
+        except BaseException as error:
+            error._ulsbs_child_data = (timings, tuple(child_ui.diagnostics))
+            raise
+    return timings, tuple(child_ui.diagnostics)
 
 
 def _report_failure(ui, cfg, failure, seen):
@@ -2051,7 +2162,7 @@ def run_jobs_parallel(
     assets: EngineAssets,
     cfg: Config,
 ) -> ParallelRunResult:
-    """Compile in parallel and submit packaging when each matching pair is ready.
+    """Admit ready stages to one shared bounded pool, without worker-side waits.
 
     Expect a queue with unique publication paths, as checked by job construction.
     Submit ordinary and MULTIKEY compilation together. Match editions by absolute
@@ -2059,10 +2170,11 @@ def run_jobs_parallel(
     MULTIKEY job fails without starting; either compilation failing prevents its
     package from being published, even if the other compilation is still running.
 
-    A ready pair submits exactly one packaging task to the same bounded executor.
-    Neither phase waits inside a worker, so a single worker cannot deadlock and
-    unrelated jobs do not impose a global packaging barrier. Available executor
-    capacity still determines when an already queued packaging task can start.
+    A ready pair adds exactly one packaging continuation. Parent resumptions and
+    packaging take priority over FIFO score chains, which take priority over FIFO
+    unstarted books. Finite child batches/retries guarantee eventual admission of
+    new books; no stage reserves a slot while waiting for children/dependencies.
+    Only max_parallel futures are admitted, with the existing shared memory policy.
 
     Ordinary jobs become successful after compilation; MULTIKEY jobs only after
     packaging. Count their warnings once, without counting the intermediate
@@ -2078,6 +2190,9 @@ def run_jobs_parallel(
     packaging_started: set[Job] = set()
     stop_requested = {"value": False}
     seen_errors = {}
+    handoffs: dict[Job, _CompilationHandoff] = {}
+    remaining: dict[Job, int] = {}
+    fut_map = {}
 
     def record_failure(job: Job, reason: str, *, error=None, blocked=False) -> None:
         """Deduplicate dependency failure and a later error from its running job."""
@@ -2120,9 +2235,36 @@ def run_jobs_parallel(
 
             warnings.showwarning = showwarning
             warnings.simplefilter("always")
-            # Each future maps to (job, is_packaging). Compilation returns a
-            # handoff object; packaging returns the final integer warning count.
-            fut_map = {}
+            # Admit only runnable work, never a whole executor backlog. Finish
+            # started parents first: FIFO continuations, FIFO children, then FIFO
+            # new books. Each parent has one finite child batch, so priority work
+            # drains and unstarted books make progress even with one slot.
+            normal = deque()
+            children = deque()
+            continuations = deque()
+
+            def enqueue(job, kind, payload=None):
+                lane = children if kind == "child" else continuations
+                lane.append((job, kind, payload))
+
+            def admit():
+                while (len(fut_map) < cfg.max_parallel and (normal or children or continuations)
+                       and not ABORT_EVENT.is_set()):
+                    lane = continuations or children or normal
+                    item = lane.popleft()
+                    job, kind, payload = item
+                    if kind == "child":
+                        index, chain = payload
+                        function, args = _run_score_chain, (chain, ui, job)
+                    elif kind == "resume":
+                        function, args = _advance_compilation, (ui, assets, cfg, job, payload)
+                    elif kind == "package":
+                        source = ordinary[(job.doc_tex_abs, job.variant)]
+                        function, args = finish_multikey_job, (ui, cfg, job, source, compiled[job])
+                    else:
+                        function, args = compile_one_job, (ui, assets, cfg, job)
+                    future = ex.submit(_run_job_phase, function, job, *args)
+                    fut_map[future] = item
 
             ordinary = {(job.doc_tex_abs, job.variant): job for job in jobs if not job.multikey}
             companions = {(job.doc_tex_abs, job.variant): job for job in jobs if job.multikey}
@@ -2130,16 +2272,45 @@ def run_jobs_parallel(
                 if job.multikey and (job.doc_tex_abs, job.variant) not in ordinary:
                     record_failure(job, "No matching ordinary edition in this run", blocked=True)
                 else:
-                    fut_map[ex.submit(_run_job_phase, compile_one_job, job, ui, assets, cfg, job)] = (job, False)
+                    normal.append((job, "compile", None))
 
             # Compilation and packaging use the same bounded pool. Only this
             # coordinator waits on futures; workers never wait on one another.
+            admit()
             while fut_map:
                 completed, _ = cf.wait(fut_map, return_when=cf.FIRST_COMPLETED)
                 if stop_requested["value"]:
                     break
-                for fut in completed:
-                    job, packaging = fut_map.pop(fut)
+                # Stable admission order breaks simultaneous-completion ties.
+                for fut in [future for future in fut_map if future in completed]:
+                    job, kind, payload = fut_map.pop(fut)
+                    if kind == "child":
+                        state = handoffs[job]
+                        try:
+                            state.results[payload[0]] = fut.result()
+                        except KeyboardInterrupt:
+                            error = fut.exception()
+                            if hasattr(error, "_ulsbs_child_data"):
+                                state.results[payload[0]] = error._ulsbs_child_data
+                            stop_requested["value"] = True
+                            ABORT_EVENT.set()
+                            break
+                        except Exception as error:
+                            if hasattr(error, "_ulsbs_child_data"):
+                                state.results[payload[0]] = error._ulsbs_child_data
+                            if state.error is None:
+                                state.error = error
+                            # Let admitted siblings finish before throwing into
+                            # the parent; unadmitted children need never start.
+                            queued = [item for item in children if item[0] == job]
+                            children_copy = [item for item in children if item[0] != job]
+                            children.clear()
+                            children.extend(children_copy)
+                            remaining[job] -= len(queued)
+                        remaining[job] -= 1
+                        if remaining[job] == 0:
+                            enqueue(job, "resume", state)
+                        continue
                     try:
                         result = fut.result()
                     except KeyboardInterrupt:
@@ -2149,13 +2320,27 @@ def run_jobs_parallel(
                     except Exception as error:
                         if ABORT_EVENT.is_set():
                             continue
+                        if kind == "resume":
+                            handoffs.pop(job, None)
+                            remaining.pop(job, None)
                         record_failure(job, str(error), error=error)
                         if not job.multikey:
                             companion = companions.get((job.doc_tex_abs, job.variant))
                             if companion is not None:
                                 record_failure(companion, "Matching ordinary edition failed", blocked=True)
                     else:
-                        if packaging:
+                        if isinstance(result, _CompilationHandoff):
+                            handoffs[job] = result
+                            remaining[job] = len(result.chains)
+                            if result.chains:
+                                for index, chain in enumerate(result.chains):
+                                    enqueue(job, "child", (index, chain))
+                            else:
+                                enqueue(job, "resume", result)
+                            continue
+                        handoffs.pop(job, None)
+                        remaining.pop(job, None)
+                        if kind == "package":
                             resultlist.commit_job(job)
                             successes.append(JobSuccess(job, result.warning_count,
                                                         result.diagnostics, result.skipped))
@@ -2177,12 +2362,11 @@ def run_jobs_parallel(
                         if (companion is not None and companion not in failed
                                 and companion not in packaging_started
                                 and companion in compiled and source in compiled):
-                            future = ex.submit(_run_job_phase, finish_multikey_job, companion,
-                                               ui, cfg, companion, source, compiled[companion])
-                            fut_map[future] = (companion, True)
+                            enqueue(companion, "package")
                             packaging_started.add(companion)
                 if stop_requested["value"]:
                     break
+                admit()
 
             if stop_requested["value"]:
                 for future in fut_map:
@@ -2191,6 +2375,32 @@ def run_jobs_parallel(
                 raise KeyboardInterrupt()
 
     finally:
+        # Executor shutdown above joins admitted workers first. A suspended
+        # generator may still own its job lock; closing it cannot race children.
+        # Include handoffs returned just as SIGINT stopped result consumption.
+        for future, (job, kind, payload) in fut_map.items():
+            if future.cancelled():
+                continue
+            try:
+                result = future.result()
+            except BaseException as error:
+                if kind == "child" and hasattr(error, "_ulsbs_child_data") and job in handoffs:
+                    handoffs[job].results[payload[0]] = error._ulsbs_child_data
+            else:
+                if isinstance(result, _CompilationHandoff):
+                    handoffs[job] = result
+                elif kind == "child" and job in handoffs:
+                    handoffs[job].results[payload[0]] = result
+        for job, state in handoffs.items():
+            if state.stages.gi_frame is None:
+                continue
+            state.error = KeyboardInterrupt()
+            try:
+                _advance_compilation(ui, assets, cfg, job, state)
+            except (KeyboardInterrupt, Exception):
+                pass
+            finally:
+                state.stages.close()
         signal.signal(signal.SIGINT, old_int)
         for job in jobs:
             resultlist.discard_job(job)

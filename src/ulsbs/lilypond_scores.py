@@ -20,6 +20,7 @@ import shlex
 import time
 from dataclasses import dataclass
 from fractions import Fraction
+from functools import partial
 from itertools import groupby
 from pathlib import Path
 
@@ -273,7 +274,39 @@ def _valid_key(key: object, *, mode: bool = False) -> bool:
 @measure("scores.generate")
 def generate_scores(ui, job, basename: str, scores: dict[str, Score],
                     env: dict[str, str], include_args: list[str], *, verbose: bool = False) -> None:
-    """Render requested alternatives and write final dispatch plus fitting policy.
+    """Run staged score generation synchronously, including its timing scope."""
+    for tasks in generate_scores_staged(ui, job, basename, scores, env, include_args,
+                                       verbose=verbose):
+        for task in tasks:
+            task()
+
+
+def _engrave_chain(score, key, target, offset, dimensions, directory, env, include_args,
+                   fingerprint, result) -> None:
+    """Run sequential octave retries, mutating only this chain's private result."""
+    signed = offset if offset <= 6 else offset - 12
+    # Keep preferred choices first; the third, higher register covers instrument
+    # pitch floors missed by both earlier choices.
+    candidates = ((signed, signed - 12, signed + 12) if signed > 0
+                  else (signed, signed + 12))
+    for candidate in candidates:
+        graphic, failure, log = _engrave(
+            score, key, target, candidate, offset, dimensions, directory, env, include_args,
+            fingerprint=fingerprint, statistics=result["statistics"],
+        )
+        result["rendered"].append((candidate, graphic, failure, log))
+        if graphic:
+            break
+
+
+def generate_scores_staged(ui, job, basename: str, scores: dict[str, Score],
+                           env: dict[str, str], include_args: list[str], *, verbose: bool = False):
+    """Prepare independent score/offset chains, then assemble their ordered results.
+
+    First advance yields zero-argument callables. The coordinator must execute each
+    exactly once and wait for all to finish before advancing again. Chains own their
+    result/statistics storage and emit no UI output; the coordinator supplies child
+    timing scopes and propagates child exceptions. No timing scope spans the yield.
 
     The generated bindings carry ``LILYPOND_SCORE_MIN_SCALE`` alongside accepted graphics,
     keeping TeX's physical-box checks consistent with engraving and cache checks.
@@ -300,7 +333,7 @@ def generate_scores(ui, job, basename: str, scores: dict[str, Score],
 
     dispatch, results = [], []
     warnings = {}
-    rendered = {}
+    chains, tasks, prepared = {}, [], []
     fingerprints = {}
     asset_directory = directory / "ulsbs-assets/ly"
     if requests and asset_directory.is_dir():
@@ -322,8 +355,6 @@ def generate_scores(ui, job, basename: str, scores: dict[str, Score],
                             "normal cache eligibility checks still apply",
                             source="Cache", category="assets")
     toolchain = cache.toolchain_fingerprint(env=env, cwd=directory) if requests else None
-    statistics = {"engravings": 0, "cache_hits": 0}
-    successes = fallbacks = attempts = 0
     for request in requests:
         if not isinstance(request, dict):
             continue
@@ -331,8 +362,7 @@ def generate_scores(ui, job, basename: str, scores: dict[str, Score],
         prefix = request.get("layer_prefix", "")
         if score is None or not isinstance(prefix, str) or not re.fullmatch(
                 r"ulsbs:transpose:v1:id:[a-z0-9-]+(?::o\d+)?", prefix):
-            ui.warning_line(f"{ui.fmt_doc(job)} Multikey LilyPond: unmatched score request; using original",
-                            source="Scores", category="requests", log_path=result_file)
+            prepared.append(None)
             continue
         key, targets = request.get("key"), request.get("targets")
         reason = score.unsupported
@@ -350,6 +380,38 @@ def generate_scores(ui, job, basename: str, scores: dict[str, Score],
         # A broken original is not a recoverable additional-variant failure.
         dimensions = tuple(_dimensions(directory / (graphic + ".pdf")) for graphic in score.graphics)
         signature = f'{key["letter"]}-{key["pitch"]}-{key["minor"]}' if _valid_key(key, mode=True) else "unknown"
+        prepared.append((request, score, prefix, key, targets, reason, record, signature))
+        if reason:
+            continue
+        if score.identity not in fingerprints:
+            fingerprints[score.identity] = cache.source_fingerprint(
+                score.source, include_args, cwd=directory, env=env, toolchain=toolchain)
+        record["cache_eligible"] = fingerprints[score.identity] is not None
+        for offset in range(1, 12):
+            # Each candidate's signed interval determines its offset modulo 12.
+            # This groups precisely the old rendered keys, including spelling,
+            # and retains the first request's operands for repeated requests.
+            chain_key = (score.identity, signature, targets[offset]["letter"], offset)
+            if chain_key not in chains:
+                result = {"rendered": [], "statistics": {"engravings": 0, "cache_hits": 0}}
+                chains[chain_key] = result
+                tasks.append(partial(
+                    _engrave_chain, score, key, targets[offset], offset, dimensions,
+                    directory, env, include_args, fingerprints[score.identity], result,
+                ))
+
+    yield tasks
+
+    statistics = {name: sum(result["statistics"][name] for result in chains.values())
+                  for name in ("engravings", "cache_hits")}
+    attempts = sum(len(result["rendered"]) for result in chains.values())
+    successes = fallbacks = 0
+    for entry in prepared:
+        if entry is None:
+            ui.warning_line(f"{ui.fmt_doc(job)} Multikey LilyPond: unmatched score request; using original",
+                            source="Scores", category="requests", log_path=result_file)
+            continue
+        request, score, prefix, key, targets, reason, record, signature = entry
         for offset in range(1, 12):
             target = targets[offset] if isinstance(targets, list) and len(targets) == 12 else None
             target_label = "unknown"
@@ -360,25 +422,8 @@ def generate_scores(ui, job, basename: str, scores: dict[str, Score],
                     target_label = str(target)
             outcome = {"offset": offset, "target": target, "attempts": [], "status": "fallback", "reason": reason}
             if not reason:
-                if score.identity not in fingerprints:
-                    fingerprints[score.identity] = cache.source_fingerprint(
-                        score.source, include_args, cwd=directory, env=env, toolchain=toolchain)
-                record["cache_eligible"] = fingerprints[score.identity] is not None
-                signed = offset if offset <= 6 else offset - 12
-                # Keep existing choices first, then try the higher register that
-                # positive intervals otherwise miss on instruments with a floor.
-                candidates = ((signed, signed - 12, signed + 12) if signed > 0
-                              else (signed, signed + 12))
-                for candidate in candidates:
-                    cache_key = (score.identity, signature, targets[offset]["letter"], candidate)
-                    if cache_key not in rendered:
-                        attempts += 1
-                        rendered[cache_key] = _engrave(
-                            score, key, targets[offset], candidate, offset, dimensions,
-                            directory, env, include_args, fingerprint=fingerprints[score.identity],
-                            statistics=statistics,
-                        )
-                    graphic, failure, log = rendered[cache_key]
+                chain_key = (score.identity, signature, targets[offset]["letter"], offset)
+                for candidate, graphic, failure, log in chains[chain_key]["rendered"]:
                     outcome["attempts"].append({"interval": candidate, "log": log, "reason": failure})
                     if graphic:
                         outcome.update(status="transposed", reason=None, graphic=graphic)

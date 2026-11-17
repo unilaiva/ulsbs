@@ -590,7 +590,8 @@ class MultikeyPipelineTests(unittest.TestCase):
                     patch.object(pipeline, "step_multikey_ranges", return_value=(self.result / "ranges.json", 6)), \
                     patch.object(pipeline, "analyze_warnings", return_value=0), \
                     patch("ulsbs.lilypond_scores.prepare_scores", return_value={}), \
-                    patch("ulsbs.lilypond_scores.generate_scores") as generate:
+                    patch("ulsbs.lilypond_scores.generate_scores_staged",
+                          side_effect=lambda *args, **kwargs: (batch for batch in [()])) as generate:
                 cfg = replace(self.cfg, multikey_lilypond_scores=True, verbose=verbose)
                 compilation = pipeline.compile_one_job(self.ui, Mock(), cfg, job)
                 self.assertEqual(compilation, pipeline.CompilationResult(0, 5))

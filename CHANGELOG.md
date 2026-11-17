@@ -63,6 +63,9 @@
 
 ### Other highlights
 
+- MULTIKEY supplemental score engraving now uses spare parallel build capacity
+  without increasing configured worker or memory limits. Retry order and parent-owned
+  diagnostics are preserved; cancellation also stops active tool descendants.
 - Compiler success messages now show per-edition compilation/packaging time and
   total compiler-run duration.
 - Container builds now honor host spinner suppression, keeping redirected output

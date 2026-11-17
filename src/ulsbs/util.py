@@ -15,13 +15,29 @@ import platform
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import time
 import unicodedata
 from dataclasses import dataclass
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Dict, List, Iterable
 from uuid import uuid4
+
+
+_command_cancel_event = ContextVar("ulsbs_command_cancel_event", default=None)
+
+
+@contextmanager
+def cancelling_commands(event):
+    """Bind cooperative subprocess cancellation to one scheduler worker stage."""
+    token = _command_cancel_event.set(event)
+    try:
+        yield
+    finally:
+        _command_cancel_event.reset(token)
 
 
 def run_quiet(args: list[str]) -> str | None:
@@ -744,6 +760,44 @@ def run_cmd(
         stderr = subprocess.STDOUT if stderr_to_stdout else subprocess.PIPE
 
     try:
+        cancel = _command_cancel_event.get()
+        if cancel is not None:
+            if cancel.is_set():
+                raise KeyboardInterrupt()
+            # A private process group includes LilyPond's Ghostscript descendants.
+            # The coordinator can abort without relying on terminal SIGINT being
+            # delivered to every descendant, and no worker returns before reaping.
+            with subprocess.Popen(args, cwd=str(cwd) if cwd else None, env=env,
+                                  stdout=stdout, stderr=stderr, start_new_session=True) as process:
+                try:
+                    while True:
+                        if cancel.is_set():
+                            raise KeyboardInterrupt()
+                        try:
+                            output, errors = process.communicate(timeout=0.1)
+                            break
+                        except subprocess.TimeoutExpired:
+                            continue
+                except BaseException:
+                    try:
+                        os.killpg(process.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        process.communicate(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        pass
+                    # Also kill a descendant that outlives its terminated leader.
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.communicate()
+                    raise
+                result = subprocess.CompletedProcess(args, process.returncode, output, errors)
+                if check:
+                    result.check_returncode()
+                return result
         return subprocess.run(
             args,
             cwd=str(cwd) if cwd else None,

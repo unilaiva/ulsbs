@@ -1197,6 +1197,28 @@ workers never wait on other jobs, including with a single worker. Each phase
 uses the existing per-job lock; packaging reacquires it after compilation. No
 shared manifest-payload sink or additional locking mechanism is required.
 
+At the supplemental-score boundary, compilation returns a private resumable
+handoff and releases its executor worker. The suspended generator retains its
+job lock and local files, but no execution-context scope or worker allocation.
+The coordinator admits independent score/offset chains to the SAME executor and
+`max_parallel`/container-memory budget as normal stages. Each chain keeps its
+preferred/octave retries sequential. Chains have private results, diagnostics
+and timing collectors; only the resumed parent assembles bindings and reports
+actionable warnings/debug information, in original request/offset order. Child
+work emits no compiler progress, start, completion or success output.
+
+Admission is bounded to active capacity, not an eagerly submitted whole-book
+backlog. Ready parent resumptions and packaging have FIFO priority, followed by
+FIFO children, then FIFO unstarted books. Each parent yields a finite child batch
+with finite retries, so started work drains and unstarted books eventually
+progress; admission does not preempt already running stages. At one slot, parents
+suspend, children run serially, then parents resume without a waiting worker.
+Unexpected child errors cancel unadmitted siblings and drain admitted siblings
+before the parent unwinds/releases its lock. SIGINT stops admission, cancels queued
+work, terminates/reaps scoped command process groups (including descendants), joins
+workers, and closes even handoffs returned at the interrupt boundary. Tests live
+in `test_supplemental_scheduler.py` and `test_lilypond_scores_staged.py`.
+
 The queue rejects duplicate publication paths before starting jobs: independent
 locks cannot prevent two sources/editions from overwriting the same artifact.
 Ordinary jobs reserve their PDF and optional `json/` export paths. Multikey jobs
@@ -1442,6 +1464,15 @@ that stage. Failed/interrupted workers retain completed and unwound stage data
 when their compile directory is writable. A compiled companion blocked by an
 ordinary failure can retain status `compiled`: timing status is a phase status,
 not the authoritative final run outcome.
+
+Resumable compilation aggregates active parent stages plus the supplemental
+handoff interval into `job.compile`; `scores.generate` includes preparation,
+the child batch's critical-path wall interval and ordered assembly. This interval
+includes supplemental admission/continuation waits, not a blocked parent worker.
+Child collectors are merged only after they drain. Their per-candidate/engraving
+elapsed totals sum overlapping command wall times and can exceed `scores.generate`;
+they are not CPU measurements or additional end-to-end elapsed time. Interrupted
+suspended parents retain their timing report when cleanup can write it.
 
 The run report is `<unique-id>.ulsbs-timings.json` in the temp root. It records
 `run.jobs` and total compiler-process elapsed time from CLI entry through output
