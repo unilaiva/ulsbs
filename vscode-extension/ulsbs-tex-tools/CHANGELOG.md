@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.3.0 - 2026-11-18
+
 - Updated editing support and the new-book template for the current ULSBS API,
   including variant availability, local visibility, identity and musical tests,
   and scalar verse-spacing controls.

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.3.0 - 2026-11-18
+
 > [!IMPORTANT]
 > **Existing books require source and configuration migration.** Review the
 > [v2 migration instructions](README.md#ulsbs-migrate-syntax-v2) before rebuilding,

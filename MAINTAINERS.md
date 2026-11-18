@@ -113,7 +113,7 @@ Run these commands from the ULSBS repository root on `main`.
 1. Set release variables and start from an up-to-date, clean branch:
 
    ```sh
-   VERSION=0.2.2
+   VERSION=0.3.0
    TAG="v$VERSION"
    DATE="$(date +%F)"
 
@@ -148,7 +148,7 @@ Run these commands from the ULSBS repository root on `main`.
    the preceding release, including required source/configuration migration.
    Consolidate intermediate fixes into their final behavior rather than listing
    implementation phases or individual commits. Then move the release entries to
-   `## [$VERSION] - $DATE`, then leave a new empty `## [Unreleased]` above it.
+   `## $VERSION - $DATE`, then leave a new empty `## Unreleased` above it.
 
 4. Verify versions and run release checks:
 
@@ -158,9 +158,9 @@ Run these commands from the ULSBS repository root on `main`.
    ./ulsbs-test
    npm --prefix vscode-extension/ulsbs-tex-tools ci
    npm --prefix vscode-extension/ulsbs-tex-tools run compile-web
-    npm --prefix vscode-extension/ulsbs-tex-tools run test:grammar
-    npm --prefix vscode-extension/ulsbs-tex-tools run test:songbooks
-    npm --prefix vscode-extension/ulsbs-tex-tools run test:verse
+   npm --prefix vscode-extension/ulsbs-tex-tools run test:grammar
+   npm --prefix vscode-extension/ulsbs-tex-tools run test:songbooks
+   npm --prefix vscode-extension/ulsbs-tex-tools run test:verse
    npm --prefix vscode-extension/ulsbs-tex-tools run package
    git diff --check
    git status --short
