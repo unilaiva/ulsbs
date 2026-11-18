@@ -603,6 +603,8 @@ Sizing anchor.
     walk(box, 0)
     texio.write_nl('LANE-' .. label .. ':' .. box.height .. ':' .. box.depth
       .. ':' .. table.concat(positions, ','))
+    % write_nl starts a line; finish it before TeX appends shipout progress.
+    texio.write_nl('')
   end
   local verse = 0
   luatexbase.add_to_callback('post_linebreak_filter', function(head)
