@@ -310,17 +310,80 @@ affect where lyrics wrap.
 Hidden alternate PDF layers in optional MULTIKEY editions never reserve extra
 space: the effective original notation alone determines line and page geometry.
 
-Use `\brk` within a lyric line to suggest a line break. Between verses or
-songs, it suggests a page or column break.
+### Break requests inside and between songs
 
-To force breaks between songs:
+The `\brk` family is context-sensitive. Its current behavior is:
 
-- `\sclearpage` jumps to the next page.
-- `\scleardpage` jumps to the next spread / even page.
+| Context | `\brk` | `\hardbrk` | `\forcebrk` |
+| --- | --- | --- | --- |
+| Inside a song, within an open text paragraph | Mild line-break suggestion | Same mild line-break suggestion | Same mild line-break suggestion |
+| Inside a song, between paragraphs or verses | Uses `\ulBreakPenalty` (initially `50`) | Strong suggestion using `\ulHardBreakPenalty` (initially `-500`) | Forced column/page break |
+| Outside an active song, including between songs | Forced column/page break | Forced column/page break | Forced column/page break |
 
-For long songs, `\brk`, `\hardbrk`, or `\forcebrk` may be needed immediately
-before the song so that the preceding song ends cleanly. Check the compiled
-PDF after changing breaks, paper size, fonts, or visible annotations.
+Here a column/page break advances to the next column in two-column layout, or
+the next page in one-column layout. A suggested break is not guaranteed to be
+taken. In a verse, put a column/page break request on its own source line, not
+after lyric text on the same line. Outside a verse, ordinary TeX paragraph rules
+apply: a source newline alone does not end an open paragraph.
+
+**Despite its name, `\forcebrk` does not force a break within an open song
+paragraph.** All three commands insert the same mild inline suggestion there.
+
+`\hardbrk` and `\forcebrk` also change later break requests: they assign
+`\ulBreakPenalty` to `\ulHardBreakPenalty` or `-10000`, respectively. The assignment
+lasts until the end of the current TeX group, such as the current verse, song, or
+`ulSongs` environment, unless changed again. A later plain `\brk` can therefore
+remain strong or forced. Use `{\hardbrk}` or `{\forcebrk}` to limit that assignment
+to the individual request. This grouping does not change the context-sensitive
+behavior in the table.
+
+### Clearing columns and pages between songs
+
+Use these commands between songs, not inside a song's captured body:
+
+| Command | Behavior |
+| --- | --- |
+| `\nextcol` | Forces the next column, or the next page in one-column layout. |
+| `\sclearpage` | Finishes all pending song/intersong pages, including continuations. Does nothing if none is pending. |
+| `\scleardpage` | Drains pending song/intersong output, then targets an even (left-hand) page in two-sided books. See the ordinary-prose exception below. |
+| `\sclearoddpage` | Drains pending song/intersong output, then targets an odd (right-hand) page in two-sided books. |
+
+"Pending" means already-typeset output that has not yet been fully written to
+PDF pages, not songs still to come in the source. Even the last song can be
+pending after `\endsong`; the end of `ulSongs` normally drains it. Ordinary prose
+alone is not pending song/intersong output.
+
+The parity commands retain an available page whose parity already matches,
+rather than always skipping another spread. Their parity step can act even when
+no song output is pending. In one-sided books, both behave like `\sclearpage`.
+
+**Ordinary-prose exception:** in one-column layout, `\scleardpage` retains a legacy
+padding policy that can insert an extra page and leave following content on an
+odd page when ordinary prose has not been cleared first. For reliable alignment
+after ordinary prose, finish it with normal LaTeX `\clearpage` before applying
+`\scleardpage`. `\sclearoddpage` does not have this exception.
+
+### Breaks in selected songbooks
+
+`\nextcol`, `\sclearpage`, `\scleardpage`, and `\sclearoddpage` accept an optional
+trailing star. Without song selection, starred and unstarred forms behave
+identically. With `\ulIncludeOnlySongs`, their unstarred forms in the source are
+ignored; starred forms execute immediately while the source is read, not when
+the selected songs are output. The star changes timing, not break strength.
+
+To insert a break in selected output, put the command name without a backslash or
+star in the selection list, for example `\ulIncludeOnlySongs{3,sclearoddpage,8}`.
+The supported break directives are `brk`, `nextcol`, `sclearpage`, `scleardpage`, and
+`sclearoddpage`. Here `brk` and `nextcol` both mean a forced column/page break;
+`hardbrk` and `forcebrk` are not selection-list directives.
+
+The `\brk`, `\hardbrk`, and `\forcebrk` commands do not accept stars or suppress
+source-time execution. Inside a song their break nodes are retained with that
+song. Between songs they act while the source is read, so use selection-list
+directives instead to control breaks in a rearranged selection.
+
+Check the compiled PDF after changing breaks, paper size, fonts, or visible
+annotations.
 
 ## Keys and accidentals
 

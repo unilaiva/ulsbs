@@ -660,6 +660,17 @@ ships. Empty-page lookahead retains even/odd spread reservations. Song clears us
 the saved kernel clear locally, independent of an author's temporary include-clear
 override; standard kernel column output stays untouched.
 
+Explicit break commands live in `ulsbs-layout.code.tex`. Inside an active song,
+`\brk` emits an inline penalty of `-5` in horizontal mode, or a column/page boundary
+using `\ulBreakPenalty` in vertical mode; outside a song it forces a column/page
+break. `\hardbrk` and `\forcebrk` assign `\ulBreakPenalty` in the caller's scope
+before dispatching through `\brk`, so their inline behavior is identical and their
+assignments are not one-shot. Only `\nextcol` and the song-clear commands suppress
+unstarred source-time execution during selection; selection-list `brk` is forced.
+The shared parity helper preserves `\scleardpage`'s one-column ordinary-prose
+spacer, which can overflow and leave subsequent content on an odd page. Odd-page
+padding and both parities in two-column mode use a kernel physical-page clear.
+
 `\ulColumnBottomGlue` is independent scoped layout policy, initially
 `0pt plus .5\textheight` for every named variant and package-only default. It
 absorbs unused column space instead of stretching compact lyric lines; visibility

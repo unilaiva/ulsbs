@@ -216,21 +216,22 @@
 
 % === Public break commands ===
 
-% No arguments; suggest an inline break in lyrics or a column/page break between
-% song paragraphs. Outside a song, force layout's general column/page break.
+% No arguments; suggest an inline break in an open song paragraph, otherwise use
+% ulBreakPenalty between song paragraphs. Outside a song, force a column/page break.
 \cs_set_protected:Npn \brk
   {\bool_if:NTF \g__ulsbs_song_active_bool
     {\mode_if_horizontal:TF {\penalty-5\relax}
        {\unpenalty\__ulsbs_layout_break:n {\ulBreakPenalty}}}
     {\__ulsbs_layout_break:}}
 
-% No arguments; set the scoped break penalty to forced (-10000), then use brk.
+% These assignments persist in the caller's scope; brk's inline branch stays mild.
+% No arguments; set ulBreakPenalty to forced (-10000), then use brk.
 \newcommand\forcebrk{\ulBreakPenalty=-10000\brk}
 
 % No arguments; set the scoped break penalty to ulHardBreakPenalty, then use brk.
 \newcommand\hardbrk{\ulBreakPenalty=\ulHardBreakPenalty\brk}
 
-% These three commands suppress unstarred source breaks during song selection;
+% These four commands suppress unstarred source breaks during song selection;
 % an optional star executes immediately (selection directives run at commit).
 % [star]: force the next column, or the next page in one-column layout.
 \DeclareDocumentCommand \nextcol {s}
@@ -242,27 +243,33 @@
    {\IfBooleanTF{#1}{\__ulsbs_layout_clear_songs:}
      {\bool_if:NF \g__ulsbs_song_selection_bool {\__ulsbs_layout_clear_songs:}}}
 
-% [star]: drain pending song pages and align to an even page in two-sided mode.
+% [star]: drain pending song pages and target even parity in two-sided mode;
+% the legacy one-column ordinary-prose spacer below can overflow that target.
 \DeclareDocumentCommand \scleardpage {s}
-  {\IfBooleanTF{#1}{\__ulsbs_layout_spread:}
-    {\bool_if:NF \g__ulsbs_song_selection_bool {\__ulsbs_layout_spread:}}}
+  {\IfBooleanTF{#1}{\__ulsbs_layout_clear_parity:n {0}}
+    {\bool_if:NF \g__ulsbs_song_selection_bool {\__ulsbs_layout_clear_parity:n {0}}}}
 
-% No arguments; drain owned output and reserve a blank odd page when needed.
-\cs_new_protected:Npn \__ulsbs_layout_spread:
+% [star]: drain pending song pages and align to an odd page in two-sided mode.
+\DeclareDocumentCommand \sclearoddpage {s}
+  {\IfBooleanTF{#1}{\__ulsbs_layout_clear_parity:n {1}}
+    {\bool_if:NF \g__ulsbs_song_selection_bool {\__ulsbs_layout_clear_parity:n {1}}}}
+
+% {0|1}: drain owned output, then pad to even/odd parity in two-sided mode.
+% An already matching page is retained; one-sided mode only drains owned output.
+\cs_new_protected:Npn \__ulsbs_layout_clear_parity:n #1
   {\__ulsbs_layout_clear_songs:
-   \if@twoside\ifodd\value{page}
-     \if@twocolumn
-       % Padding must finish the physical page, not just its first column.
-       % A null also makes an otherwise empty odd page reach kernel shipout.
-       \null\__ulsbs_layout_clear_song_page:
-     \else
-      % Let ordinary page glue decide whether the empty column fits here.
-      \dim_set:Nn \l__ulsbs_layout_available_dim {\textheight-\pagetotal}
-      \par\penalty10000\relax
-      \kern0pt\vbox_to_ht:nn {\l__ulsbs_layout_available_dim}{\hbox{}\vfil}
-      \vfil\penalty-10000\relax
-     \fi
-   \fi\fi}
+   \if@twoside
+     \int_compare:nNnF {\int_mod:nn {\value{page}}{2}}={#1}
+       {\bool_lazy_or:nnTF {\legacy_if_p:n {@twocolumn}} {\int_compare_p:n {#1=1}}
+         {% Finish the physical page, even when only its first column is empty.
+          % A null makes an otherwise empty padding page reach kernel shipout.
+          \null\__ulsbs_layout_clear_song_page:}
+         {% Preserve scleardpage's established one-column ordinary-prose glue.
+          \dim_set:Nn \l__ulsbs_layout_available_dim {\textheight-\pagetotal}
+          \par\penalty10000\relax
+          \kern0pt\vbox_to_ht:nn {\l__ulsbs_layout_available_dim}{\hbox{}\vfil}
+          \vfil\penalty-10000\relax}}
+   \fi}
 
 % No arguments. Apply output columns and traverse requested labels/directives;
 % submit copies of retained boxes (duplicates allowed), then clear the lookup.
@@ -277,7 +284,9 @@
     \clist_map_inline:Nn \g__ulsbs_song_selection_clist
     {\str_case:nnF {##1}
       {{brk}{\__ulsbs_layout_break:}{nextcol}{\__ulsbs_layout_break:}
-        {sclearpage}{\__ulsbs_layout_clear_songs:}{scleardpage}{\__ulsbs_layout_spread:}}
+         {sclearpage}{\__ulsbs_layout_clear_songs:}
+         {scleardpage}{\__ulsbs_layout_clear_parity:n {0}}
+         {sclearoddpage}{\__ulsbs_layout_clear_parity:n {1}}}
       {\prop_get:NnNT \g__ulsbs_song_selection_boxes_prop {##1}\l_tmpa_tl
         {\tl_use:N \l_tmpa_tl}}}
    \prop_gclear:N \g__ulsbs_song_selection_boxes_prop}

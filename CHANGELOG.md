@@ -6,6 +6,8 @@
   breaks, including introductory notes and prose, without changing later breaks.
 - Fix `\scleardpage` in two-column layouts to start the next even page rather
   than the next column of an odd page.
+- Add `\sclearoddpage` for odd-page song starts, including starred source-time
+  use and song-selection break directives.
 
 ## v0.3.0 - 2026-11-18
 

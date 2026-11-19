@@ -1717,7 +1717,7 @@ BODYMARK
         for columns in (1, 2):
             for page in (2, 3):
                 for right in (False, True) if columns == 2 else (False,):
-                    for clear in ("sclearpage", "scleardpage"):
+                    for clear in ("sclearpage", "scleardpage", "sclearoddpage"):
                         label = f"{columns}-{page}-{right}-{clear}"
                         with self.subTest(case=label):
                             body = (rf"\setcounter{{page}}{{{page}}}\begin{{ulSongs}}{{}}"
@@ -1745,7 +1745,8 @@ BODYMARK
                             source = source.replace("oneside,openany,", "twoside,openany,")
                             output = self.compile_source(source, label=label)
                             expected = page + 1
-                            if clear == "scleardpage" and expected % 2:
+                            parity = int(clear == "sclearoddpage")
+                            if clear != "sclearpage" and expected % 2 != parity:
                                 expected += 1
                             self.assertIn(f"CLEAR-STATE:{expected}/left", output)
                             self.assertIn("CLEAR-OVERRIDE-PRESERVED", output)
@@ -1761,7 +1762,7 @@ BODYMARK
         for page in (2, 3):
             for right in (False, True):
                 for prose in (False, True):
-                    for clear in ("sclearpage", "scleardpage"):
+                    for clear in ("sclearpage", "scleardpage", "sclearoddpage"):
                         label = f"{page}-{right}-{prose}-{clear}"
                         with self.subTest(case=label):
                             body = (rf"\setcounter{{page}}{{{page}}}\begin{{ulSongs}}{{}}"
@@ -1778,7 +1779,8 @@ AFTERMARK
                             source = document(body, preamble).replace(
                                 "[oneside,openany,", "[twoside,openany,")
                             output = self.compile_source(source, label=label)
-                            advances = clear == "scleardpage" and page % 2
+                            advances = (clear != "sclearpage"
+                                        and page % 2 != int(clear == "sclearoddpage"))
                             expected = page + 1 if advances else page
                             column = "right" if right and not advances else "left"
                             self.assertIn(f"CLEAR-STATE:{expected}/{column}", output)
@@ -1793,7 +1795,7 @@ AFTERMARK
 
     def test_one_sided_two_column_clears_drain_intersong_without_parity_padding(self):
         for right in (False, True):
-            for clear in ("sclearpage", "scleardpage"):
+            for clear in ("sclearpage", "scleardpage", "sclearoddpage"):
                 label = f"{right}-{clear}"
                 with self.subTest(case=label):
                     body = (r"\setcounter{page}{3}\begin{ulSongs}{}"
@@ -1822,7 +1824,7 @@ AFTERMARK
 """
         for selection in (False, True):
             for page in (2, 3):
-                for clear in ("sclearpage", "scleardpage"):
+                for clear in ("sclearpage", "scleardpage", "sclearoddpage"):
                     label = f"{selection}-{page}-{clear}"
                     with self.subTest(case=label):
                         body = (rf"\setcounter{{page}}{{{page}}}\begin{{ulSongs}}{{}}"
@@ -1843,10 +1845,56 @@ AFTERMARK
                                      for i, words in enumerate(self.positioned_words())
                                      for text, box in words if text in ("LASTMARK", "AFTERMARK")}
                         expected = locations["LASTMARK"][0] + 1
-                        if clear == "scleardpage" and expected % 2:
+                        parity = int(clear == "sclearoddpage")
+                        if clear != "sclearpage" and expected % 2 != parity:
                             expected += 1
                         self.assertEqual(locations["AFTERMARK"][0], expected)
                         self.assertLess(locations["AFTERMARK"][1], 200)
+
+    def test_odd_clear_without_pending_output_inside_and_outside_songs(self):
+        for page in (2, 3):
+            for songs in (False, True):
+                for prose in (False, True):
+                    label = f"{page}-{songs}-{prose}"
+                    with self.subTest(case=label):
+                        body = (rf"\setcounter{{page}}{{{page}}}"
+                                + (r"\begin{ulSongs}{}" if songs else "")
+                                + (r"ORDINARYMARK\par" if prose else "")
+                                + r"\sclearoddpage\typeout{ODD-PAGE:\thepage}AFTERMARK\par"
+                                + (r"\end{ulSongs}" if songs else ""))
+                        source = document(body).replace(
+                            "[oneside,openany,", "[twoside,openany,")
+                        output = self.compile_source(source, label=label)
+                        self.assertIn("ODD-PAGE:3", output)
+                        locations = {text: i + page for i, words in enumerate(self.positioned_words())
+                                     for text, _ in words if text in ("ORDINARYMARK", "AFTERMARK")}
+                        self.assertEqual(locations["AFTERMARK"], 3)
+                        if prose:
+                            self.assertEqual(locations["ORDINARYMARK"], page)
+
+    def test_odd_clear_star_executes_at_capture_and_directive_at_commit(self):
+        for columns in (1, 2):
+            with self.subTest(columns=columns):
+                body = r"""
+\setcounter{page}{2}\begin{ulSongs}{}
+\beginsong{First}[id={first-source}]\beginverse*
+FIRSTMARK
+\endverse\endsong
+\sclearoddpage\typeout{UNSTARRED-PAGE:\thepage}
+\sclearoddpage*\typeout{STARRED-PAGE:\thepage}
+\beginsong{Second}[id={second-source}]\beginverse*
+SECONDMARK
+\endverse\endsong\end{ulSongs}
+"""
+                source = document(body, rf"\ulSongColumns{{{columns}}}\ulSongPosition{{0}}"
+                                  r"\ulIncludeOnlySongs{2,sclearoddpage,1}").replace(
+                    "[oneside,openany,", "[twoside,openany,")
+                output = self.compile_source(source, label=str(columns))
+                self.assertIn("UNSTARRED-PAGE:2", output)
+                self.assertIn("STARRED-PAGE:3", output)
+                locations = {text: i + 2 for i, words in enumerate(self.positioned_words())
+                             for text, _ in words if text in ("FIRSTMARK", "SECONDMARK")}
+                self.assertEqual(locations, {"SECONDMARK": 3, "FIRSTMARK": 5})
 
     def test_two_page_song_reserves_a_spread_on_an_empty_odd_page(self):
         lines = "\n".join(r"\EmptyEffect Lyric line " + str(n) + "." for n in range(13))
