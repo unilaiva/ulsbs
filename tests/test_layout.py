@@ -1675,6 +1675,145 @@ Second song line.
         self.assertEqual(re.findall(r"CLEAR-EFFECTS=(\d+)", output), ["27", "27"])
         self.assertEqual(self.pages(), 3)
 
+    def test_song_clears_advance_whole_pages_from_either_column(self):
+        preamble = r"""
+\ulSongPosition{0}\setlength\textheight{150pt}
+\newcount\ClearEffects\def\ClearEffect{\global\advance\ClearEffects1 }
+"""
+        for columns in (1, 2):
+            for page in (2, 3):
+                for right in (False, True) if columns == 2 else (False,):
+                    for clear in ("sclearpage", "scleardpage"):
+                        label = f"{columns}-{page}-{right}-{clear}"
+                        with self.subTest(case=label):
+                            body = (rf"\setcounter{{page}}{{{page}}}\begin{{ulSongs}}{{}}"
+                                    + (r"\hbox{LEFTMARK}\nextcol*" if right else "")
+                                    + r"""
+\beginsong{Before}[id={before-clear}]
+\beginverse*
+\ClearEffect BEFOREMARK
+\endverse\endsong
+\let\SavedClearpage\clearpage\let\clearpage\relax
+""" + "\\" + clear + ("*" if right else "") + r"""
+\makeatletter
+\typeout{CLEAR-STATE:\thepage/\if@firstcolumn left\else right\fi}
+\ifx\clearpage\relax\typeout{CLEAR-OVERRIDE-PRESERVED}\fi
+\makeatother
+\let\clearpage\SavedClearpage
+\beginsong{After}[id={after-clear}]
+\beginverse*
+\ClearEffect AFTERMARK
+\endverse\endsong
+\end{ulSongs}\typeout{CLEAR-EFFECTS:\the\ClearEffects}
+""")
+                            source = document(body, preamble + rf"\ulSongColumns{{{columns}}}",
+                                              variant="lyric" if right else "default")
+                            source = source.replace("oneside,openany,", "twoside,openany,")
+                            output = self.compile_source(source, label=label)
+                            expected = page + 1
+                            if clear == "scleardpage" and expected % 2:
+                                expected += 1
+                            self.assertIn(f"CLEAR-STATE:{expected}/left", output)
+                            self.assertIn("CLEAR-OVERRIDE-PRESERVED", output)
+                            self.assertEqual(re.findall(r"CLEAR-EFFECTS:(\d+)", output), ["2"])
+                            locations = {text: i + page for i, words in enumerate(self.positioned_words())
+                                         for text, _ in words if text in ("BEFOREMARK", "AFTERMARK")}
+                            self.assertEqual(locations, {"BEFOREMARK": page, "AFTERMARK": expected})
+
+    def test_two_column_song_clears_preserve_no_pending_output_contract(self):
+        preamble = r"""
+\ulSongColumns{2}\ulSongPosition{0}\setlength\textheight{150pt}
+"""
+        for page in (2, 3):
+            for right in (False, True):
+                for prose in (False, True):
+                    for clear in ("sclearpage", "scleardpage"):
+                        label = f"{page}-{right}-{prose}-{clear}"
+                        with self.subTest(case=label):
+                            body = (rf"\setcounter{{page}}{{{page}}}\begin{{ulSongs}}{{}}"
+                                    + (r"\hbox{LEFTMARK}\nextcol*" if right else "")
+                                    + (r"ORDINARYMARK\par" if prose else "")
+                                    + "\\" + clear + r"""
+\makeatletter
+\typeout{CLEAR-STATE:\thepage/\if@firstcolumn left\else right\fi}
+\makeatother
+\beginsong{After}\beginverse*
+AFTERMARK
+\endverse\endsong\end{ulSongs}
+""")
+                            source = document(body, preamble).replace(
+                                "[oneside,openany,", "[twoside,openany,")
+                            output = self.compile_source(source, label=label)
+                            advances = clear == "scleardpage" and page % 2
+                            expected = page + 1 if advances else page
+                            column = "right" if right and not advances else "left"
+                            self.assertIn(f"CLEAR-STATE:{expected}/{column}", output)
+                            words = self.positioned_words()[expected - page]
+                            after = next(box for text, box in words if text == "AFTERMARK")
+                            # Both the state and actual following ink must agree
+                            # on the physical column, including an empty odd page.
+                            if column == "left":
+                                self.assertLess(float(after["xMin"]), 200)
+                            else:
+                                self.assertGreater(float(after["xMin"]), 200)
+
+    def test_one_sided_two_column_clears_drain_intersong_without_parity_padding(self):
+        for right in (False, True):
+            for clear in ("sclearpage", "scleardpage"):
+                label = f"{right}-{clear}"
+                with self.subTest(case=label):
+                    body = (r"\setcounter{page}{3}\begin{ulSongs}{}"
+                            + (r"\hbox{LEFTMARK}\nextcol*" if right else "")
+                            + r"\begin{intersong}BEFOREMARK\par\end{intersong}"
+                            + "\\" + clear + r"""
+\makeatletter
+\typeout{CLEAR-STATE:\thepage/\if@firstcolumn left\else right\fi}
+\makeatother
+\beginsong{After}\beginverse*
+AFTERMARK
+\endverse\endsong\end{ulSongs}
+""")
+                    output = self.compile_source(document(body,
+                        r"\ulSongColumns{2}\ulSongPosition{0}\setlength\textheight{150pt}"),
+                        label=label)
+                    self.assertIn("CLEAR-STATE:4/left", output)
+                    locations = {text: i for i, words in enumerate(self.positioned_words())
+                                 for text, _ in words if text in ("BEFOREMARK", "AFTERMARK")}
+                    self.assertEqual(locations, {"BEFOREMARK": 0, "AFTERMARK": 1})
+
+    def test_two_column_clear_directives_and_multipage_continuations(self):
+        preamble = r"""
+\ulSongColumns{2}\ulSongPosition{0}\setlength\textheight{150pt}
+\ulVerseBaseline{2}{0}{0}
+"""
+        for selection in (False, True):
+            for page in (2, 3):
+                for clear in ("sclearpage", "scleardpage"):
+                    label = f"{selection}-{page}-{clear}"
+                    with self.subTest(case=label):
+                        body = (rf"\setcounter{{page}}{{{page}}}\begin{{ulSongs}}{{}}"
+                                + "\n" + r"\beginsong{Long}[id={long-before-clear}]\beginverse*"
+                                + "\n" + "CONTINUATION\n" * 45 + "LASTMARK\n"
+                                + r"\endverse\endsong" + "\\" + clear + r"""
+\beginsong{After}[id={after-clear}]\beginverse*
+AFTERMARK
+\endverse\endsong\end{ulSongs}
+""")
+                        settings = preamble
+                        if selection:
+                            settings += rf"\ulIncludeOnlySongs{{1,{clear},2}}"
+                        source = document(body, settings).replace(
+                            "[oneside,openany,", "[twoside,openany,")
+                        self.compile_source(source, label=label)
+                        locations = {text: (i + page, float(box["xMin"]))
+                                     for i, words in enumerate(self.positioned_words())
+                                     for text, box in words if text in ("LASTMARK", "AFTERMARK")}
+                        expected = locations["LASTMARK"][0] + 1
+                        if clear == "scleardpage" and expected % 2:
+                            expected += 1
+                        self.assertEqual(locations["AFTERMARK"][0], expected)
+                        self.assertLess(locations["AFTERMARK"][1], 200)
+
     def test_two_page_song_reserves_a_spread_on_an_empty_odd_page(self):
         lines = "\n".join(r"\EmptyEffect Lyric line " + str(n) + "." for n in range(13))
         source = document(r"""

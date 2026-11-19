@@ -234,11 +234,17 @@
 \cs_new_protected:Npn \__ulsbs_layout_spread:
   {\__ulsbs_layout_clear_songs:
    \if@twoside\ifodd\value{page}
+     \if@twocolumn
+       % Padding must finish the physical page, not just its first column.
+       % A null also makes an otherwise empty odd page reach kernel shipout.
+       \null\__ulsbs_layout_clear_song_page:
+     \else
       % Let ordinary page glue decide whether the empty column fits here.
       \dim_set:Nn \l__ulsbs_layout_available_dim {\textheight-\pagetotal}
       \par\penalty10000\relax
       \kern0pt\vbox_to_ht:nn {\l__ulsbs_layout_available_dim}{\hbox{}\vfil}
       \vfil\penalty-10000\relax
+     \fi
    \fi\fi}
 
 % No arguments. Apply output columns and traverse requested labels/directives;

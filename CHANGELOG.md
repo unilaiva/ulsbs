@@ -4,6 +4,8 @@
 
 - Keep song preludes with the first body content across automatic page/column
   breaks, including introductory notes and prose, without changing later breaks.
+- Fix `\scleardpage` in two-column layouts to start the next even page rather
+  than the next column of an odd page.
 
 ## v0.3.0 - 2026-11-18
 
