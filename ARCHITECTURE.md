@@ -661,15 +661,30 @@ the saved kernel clear locally, independent of an author's temporary include-cle
 override; standard kernel column output stays untouched.
 
 Explicit break commands live in `ulsbs-layout.code.tex`. Inside an active song,
-`\brk` emits an inline penalty of `-5` in horizontal mode, or a column/page boundary
-using `\ulBreakPenalty` in vertical mode; outside a song it forces a column/page
-break. `\hardbrk` and `\forcebrk` assign `\ulBreakPenalty` in the caller's scope
-before dispatching through `\brk`, so their inline behavior is identical and their
-assignments are not one-shot. Only `\nextcol` and the song-clear commands suppress
-unstarred source-time execution during selection; selection-list `brk` is forced.
-The shared parity helper preserves `\scleardpage`'s one-column ordinary-prose
-spacer, which can overflow and leave subsequent content on an odd page. Odd-page
-padding and both parities in two-column mode use a kernel physical-page clear.
+the open-paragraph (horizontal-mode) penalties for `\brk`, `\hardbrk` and
+`\forcebrk` are respectively `-5`, `\ulHardBreakPenalty` (default `-500`) and
+`-10000`; the last forces a line break, not a page break. At song paragraph/verse
+boundaries and outside songs, they request column/page boundaries using
+`\ulBreakPenalty` (default `50`), `\ulHardBreakPenalty` and `-10000`, respectively.
+All are one-shot: neither stronger command assigns `\ulBreakPenalty` or changes
+later requests. Persistent policy requires explicit register assignments.
+
+During selection capture within `ulSongs`, retain in-song break nodes, but suppress
+between-song source requests from the `\brk` family. Standalone `intersong` blocks
+remain omitted from selection. Selection
+configuration alone must not suppress ordinary prose requests outside collection.
+The family has no starred forms. Existing `\nextcol` and song-clear stars still
+execute at source time; their unstarred forms remain suppressed during selection.
+At commit, selection directives `brk`,
+`hardbrk` and `forcebrk` use the respective boundary penalties above; `nextcol`
+remains forced. Automatic prelude/first-content protection is unchanged and must
+not block explicit forced requests.
+
+The shared parity helper first drains pending song/intersong output for both
+`\scleardpage` and `\sclearoddpage`. In two-sided mode, a target-parity mismatch
+uses the saved kernel physical-page clear symmetrically, including one-column
+ordinary prose; there is no legacy spacer exception. Matching parity adds no
+extra skip. In one-sided mode, both commands only drain pending owned output.
 
 `\ulColumnBottomGlue` is independent scoped layout policy, initially
 `0pt plus .5\textheight` for every named variant and package-only default. It

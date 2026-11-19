@@ -1442,39 +1442,126 @@ Second song line.
         self.assertLess(before, after)
         self.assertLess(after, second)
 
-    def test_hard_break_penalty_is_configurable_scoped_and_force_is_fixed(self):
+    def test_break_strengths_are_one_shot_in_inline_and_boundary_contexts(self):
         source = document(r"""
 \newbox\BreakBox
-\newcommand\CheckBreak[2]{%
-  \setbox\BreakBox=\vbox{\hbox{Before}#1\hbox{After}}%
+\newcommand\CheckBreak[3]{%
+  \setbox\BreakBox=#1{#2%
+    \ifnum\ulBreakPenalty=91\else\errmessage{Break request changed policy}\fi}%
   \directlua{
-    local found=false
+    local penalties={}
     for n in node.traverse(tex.box[\number\BreakBox].list) do
-      if n.id==node.id('penalty') and n.penalty==#2 then found=true end
+      if n.id==node.id('penalty') then table.insert(penalties,n.penalty) end
     end
-    assert(found, 'Missing requested break penalty: #2')
+    assert(penalties[rawlen(penalties)]==#3, 'Wrong requested break penalty: #3')
   }}
 \ifnum\ulHardBreakPenalty=-500\else\errmessage{Wrong default hard penalty}\fi
+% Outside ulSongs, configuring selection must not suppress ordinary requests.
+\ulIncludeOnlySongs{1}
+\CheckBreak\vbox{\hbox{Before}\brk\hbox{After}}{91}
+\CheckBreak\vbox{\hbox{Before}\hardbrk\hbox{After}}{-500}
+\CheckBreak\vbox{\hbox{Before}\forcebrk\hbox{After}}{-10000}
+\CheckBreak\vbox{\hbox{Before}\hardbrk\hbox{Middle}\brk\hbox{After}}{91}
 \begin{ulSongs}{}\beginsong{Break policy}
-\CheckBreak{\hardbrk}{-500}
+\CheckBreak\hbox{Before\brk After}{-5}
+\CheckBreak\hbox{Before\hardbrk After}{-500}
+\CheckBreak\hbox{Before\forcebrk After}{-10000}
+\CheckBreak\vbox{\hbox{Before}\brk\hbox{After}}{91}
+\CheckBreak\vbox{\hbox{Before}\hardbrk\hbox{After}}{-500}
+\CheckBreak\vbox{\hbox{Before}\forcebrk\hbox{After}}{-10000}
 {\ulHardBreakPenalty=-725\relax
- \CheckBreak{\hardbrk}{-725}
- \CheckBreak{\forcebrk}{-10000}}
+ \CheckBreak\hbox{Before\hardbrk After}{-725}
+ \CheckBreak\hbox{Before\forcebrk After}{-10000}
+ \CheckBreak\vbox{\hbox{Before}\hardbrk\hbox{After}}{-725}
+ \CheckBreak\vbox{\hbox{Before}\forcebrk\hbox{After}}{-10000}}
 \ifnum\ulHardBreakPenalty=-500\else\errmessage{Hard penalty escaped scope}\fi
-\hardbrk
-\ifnum\ulBreakPenalty=-500\else\errmessage{Hard penalty did not persist}\fi
-{\ulHardBreakPenalty=-725\relax\hardbrk
- \ifnum\ulBreakPenalty=-725\else\errmessage{Custom hard penalty ignored}\fi
- \forcebrk
- \ifnum\ulBreakPenalty=-10000\else\errmessage{Force penalty is configurable}\fi}
-\ifnum\ulBreakPenalty=-500\else\errmessage{Break penalty escaped scope}\fi
 \beginverse*
 BODYMARK
 \endverse\endsong\end{ulSongs}
-\ifnum\ulBreakPenalty=50\else\errmessage{Break penalty escaped song}\fi
+\ifnum\ulBreakPenalty=91\else\errmessage{Break policy changed after song}\fi
+\CheckBreak\vbox{\hbox{Before}\brk\hbox{After}}{91}
+\CheckBreak\vbox{\hbox{Before}\hardbrk\hbox{After}}{-500}
+\CheckBreak\vbox{\hbox{Before}\forcebrk\hbox{After}}{-10000}
 \typeout{BREAK-POLICY:OK}
-""")
+""", r"\ulBreakPenalty=91\relax")
         self.assertIn("BREAK-POLICY:OK", self.compile_source(source))
+
+    def test_inline_force_break_changes_line_not_page_and_keeps_following_policy(self):
+        body = r"""
+\begin{ulSongs}{}\beginsong{Inline breaks}
+\beginverse*
+INLINEBEFORE\forcebrk INLINEAFTER
+MILDLEFT \brk MILDRIGHT
+\endverse\endsong\end{ulSongs}
+"""
+        for columns in (1, 2):
+            for variant in ("default", "lyric"):
+                with self.subTest(columns=columns, variant=variant):
+                    self.compile_source(document(body,
+                        rf"\ulSongColumns{{{columns}}}\ulSongPosition{{0}}", variant=variant),
+                        label=f"{columns}-{variant}")
+                    pages = self.positioned_words()
+                    words = {text: (page, box) for page, entries in enumerate(pages)
+                             for text, box in entries}
+                    self.assertEqual(words["INLINEBEFORE"][0], words["INLINEAFTER"][0])
+                    self.assertLess(words["INLINEBEFORE"][1]["yMin"],
+                                    words["INLINEAFTER"][1]["yMin"])
+                    self.assertAlmostEqual(words["MILDLEFT"][1]["yMin"],
+                                           words["MILDRIGHT"][1]["yMin"], delta=.03)
+
+    def test_selection_break_strengths_run_at_commit_not_between_source_songs(self):
+        preamble = r"""
+\ulBreakPenalty=37\ulHardBreakPenalty=-731\ulSongPosition{0}
+\newif\ifCommitting\newcount\BreakEffects\newbox\OrdinaryBox
+\ExplSyntaxOn
+\cs_new_eq:NN \OriginalBoundary \__ulsbs_layout_break:n
+\cs_set_protected:Npn \__ulsbs_layout_break:n #1
+  {\iow_term:x {BOUNDARY:\ifCommitting commit\else source\fi :\int_eval:n {#1}}
+   \OriginalBoundary {#1}}
+\cs_new_eq:NN \OriginalForced \__ulsbs_layout_break:
+\cs_set_protected:Npn \__ulsbs_layout_break:
+  {\iow_term:x {BOUNDARY:\ifCommitting commit\else source\fi :-10000}\OriginalForced}
+\ExplSyntaxOff
+\let\OriginalCommit\ulCommitSongs
+\renewcommand\ulCommitSongs{\Committingtrue\OriginalCommit\Committingfalse}
+"""
+        for columns in (1, 2):
+            for directive, penalty in (("brk", 37), ("hardbrk", -731),
+                                       ("forcebrk", -10000), ("nextcol", -10000)):
+                with self.subTest(columns=columns, directive=directive):
+                    body = r"""
+\setbox\OrdinaryBox=\vbox{\hbox{Outside}\brk}
+\begin{ulSongs}{}
+\beginsong{First source}[id={source-first}]\beginverse*
+\global\advance\BreakEffects1 FIRSTMARK
+\hardbrk
+LASTMARK
+\endverse\endsong
+\brk\hardbrk\forcebrk
+\ifnum\ulBreakPenalty=37\else\errmessage{Suppressed source changed policy}\fi
+\beginsong{Second source}[id={source-second}]\beginverse*
+\global\advance\BreakEffects1 SECONDMARK
+\endverse\endsong
+\end{ulSongs}\typeout{BREAK-EFFECTS:\the\BreakEffects}
+"""
+                    settings = preamble + (rf"\ulSongColumns{{{columns}}}"
+                                            rf"\ulIncludeOnlySongs{{2,{directive},1}}")
+                    output = self.compile_source(document(body, settings),
+                                                 label=f"{columns}-{directive}")
+                    self.assertEqual(re.findall(r"BOUNDARY:source:(-?\d+)", output),
+                                     ["37", "-731"])
+                    # Submission may add an ordinary zero-penalty song boundary.
+                    requests = [value for value in re.findall(r"BOUNDARY:commit:(-?\d+)", output)
+                                if value != "0"]
+                    self.assertEqual(requests, [str(penalty)])
+                    self.assertEqual(re.findall(r"BREAK-EFFECTS:(\d+)", output), ["2"])
+                    text = self.pdf_text()
+                    locations = {word: (page, int(float(box["xMin"]) > 200), float(box["yMin"]))
+                                 for page, entries in enumerate(self.positioned_words())
+                                 for word, box in entries if word in ("SECONDMARK", "FIRSTMARK")}
+                    self.assertLess(locations["SECONDMARK"], locations["FIRSTMARK"])
+                    for marker in ("SECONDMARK", "FIRSTMARK", "LASTMARK"):
+                        self.assertEqual(text.count(marker), 1)
 
     def test_song_clear_survives_an_include_clearpage_override(self):
         included = r"""
@@ -1851,26 +1938,29 @@ AFTERMARK
                         self.assertEqual(locations["AFTERMARK"][0], expected)
                         self.assertLess(locations["AFTERMARK"][1], 200)
 
-    def test_odd_clear_without_pending_output_inside_and_outside_songs(self):
+    def test_parity_clears_without_pending_output_inside_and_outside_songs(self):
         for page in (2, 3):
             for songs in (False, True):
                 for prose in (False, True):
-                    label = f"{page}-{songs}-{prose}"
-                    with self.subTest(case=label):
-                        body = (rf"\setcounter{{page}}{{{page}}}"
-                                + (r"\begin{ulSongs}{}" if songs else "")
-                                + (r"ORDINARYMARK\par" if prose else "")
-                                + r"\sclearoddpage\typeout{ODD-PAGE:\thepage}AFTERMARK\par"
-                                + (r"\end{ulSongs}" if songs else ""))
-                        source = document(body).replace(
-                            "[oneside,openany,", "[twoside,openany,")
-                        output = self.compile_source(source, label=label)
-                        self.assertIn("ODD-PAGE:3", output)
-                        locations = {text: i + page for i, words in enumerate(self.positioned_words())
-                                     for text, _ in words if text in ("ORDINARYMARK", "AFTERMARK")}
-                        self.assertEqual(locations["AFTERMARK"], 3)
-                        if prose:
-                            self.assertEqual(locations["ORDINARYMARK"], page)
+                    for clear, parity in (("scleardpage", 0), ("sclearoddpage", 1)):
+                        label = f"{page}-{songs}-{prose}-{clear}"
+                        with self.subTest(case=label):
+                            body = (rf"\setcounter{{page}}{{{page}}}"
+                                    + (r"\begin{ulSongs}{}" if songs else "")
+                                    + (r"ORDINARYMARK\par" if prose else "")
+                                    + "\\" + clear
+                                    + r"\typeout{PARITY-PAGE:\thepage}AFTERMARK\par"
+                                    + (r"\end{ulSongs}" if songs else ""))
+                            source = document(body).replace(
+                                "[oneside,openany,", "[twoside,openany,")
+                            output = self.compile_source(source, label=label)
+                            expected = page if page % 2 == parity else page + 1
+                            self.assertIn(f"PARITY-PAGE:{expected}", output)
+                            locations = {text: i + page for i, words in enumerate(self.positioned_words())
+                                         for text, _ in words if text in ("ORDINARYMARK", "AFTERMARK")}
+                            self.assertEqual(locations["AFTERMARK"], expected)
+                            if prose:
+                                self.assertEqual(locations["ORDINARYMARK"], page)
 
     def test_odd_clear_star_executes_at_capture_and_directive_at_commit(self):
         for columns in (1, 2):
@@ -1920,7 +2010,7 @@ LINES
                 self.assertEqual(re.findall(r"EMPTY-EFFECTS=(\d+)", output), ["26", "26"])
                 self.assertEqual(self.pages(), 3)
 
-    def test_spread_clear_blank_can_share_shrinkable_ordinary_page(self):
+    def test_spread_clear_finishes_shrinkable_ordinary_page(self):
         source = document(r"""
 \setcounter{page}{3}
 \section{Ordinary instructions}
@@ -1938,10 +2028,10 @@ LINES
         self.assertEqual(re.findall(r"CLEAR-EFFECTS=(\d+)", output), ["3", "3"])
         self.assertEqual(self.pages(), 2)
 
-    def test_spread_clear_reserves_blank_without_stretching_ordinary_prose(self):
-        cases = [(3, "empty", 2), (3, "paragraph", 3), (3, "hmode", 3), (3, "owned", 2),
+    def test_spread_clear_targets_even_pages_without_stretching_ordinary_prose(self):
+        cases = [(3, "empty", 2), (3, "paragraph", 2), (3, "hmode", 2), (3, "owned", 2),
                  (4, "empty", 1), (4, "paragraph", 1), (4, "hmode", 1), (4, "owned", 3),
-                 (2, "instructions", 4)]
+                 (2, "instructions", 3)]
         for page, kind, expected_pages in cases:
             with self.subTest(page=page, kind=kind):
                 body = r"\setcounter{page}{" + str(page) + "}\n"
@@ -1982,6 +2072,10 @@ LINES
                 self.assertEqual(re.findall(r"CLEAR-EFFECTS=(\d+)", output),
                                  ["1" if kind == "empty" else "3"] * 2)
                 self.assertEqual(self.pages(), expected_pages)
+                marker = "Followinglyric." if kind == "instructions" else "Aftermarker."
+                final_page = next(i + page for i, text in enumerate(self.pdf_text().split("\f"))
+                                  if marker in text)
+                self.assertEqual(final_page % 2, 0)
 
     def test_two_columns_use_standard_latex_and_restore_single_column(self):
         songs = "\n".join(r"\beginsong{Column song " + str(i) + "}\n" +
@@ -2024,7 +2118,7 @@ Lyric third line.
 
     def test_selected_song_boxes_can_be_repeated_without_reexecuting_source(self):
         output = self.compile_source(document(r"""
-\ulIncludeOnlySongs{1,brk,1}
+\ulIncludeOnlySongs{1,forcebrk,1}
 \begin{ulSongs}{}
 \beginsong{Repeated selected song}
 \beginverse*

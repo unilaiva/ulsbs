@@ -216,20 +216,26 @@
 
 % === Public break commands ===
 
-% No arguments; suggest an inline break in an open song paragraph, otherwise use
-% ulBreakPenalty between song paragraphs. Outside a song, force a column/page break.
-\cs_set_protected:Npn \brk
+% {inline penalty}{boundary penalty}: emit one request without changing policy.
+% In-song nodes stay with captured songs. Between-song requests are suppressed
+% only during selection collection, not in ordinary prose outside ulSongs.
+\cs_new_protected:Npn \__ulsbs_layout_request:nn #1#2
   {\bool_if:NTF \g__ulsbs_song_active_bool
-    {\mode_if_horizontal:TF {\penalty-5\relax}
-       {\unpenalty\__ulsbs_layout_break:n {\ulBreakPenalty}}}
-    {\__ulsbs_layout_break:}}
+    {\mode_if_horizontal:TF {\penalty#1\relax}
+       {\unpenalty\__ulsbs_layout_break:n {#2}}}
+    {\bool_lazy_and:nnF {\g__ulsbs_songs_active_bool} {\g__ulsbs_song_selection_bool}
+       {\__ulsbs_layout_break:n {#2}}}}
 
-% These assignments persist in the caller's scope; brk's inline branch stays mild.
-% No arguments; set ulBreakPenalty to forced (-10000), then use brk.
-\newcommand\forcebrk{\ulBreakPenalty=-10000\brk}
+% No arguments; mildly suggest an inline break, or use ulBreakPenalty at a boundary.
+\cs_set_protected:Npn \brk
+  {\__ulsbs_layout_request:nn {-5}{\ulBreakPenalty}}
 
-% No arguments; set the scoped break penalty to ulHardBreakPenalty, then use brk.
-\newcommand\hardbrk{\ulBreakPenalty=\ulHardBreakPenalty\brk}
+% No arguments; force this line or column/page boundary, without changing policy.
+\newcommand\forcebrk{\__ulsbs_layout_request:nn {-10000}{-10000}}
+
+% No arguments; use ulHardBreakPenalty for this inline or column/page request.
+\newcommand\hardbrk
+  {\__ulsbs_layout_request:nn {\ulHardBreakPenalty}{\ulHardBreakPenalty}}
 
 % These four commands suppress unstarred source breaks during song selection;
 % an optional star executes immediately (selection directives run at commit).
@@ -243,8 +249,7 @@
    {\IfBooleanTF{#1}{\__ulsbs_layout_clear_songs:}
      {\bool_if:NF \g__ulsbs_song_selection_bool {\__ulsbs_layout_clear_songs:}}}
 
-% [star]: drain pending song pages and target even parity in two-sided mode;
-% the legacy one-column ordinary-prose spacer below can overflow that target.
+% [star]: drain pending song pages and align to an even page in two-sided mode.
 \DeclareDocumentCommand \scleardpage {s}
   {\IfBooleanTF{#1}{\__ulsbs_layout_clear_parity:n {0}}
     {\bool_if:NF \g__ulsbs_song_selection_bool {\__ulsbs_layout_clear_parity:n {0}}}}
@@ -260,15 +265,9 @@
   {\__ulsbs_layout_clear_songs:
    \if@twoside
      \int_compare:nNnF {\int_mod:nn {\value{page}}{2}}={#1}
-       {\bool_lazy_or:nnTF {\legacy_if_p:n {@twocolumn}} {\int_compare_p:n {#1=1}}
-         {% Finish the physical page, even when only its first column is empty.
-          % A null makes an otherwise empty padding page reach kernel shipout.
-          \null\__ulsbs_layout_clear_song_page:}
-         {% Preserve scleardpage's established one-column ordinary-prose glue.
-          \dim_set:Nn \l__ulsbs_layout_available_dim {\textheight-\pagetotal}
-          \par\penalty10000\relax
-          \kern0pt\vbox_to_ht:nn {\l__ulsbs_layout_available_dim}{\hbox{}\vfil}
-          \vfil\penalty-10000\relax}}
+        {% Finish the physical page, even when only its first column is empty.
+         % A null makes an otherwise empty padding page reach kernel shipout.
+         \null\__ulsbs_layout_clear_song_page:}
    \fi}
 
 % No arguments. Apply output columns and traverse requested labels/directives;
@@ -283,7 +282,9 @@
        \__ulsbs_layout_columns:}
     \clist_map_inline:Nn \g__ulsbs_song_selection_clist
     {\str_case:nnF {##1}
-      {{brk}{\__ulsbs_layout_break:}{nextcol}{\__ulsbs_layout_break:}
+       {{brk}{\__ulsbs_layout_break:n {\ulBreakPenalty}}
+          {hardbrk}{\__ulsbs_layout_break:n {\ulHardBreakPenalty}}
+          {forcebrk}{\__ulsbs_layout_break:}{nextcol}{\__ulsbs_layout_break:}
          {sclearpage}{\__ulsbs_layout_clear_songs:}
          {scleardpage}{\__ulsbs_layout_clear_parity:n {0}}
          {sclearoddpage}{\__ulsbs_layout_clear_parity:n {1}}}

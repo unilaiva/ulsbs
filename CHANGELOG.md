@@ -3,11 +3,20 @@
 ## Unreleased
 
 - Keep song preludes with the first body content across automatic page/column
-  breaks, including introductory notes and prose, without changing later breaks.
-- Fix `\scleardpage` in two-column layouts to start the next even page rather
-  than the next column of an odd page.
-- Add `\sclearoddpage` for odd-page song starts, including starred source-time
-  use and song-selection break directives.
+  breaks, including introductory notes and prose, without changing later breaks
+  or blocking explicit forced breaks.
+- Make `\brk`, `\hardbrk` and `\forcebrk` one-shot weak/optional, strong and forced
+  requests: inside open song paragraphs they control line breaks; at song
+  boundaries and outside songs they control column/page breaks. Stronger requests
+  no longer change later `\brk` strength; persistent tuning uses explicit register
+  assignments.
+- Support all three break strengths in song-selection lists, retaining in-song
+  breaks while ignoring between-song source requests during selection collection.
+  Ordinary prose outside collection still honors the configured break strengths.
+- Add `\sclearoddpage` for odd-page starts, including starred source-time use and
+  selection directives. Both parity clears drain pending song/intersong output
+  first, then finish a physical page only on a parity mismatch in two-sided
+  books, consistently in one- and two-column layouts, including ordinary prose.
 
 ## v0.3.0 - 2026-11-18
 
