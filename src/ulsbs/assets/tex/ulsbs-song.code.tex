@@ -272,6 +272,8 @@
        \UseHook{ulsbs/song/finish}
        \__ulsbs_layout_song_end:
        \vbox_set_end:
+       % Body metadata/paragraph glue must not strand the prelude by itself.
+       \directlua{ulsbs_layout.protect_song_start(\number\l__ulsbs_song_body_box)}
        \ulSongMark
        \vbox_unpack_drop:N \l__ulsbs_song_anchor_box
        \__ulsbs_layout_prelude_start:

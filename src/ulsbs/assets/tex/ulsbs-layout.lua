@@ -7,7 +7,7 @@
 -- Never re-evaluate lyric source.
 -- Loaded by ulsbs-layout.code.tex as ulsbs_layout. TeX owns layout policy,
 -- box registers and actual submission; Lua inspects ownership markers, preserves
--- outer stretch and builds disposable lookahead boxes from copied node lists.
+-- outer stretch, protects song starts and builds disposable lookahead boxes.
 -- Attributes are allocated once per module load and survive node copies. TeX
 -- marks submitted song tails with pending_attribute and owned column boundaries
 -- with boundary_attribute. outer_glue holds detached copies until TeX writes
@@ -16,6 +16,29 @@
 local M = {}
 M.boundary_attribute = luatexbase.new_attribute("ulsbs-layout-boundary")
 M.pending_attribute = luatexbase.new_attribute("ulsbs-layout-pending")
+
+-- Protect a retained body box through its first content box or visible rule.
+-- Metadata whatsits followed by even zero paragraph glue can reopen a breakpoint
+-- after the prelude's nobreak. Guard each leading glue and optional penalty,
+-- skipping empty boxes/zero-height rules used by spacing commands. Forced breaks
+-- remain authoritative; later nodes and all dimensions/writes stay untouched.
+-- Called once before assembly so fit probes and selected copies share the guard.
+function M.protect_song_start(number)
+  local body = assert(tex.box[number], "Missing song body for start protection")
+  for item in node.traverse(body.list) do
+    local kind = node.type(item.id)
+    if ((kind == "hlist" or kind == "vlist") and item.list)
+      or (kind == "rule" and item.width ~= 0 and (item.height ~= 0 or item.depth ~= 0)) then
+      break
+    elseif kind == "penalty" and item.penalty > -10000 then
+      item.penalty = 10000
+    elseif kind == "glue" then
+      local stop = node.new("penalty")
+      stop.penalty = 10000
+      body.list = node.insert_before(body.list, item, stop)
+    end
+  end
+end
 
 -- Return whether either live page-builder list still contains a marked song
 -- tail. Scanning both lists detects continuations after a first page has shipped;

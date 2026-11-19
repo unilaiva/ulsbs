@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Keep song preludes with the first body content across automatic page/column
+  breaks, including introductory notes and prose, without changing later breaks.
+
 ## v0.3.0 - 2026-11-18
 
 > [!IMPORTANT]

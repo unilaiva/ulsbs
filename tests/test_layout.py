@@ -619,6 +619,143 @@ NEXT
         for value in ("Introductory note", "Before first line", "Attached note", "V1", "V2"):
             self.assertIn(value, text)
 
+    def test_prelude_stays_with_first_body_content_across_pages_and_columns(self):
+        # Explicit heading/filler dimensions leave room for only the heading.
+        # A long body defeats whole-song fit policies and must still split later.
+        preamble = r"""
+\setlength\textheight{110pt}\setlength\textwidth{320pt}
+\setlength\columnsep{20pt}\setlength\ulSongBarHeight{0pt}
+\setlength\ulAfterPreludeSkip{0pt}\ulVerseSeparation{0}{0}{0}
+\renewcommand\ulMakePrelude{\vbox to40pt{\hbox{\ulSongTitle}\vfil}}
+\newcount\Effects\newcommand\Effect{\global\advance\Effects1 }
+"""
+        cases = (
+            ("verse", "", "FIRSTLINE"),
+            ("next-star", r"\textnotefornext{\Effect INTRO}*", "INTRO"),
+            ("next", r"\textnotefornext{\Effect INTRO}", "INTRO"),
+            ("textnote", r"\textnote{\Effect INTRO}", "INTRO"),
+            ("prose", r"\Effect INTRO\par", "INTRO"),
+            ("explanation", "\\begin{explanation}\n\\Effect INTRO\n\\end{explanation}", "INTRO"),
+            ("spacing", r"\vspace*{0pt}\hbox{}\kern0pt\textnotefornext{\Effect INTRO}*", "INTRO"),
+            ("hidden", r"{\ulLocalShow{musiccomments}{false}\musicnote{\Effect HIDDEN}}", "FIRSTLINE"),
+        )
+        verses = ("\\beginverse*\n\\Effect FIRSTLINE\n" + "LATERLINE\n" * 20
+                  + "\\Effect LASTLINE\n\\endverse\n")
+        for columns in (1, 2):
+            for edition in ("default", "lyric"):
+                for label, intro, first in cases:
+                    with self.subTest(columns=columns, edition=edition, intro=label):
+                        body = (r"\begin{ulSongs}{}"
+                                r"\vbox to65pt{\hbox{FILLER}\vfil}\penalty0"
+                                + "\n" + r"\beginsong{TARGET}[id={guarded-start}]" + "\n" + intro + "\n"
+                                + verses + r"\endsong\end{ulSongs}"
+                                r"\typeout{START-EFFECTS:\the\Effects}")
+                        # Flow tests physical column breaks; default positioning
+                        # also exercises dry-fit lookahead against the same guard.
+                        settings = preamble + rf"\ulSongColumns{{{columns}}}"
+                        if columns == 2:
+                            settings += r"\ulSongPosition{0}"
+                        output = self.compile_source(document(body, settings, variant=edition),
+                            label=f"{columns}-{edition}-{label}")
+                        locations = {}
+                        for page, words in enumerate(self.positioned_words()):
+                            for text, box in words:
+                                if text in ("TARGET", first, "FIRSTLINE", "LASTLINE"):
+                                    self.assertNotIn(text, locations)
+                                    locations[text] = (page, float(box["xMin"]))
+                        self.assertEqual(locations["TARGET"][0], locations[first][0])
+                        self.assertLess(abs(locations["TARGET"][1] - locations[first][1]), 50)
+                        # The header moves, rather than pushing the first content
+                        # forward or making the entire song unbreakable.
+                        self.assertTrue(locations["TARGET"][0] > 0
+                                        or locations["TARGET"][1] > 200)
+                        self.assertGreater(locations["LASTLINE"], locations["FIRSTLINE"])
+                        self.assertNotIn("Overfull \\vbox", output)
+                        self.assertNotIn("HIDDEN", self.pdf_text())
+                        self.assertEqual(re.findall(r"START-EFFECTS:(\d+)", output),
+                                         ["2" if first == "FIRSTLINE" else "3"])
+
+    def test_song_start_guard_preserves_nodes_and_explicit_breaks(self):
+        # Inspect real LuaTeX nodes independently of fonts or page geometry.
+        source = document(r"""
+\newbox\GuardBox
+\setbox\GuardBox=\vbox{\write16{DEFERRED-GUARD-WRITE}\vskip3pt
+  \penalty-10000\penalty-5\hbox{}\hrule height0pt\kern2pt\vskip0pt
+  \hbox{FIRST}\penalty317\vskip7pt\hbox{LAST}}
+\directlua{
+  local b=tex.box[\number\GuardBox]
+  local originals={}
+  for n in node.traverse(b.list) do table.insert(originals,n) end
+  local forced
+  for n in node.traverse(b.list) do
+    if n.id==node.id('penalty') and n.penalty==-10000 then forced=n end
+  end
+  local w,h,d=b.width,b.height,b.depth
+  ulsbs_layout.protect_song_start(\number\GuardBox)
+  assert(b.width==w and b.height==h and b.depth==d, 'Guard changed geometry')
+  local seen,content=0,false
+  for n in node.traverse(b.list) do
+    if n==originals[seen+1] then seen=seen+1 end
+    if n.id==node.id('hlist') and n.list then content=true end
+    if n.id==node.id('penalty') then
+      assert(n.penalty==(content and 317 or (n.penalty==-10000 and -10000 or 10000)),
+        'Guard changed forced/later breaks or missed a leading penalty')
+    elseif n.id==node.id('glue') and not content then
+      assert(n.prev.id==node.id('penalty') and n.prev.penalty==10000,
+        'Unprotected leading glue')
+    end
+  end
+  assert(seen==rawlen(originals), 'Guard lost or reordered source nodes')
+  assert(forced.penalty==-10000, 'Guard changed explicit forced break')
+}
+\box\GuardBox
+\setbox\GuardBox=\vbox{\write16{EMPTY-GUARD-WRITE}}
+\directlua{ulsbs_layout.protect_song_start(\number\GuardBox)}
+\box\GuardBox
+\begin{ulSongs}{}
+\beginsong{Forced}\forcebrk
+\beginverse*
+FORCEDBODY
+\endverse\endsong
+\beginsong{Empty}\endsong
+\end{ulSongs}
+""", r"\ulSongPosition{0}")
+        output = self.compile_source(source)
+        self.assertEqual(output.count("DEFERRED-GUARD-WRITE"), 1)
+        self.assertEqual(output.count("EMPTY-GUARD-WRITE"), 1)
+        pages = self.pdf_text().split("\f")
+        heading = next(i for i, text in enumerate(pages) if "Forced" in text)
+        content = next(i for i, text in enumerate(pages) if "FORCEDBODY" in text)
+        self.assertLess(heading, content)
+
+    def test_selected_repeated_song_keeps_intro_without_replaying_source(self):
+        body = r"""
+\begin{ulSongs}{}
+\vbox to65pt{\hbox{FILLER}\vfil}\penalty0
+\beginsong{TARGET}[id={guarded-selection}]
+\textnotefornext{\global\advance\Effects1 INTRO\write16{SELECTED-GUARD-WRITE}}*
+\beginverse*
+FIRSTLINE
+LATERLINE
+LASTLINE
+\endverse\endsong
+\end{ulSongs}\typeout{SELECTED-EFFECTS:\the\Effects}
+"""
+        preamble = r"""
+\newcount\Effects\ulIncludeOnlySongs{1,1}\ulSongPosition{0}
+\setlength\textheight{110pt}\setlength\ulSongBarHeight{0pt}
+\setlength\ulAfterPreludeSkip{0pt}\ulVerseSeparation{0}{0}{0}
+\renewcommand\ulMakePrelude{\vbox to40pt{\hbox{\ulSongTitle}\vfil}}
+"""
+        output = self.compile_source(document(body, preamble))
+        self.assertEqual(re.findall(r"SELECTED-EFFECTS:(\d+)", output), ["1"])
+        self.assertEqual(output.count("SELECTED-GUARD-WRITE"), 2)
+        for words in self.positioned_words():
+            text = [word for word, _ in words]
+            self.assertEqual(text.count("TARGET"), text.count("INTRO"))
+        for marker in ("TARGET", "INTRO", "FIRSTLINE", "LASTLINE"):
+            self.assertEqual(self.pdf_text().count(marker), 2)
+
     def test_long_song_splits_without_losing_lines_or_shipping_a_giant_box(self):
         verses = "\n".join(r"\beginverse*" + "\n" +
                            "\n".join(f"Line {verse:02d}-{line:02d}" for line in range(6)) +
