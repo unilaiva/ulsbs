@@ -342,22 +342,13 @@
 
 % === Column break and stanza spacing policy ===
 
-% Force a column break
-\newcommand{\forcebrk}{%
-  \ulBreakPenalty=-10000\brk%
-}
-
-% Strongly suggest a column break
-\newcommand{\hardbrk}{%
-  \ulBreakPenalty=-500\brk%
-}
-
 % Layout: column/page break penalties (<=-10000 forces a break).
 % Check stanza/column break behavior when changing them. Pagination may evolve
 % with styling; unchanged historical page counts are not a runtime requirement.
 \ulSongPenalty=0     % between songs
 \ulVerseVersePenalty=200  % between verse and verse
 \ulBreakPenalty=50  % for \brk
+\ulHardBreakPenalty=-500 % for \hardbrk
 \interlinepenalty=1000 % between in-verse lines
 \newcount\ulGluePenalty%
 \ulGluePenalty=950 % between verses glued together with \glueverses (default here: 950)

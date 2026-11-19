@@ -209,12 +209,5 @@
 
 \cs_set_protected:cpn {endverse*}{\__ulsbs_verse_end:}
 
-% Inside lyrics request a mild inline break; between song paragraphs replace
-% the trailing penalty via layout. Outside a song use layout's general break.
-\cs_set_protected:Npn \brk
-  {\bool_if:NTF \g__ulsbs_song_active_bool
-    {\mode_if_horizontal:TF {\penalty-5\relax}
-       {\unpenalty\__ulsbs_layout_break:n {\ulBreakPenalty}}}
-    {\__ulsbs_layout_break:}}
 \ExplSyntaxOff
 \makeatother

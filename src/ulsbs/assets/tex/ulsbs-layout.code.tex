@@ -214,18 +214,35 @@
 \cs_new_protected:Npn \__ulsbs_layout_break:
   {\par\vskip\ulColumnBottomGlue\relax\penalty-10000\relax}
 
-% Optional star forces source-time action during selection; unstarred source
-% breaks are suppressed there (selection-list directives act later at commit).
-% nextcol forces a column; sclearpage drains owned output; scleardpage also
-% reserves the next facing spread in two-sided mode.
+% === Public break commands ===
+
+% No arguments; suggest an inline break in lyrics or a column/page break between
+% song paragraphs. Outside a song, force layout's general column/page break.
+\cs_set_protected:Npn \brk
+  {\bool_if:NTF \g__ulsbs_song_active_bool
+    {\mode_if_horizontal:TF {\penalty-5\relax}
+       {\unpenalty\__ulsbs_layout_break:n {\ulBreakPenalty}}}
+    {\__ulsbs_layout_break:}}
+
+% No arguments; set the scoped break penalty to forced (-10000), then use brk.
+\newcommand\forcebrk{\ulBreakPenalty=-10000\brk}
+
+% No arguments; set the scoped break penalty to ulHardBreakPenalty, then use brk.
+\newcommand\hardbrk{\ulBreakPenalty=\ulHardBreakPenalty\brk}
+
+% These three commands suppress unstarred source breaks during song selection;
+% an optional star executes immediately (selection directives run at commit).
+% [star]: force the next column, or the next page in one-column layout.
 \DeclareDocumentCommand \nextcol {s}
   {\IfBooleanTF{#1}{\__ulsbs_layout_break:}
     {\bool_if:NF \g__ulsbs_song_selection_bool {\__ulsbs_layout_break:}}}
 
+% [star]: finish pending song/intersong pages; no pending output means no clear.
 \DeclareDocumentCommand \sclearpage {s}
    {\IfBooleanTF{#1}{\__ulsbs_layout_clear_songs:}
      {\bool_if:NF \g__ulsbs_song_selection_bool {\__ulsbs_layout_clear_songs:}}}
 
+% [star]: drain pending song pages and align to an even page in two-sided mode.
 \DeclareDocumentCommand \scleardpage {s}
   {\IfBooleanTF{#1}{\__ulsbs_layout_spread:}
     {\bool_if:NF \g__ulsbs_song_selection_bool {\__ulsbs_layout_spread:}}}

@@ -1442,6 +1442,40 @@ Second song line.
         self.assertLess(before, after)
         self.assertLess(after, second)
 
+    def test_hard_break_penalty_is_configurable_scoped_and_force_is_fixed(self):
+        source = document(r"""
+\newbox\BreakBox
+\newcommand\CheckBreak[2]{%
+  \setbox\BreakBox=\vbox{\hbox{Before}#1\hbox{After}}%
+  \directlua{
+    local found=false
+    for n in node.traverse(tex.box[\number\BreakBox].list) do
+      if n.id==node.id('penalty') and n.penalty==#2 then found=true end
+    end
+    assert(found, 'Missing requested break penalty: #2')
+  }}
+\ifnum\ulHardBreakPenalty=-500\else\errmessage{Wrong default hard penalty}\fi
+\begin{ulSongs}{}\beginsong{Break policy}
+\CheckBreak{\hardbrk}{-500}
+{\ulHardBreakPenalty=-725\relax
+ \CheckBreak{\hardbrk}{-725}
+ \CheckBreak{\forcebrk}{-10000}}
+\ifnum\ulHardBreakPenalty=-500\else\errmessage{Hard penalty escaped scope}\fi
+\hardbrk
+\ifnum\ulBreakPenalty=-500\else\errmessage{Hard penalty did not persist}\fi
+{\ulHardBreakPenalty=-725\relax\hardbrk
+ \ifnum\ulBreakPenalty=-725\else\errmessage{Custom hard penalty ignored}\fi
+ \forcebrk
+ \ifnum\ulBreakPenalty=-10000\else\errmessage{Force penalty is configurable}\fi}
+\ifnum\ulBreakPenalty=-500\else\errmessage{Break penalty escaped scope}\fi
+\beginverse*
+BODYMARK
+\endverse\endsong\end{ulSongs}
+\ifnum\ulBreakPenalty=50\else\errmessage{Break penalty escaped song}\fi
+\typeout{BREAK-POLICY:OK}
+""")
+        self.assertIn("BREAK-POLICY:OK", self.compile_source(source))
+
     def test_song_clear_survives_an_include_clearpage_override(self):
         included = r"""
 \beginsong{Before song clear}
