@@ -1,0 +1,411 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Melody-block parsing, scoped appearance, replay payloads and beat drawing.
+% This file is part of the 'ulsbs' package.
+%
+% Load: ulsbs.sty, after media and before song metadata in the content phase.
+% Requires: typography/style, book policy, etoolbox, xparse, expl3 and TikZ.
+% Chord/music owners install note rendering and replay integration later.
+% State: owns melody policy flags, parser tokens/sequences, boxes, dimensions
+% and global replay payload state. Inherits @ as a letter with no enclosing
+% group; retains all expl3 spans and the grouped active-hat capture in place.
+% Allocations and initial assignments execute now; parsing, dimensions and beat
+% drawing execute at use time. Public providecommand appearance defaults may be
+% defined before loading or renewed afterward; use the scoped public setters
+% for lane/style policy rather than redefining private predicates. Beat display
+% permission and switches remain owned by book policy, not this drawing module.
+
+\ProvidesFile{ulsbs-melody.code.tex}[ULSBS melody blocks and beat drawing]
+
+% === Melody blocks and note hints ===
+
+% Melody blocks display transposition-aware encircled note hints in a
+% chord definition: \[<C D;E F @ .3em>Am].  Pitches must be uppercase for
+% chord transposition mechanism.  `_` advances one empty note slot, `/`
+% renders an unpitched circled slash and advances one slot, and `*` marks the
+% current slot with a beat.  Negative offsets may protrude left of the shared
+% anchor but intentionally never reduce the annotation's rightward advance.
+% A leading `!` inside the block renders normally but makes the melody layers
+% zero-advance and disables the whitespace minimum for that annotation.
+%
+% \ulMelodyPrimaryPosition{normal|low},
+% \ulMelodySecondaryPosition{above|below|same}, and
+% \ulMelodyStyleMapping{normal|swapped} are scoped policies. \ulShowNotes,
+% \noteson/\notesoff, \ulShowBeats, and \beatson/\beatsoff remain in effect.
+
+% --- Public melody appearance and layout configuration ---
+% Define providecommand defaults before loading or renew afterward. Factors and
+% font hooks expand during drawing, not during this declaration phase. Select
+% scoped lane/style policies with the public commands below, not private flags.
+
+% Shared font size for melody note circles and their neutral layout slots.
+\providecommand{\ulMelodySize}{\scriptsize}
+
+% Setup the style for the melody note name "text". Renew this macro in the
+% beginning of your document to set custom style. This will be called each
+% time the melody note circle is drawn. This can be set for individual notes,
+% too. The base style is \ulMelodySize\mdseries\ulSansHeavyFont; use
+% \ulMelodySize for sizing and this drawing-only hook for other appearance.
+\providecommand{\ulMelodySymbolStyle}{}
+
+% Setup the style for the small tags put in front of melody note circles. This
+% ought to just set a very small font size.
+\providecommand{\ulMelodyTagStyle}{\fontsize{3.5pt}{4.5pt}\selectfont}
+
+% Small tag text to be put in front of normal melody note circles. Does not take
+% space.
+\providecommand{\ulMelodyTagText}{}
+
+% Small tag text to be put in front of alternatively styled melody note circles.
+% Does not take space.
+\providecommand{\ulMelodyAltTagText}{}
+
+% Factor for the tag text for melody notes is pushed towards the right to be
+% closer to the melody note circle. This is relative to 1ex of the melody note
+% font, not the font setup in \ulMelodyTagStyle
+\providecommand{\ulMelodyTagHorizontalAdjustmentFactor}{.1}
+
+% Factor for the tag text for melody notes is pushed upwards.
+% This is relative to 1ex of the melody note font, not the font setup
+% in \ulMelodyTagStyle.
+\providecommand{\ulMelodyTagVerticalAdjustmentFactor}{.8}
+
+% Factor for the height of the normal melody notes from chord baseline.
+% This is relative to 1 ex of the current font: \ulChordFont when called from
+% within chord definition as it is meant to.
+\providecommand{\ulMelodyNormalHeightFactor}{1.85}
+
+% Factor for the height of the low melody note variant from chord baseline.
+% This is relative to 1 ex of the current font: \ulChordFont when called from
+% within chord definition as it is meant to.
+% Used by the scoped low melody lanes.
+\providecommand{\ulMelodyLowHeightFactor}{.3}
+
+% Factor for the height of the high melody note variant from chord baseline.
+% This is relative to 1 ex of the current font: \ulChordFont when called from
+% within chord definition as it is meant to.
+% Used by the high secondary melody lane.
+\providecommand{\ulMelodyHighHeightFactor}{3.4}
+
+% Factor for the lane below the low/chord-level melody lane. With the default
+% values this continues the same 1.55ex separation used by high/normal/low.
+% Selecting primary=low and secondary=below may intentionally overlap lyrics.
+\providecommand{\ulMelodyLowestHeightFactor}{-1.25}
+
+% If a visible chord-line annotation is followed by a literal source space,
+% reserve at least this much horizontal advance. Wider annotations are
+% unchanged. Relative units are evaluated in \ulLyricFontStyle; set to 0pt to disable.
+\providecommand{\ulChordWhitespaceMinimumWidth}{.8ex}
+
+
+% Melody blocks keep musical roles separate from their visual placement and
+% styling.  These assignments are deliberately local, like ordinary TeX font
+% and color changes, so a verse or explicit group can override them.  `same`
+% places secondary on the primary lane; paired voices intentionally overlap.
+\newif\ifulsbs@melodyprimarylow\ulsbs@melodyprimarylowfalse
+\newif\ifulsbs@melodysecondarybelow\ulsbs@melodysecondarybelowfalse
+\newif\ifulsbs@melodysecondarysame\ulsbs@melodysecondarysamefalse
+\newif\ifulsbs@melodyswapped\ulsbs@melodyswappedfalse
+\newcommand{\ulMelodyPrimaryPosition}[1]{%
+  \ifstrequal{#1}{normal}{\ulsbs@melodyprimarylowfalse}{%
+    \ifstrequal{#1}{low}{\ulsbs@melodyprimarylowtrue}{%
+      \PackageError{ulsbs}{Invalid melody primary position `#1'}%
+        {Use \string\ulMelodyPrimaryPosition\{normal\} or \{low\}.}%
+    }%
+  }%
+}
+\newcommand{\ulMelodySecondaryPosition}[1]{%
+  \ifstrequal{#1}{above}{\ulsbs@melodysecondarybelowfalse\ulsbs@melodysecondarysamefalse}{%
+    \ifstrequal{#1}{below}{\ulsbs@melodysecondarybelowtrue\ulsbs@melodysecondarysamefalse}{%
+      \ifstrequal{#1}{same}{\ulsbs@melodysecondarybelowfalse\ulsbs@melodysecondarysametrue}{%
+        \PackageError{ulsbs}{Invalid melody secondary position `#1'}%
+          {Use \string\ulMelodySecondaryPosition\{above\}, \{below\}, or \{same\}.}%
+      }%
+    }%
+  }%
+}
+\newcommand{\ulMelodyStyleMapping}[1]{%
+  \ifstrequal{#1}{normal}{\ulsbs@melodyswappedfalse}{%
+    \ifstrequal{#1}{swapped}{\ulsbs@melodyswappedtrue}{%
+      \PackageError{ulsbs}{Invalid melody style mapping `#1'}%
+        {Use \string\ulMelodyStyleMapping\{normal\} or \{swapped\}.}%
+    }%
+  }%
+}
+
+% Prints the pretag for melody note circle, if one exists
+\newcommand{\ulsbs@mntag}{%
+  \begingroup%
+    \hspace{\dimexpr\ulMelodyTagHorizontalAdjustmentFactor ex\relax}%
+    \raisebox{\dimexpr\ulMelodyTagVerticalAdjustmentFactor ex\relax}{%
+        \llap{\ulMelodyTagStyle\ifulsbs@altmnstyle\ulMelodyAltTagText\else\ulMelodyTagText\fi}%
+    }%
+  \endgroup%
+}
+
+% Base melody-note symbol style, followed by \ulMelodySymbolStyle:
+\newcommand{\ulsbs@mnsymbolstyle}{%
+  \ulMelodySize\mdseries\ulSansHeavyFont%
+  \ifulsbs@altmnstyle%
+    \color{ulMelodyNoteAltColor}%
+  \else%
+    \color{ulMelodyNoteColor}%
+  \fi%
+  \ulMelodySymbolStyle%
+}
+
+% Sharp and flat symbols for note circles: adjust their height and kerning
+% for a better fit within the circle.
+\newcommand{\ulsbs@mnsharpsymbol}{\raise-.25ex\hbox{\textsuperscript{{\kern-0.05em\ulSymbolFont♯}}}}%
+
+
+% Outputs an encircled melody note, internal
+%   - optional parameter: rise the note above text (chord line) by this amount,
+%                         defaults to \ulMelodyNormalHeightFactor ex
+%   - mandatory parameter: the note, must be in UPPER CASE for transposing to
+%     work
+%   * Example usage: \ulsbs@note[0.5em]{C#}
+%   * To take no horizontal space, call this macro within \makebox[0pt][l]{}
+\NewDocumentCommand{\ulsbs@note}{O{\dimexpr\ulMelodyNormalHeightFactor ex\relax} m}{}
+
+% --- Melody-block parser state ---
+%
+% The syntax is parsed after the chord scanner collects one \[...] argument.
+% Angle brackets retain their ordinary catcode and have no meaning elsewhere.
+% Parsed primary and secondary items are stored as expl3 sequences so renderer
+% layout is independent of the textual spelling (compact or space-separated).
+% The one-token `!` modifier is dispatched separately below to avoid expanding
+% active accidental tokens before they reach this content parser.
+\newsavebox{\ulsbs@melodyprimarybox}
+\newsavebox{\ulsbs@melodysecondarybox}
+\newsavebox{\ulsbs@melodybeatbox}
+\newsavebox{\ulsbs@melodylayerbox}
+\newdimen\ulsbs@melodyslotwidth
+\newdimen\ulsbs@melodyoffset
+\newdimen\ulsbs@melodybeatwidth
+\newdimen\ulsbs@melodybeatextent
+\newdimen\ulsbs@melodycurrentextent
+\newif\ifulsbs@annotationvisible
+\newif\ifulsbs@annotationfullclearance
+\newif\ifulsbs@annotationminimumdisabled
+\newif\ifulsbs@melodyzeroadvance
+
+\ExplSyntaxOn
+\tl_new:N \l__ulsbs_melody_primary_tl
+\tl_new:N \l__ulsbs_melody_secondary_tl
+\tl_new:N \l__ulsbs_melody_offset_tl
+\tl_new:N \l__ulsbs_melody_at_tl
+\seq_new:N \l__ulsbs_melody_parts_seq
+\seq_new:N \l__ulsbs_melody_primary_seq
+\seq_new:N \l__ulsbs_melody_secondary_seq
+\seq_new:N \l__ulsbs_melody_lex_seq
+\cs_generate_variant:Nn \seq_set_split:Nnn { NVn, NVV }
+\cs_generate_variant:Nn \str_case:nnF { en }
+\cs_generate_variant:Nn \regex_match:nnT { nV }
+% Report parser errors with the complete original block for useful diagnostics.
+\cs_new_protected:Npn \__ulsbs_melody_error:n #1
+  { \PackageError{ulsbs}{Malformed~melody~block~`\tl_use:N\l__ulsbs_melody_raw_tl'}{#1} }
+\tl_new:N \l__ulsbs_melody_raw_tl
+\tl_new:N \l__ulsbs_melody_content_tl
+% Parse separators first: one optional @ dimension and one optional ; voice
+% separator. The remaining voice fields are then tokenized independently.
+\cs_new_protected:Npn \__ulsbs_melody_parse:n #1
+ {
+  \tl_set:Nn \l__ulsbs_melody_raw_tl {#1}
+  \tl_set:Nn \l__ulsbs_melody_content_tl {#1}
+  \tl_trim_spaces:N \l__ulsbs_melody_content_tl
+  \regex_match:nVT { @ \s* \Z } \l__ulsbs_melody_content_tl
+   {\__ulsbs_melody_error:n {The~@~separator~must~be~followed~by~a~TeX~dimension.}}
+  \regex_match:nVT { @ .* @ } \l__ulsbs_melody_content_tl
+   {\__ulsbs_melody_error:n {A~melody~block~may~contain~only~one~@~offset.}}
+  \tl_set:Nx \l__ulsbs_melody_at_tl {\char_generate:nn {64} {12}}
+  \seq_set_split:NVV \l__ulsbs_melody_parts_seq \l__ulsbs_melody_at_tl \l__ulsbs_melody_content_tl
+  \int_compare:nNnTF {\seq_count:N \l__ulsbs_melody_parts_seq} > {2}
+   {\__ulsbs_melody_error:n {A~melody~block~may~contain~only~one~@~offset.}}
+   {
+    \seq_pop_left:NN \l__ulsbs_melody_parts_seq \l__ulsbs_melody_primary_tl
+    \tl_trim_spaces:N \l__ulsbs_melody_primary_tl
+    \tl_clear:N \l__ulsbs_melody_offset_tl
+    \seq_if_empty:NTF \l__ulsbs_melody_parts_seq
+     {\tl_if_in:VnT \l__ulsbs_melody_raw_tl {@}
+       {\__ulsbs_melody_error:n {The~@~separator~must~be~followed~by~a~TeX~dimension.}}}
+     { \seq_pop_left:NN \l__ulsbs_melody_parts_seq \l__ulsbs_melody_offset_tl
+       \tl_trim_spaces:N \l__ulsbs_melody_offset_tl
+       \tl_if_empty:NT \l__ulsbs_melody_offset_tl
+        {\__ulsbs_melody_error:n {The~@~separator~must~be~followed~by~a~TeX~dimension.}} }
+    \seq_set_split:NnV \l__ulsbs_melody_parts_seq {;} \l__ulsbs_melody_primary_tl
+    \int_compare:nNnTF {\seq_count:N \l__ulsbs_melody_parts_seq} > {2}
+     {\__ulsbs_melody_error:n {A~melody~block~may~contain~only~one~;~separator.}}
+     { \seq_pop_left:NN \l__ulsbs_melody_parts_seq \l__ulsbs_melody_primary_tl
+       \tl_trim_spaces:N \l__ulsbs_melody_primary_tl
+       \tl_clear:N \l__ulsbs_melody_secondary_tl
+       \seq_if_empty:NF \l__ulsbs_melody_parts_seq
+        {\seq_pop_left:NN \l__ulsbs_melody_parts_seq \l__ulsbs_melody_secondary_tl
+         \tl_trim_spaces:N \l__ulsbs_melody_secondary_tl}
+       \seq_clear:N \l__ulsbs_melody_primary_seq
+       \seq_clear:N \l__ulsbs_melody_secondary_seq
+       \__ulsbs_melody_lex:NV \l__ulsbs_melody_primary_seq \l__ulsbs_melody_primary_tl
+       \__ulsbs_melody_lex:NV \l__ulsbs_melody_secondary_seq \l__ulsbs_melody_secondary_tl
+        % Keep dimensions unexpanded until the renderer knows there is melody ink.
+        \ulsbs@melodyoffset=0pt\relax
+     }
+   }
+ }
+% The lexer ignores spaces and recognizes pitches one character at a time.
+% Accidentals are appended to the pending pitch without stringifying their
+% active tokens, which keeps chord transposition intact.
+\tl_new:N \l__ulsbs_melody_pending_tl
+\cs_new_protected:Npn \__ulsbs_melody_lex_commit:
+ {\tl_if_empty:NF \l__ulsbs_melody_pending_tl
+   {\seq_put_right:NV \l__ulsbs_melody_lex_seq \l__ulsbs_melody_pending_tl\tl_clear:N \l__ulsbs_melody_pending_tl}}
+\cs_new_protected:Npn \__ulsbs_melody_lex_token:n #1
+ {\str_if_eq:eeTF {\tl_to_str:n {#1}} {\c_space_tl} {}
+   {\str_if_eq:eeTF {\tl_to_str:n {#1}} {\c_hash_str}
+      {\tl_if_empty:NTF \l__ulsbs_melody_pending_tl
+        {\__ulsbs_melody_error:n {An~accidental~must~immediately~follow~a~pitch.}}
+        {\tl_put_right:Nn \l__ulsbs_melody_pending_tl {#1}\__ulsbs_melody_lex_commit:}}
+      {\str_if_eq:eeTF {\tl_to_str:n {#1}} {&}
+        {\tl_if_empty:NTF \l__ulsbs_melody_pending_tl
+          {\__ulsbs_melody_error:n {An~accidental~must~immediately~follow~a~pitch.}}
+          {\tl_put_right:Nn \l__ulsbs_melody_pending_tl {#1}\__ulsbs_melody_lex_commit:}}
+        {\__ulsbs_melody_lex_commit:
+         \str_case:enF {\tl_to_str:n {#1}}
+          {{A}{\tl_set:Nn \l__ulsbs_melody_pending_tl {#1}}{B}{\tl_set:Nn \l__ulsbs_melody_pending_tl {#1}}{C}{\tl_set:Nn \l__ulsbs_melody_pending_tl {#1}}{D}{\tl_set:Nn \l__ulsbs_melody_pending_tl {#1}}{E}{\tl_set:Nn \l__ulsbs_melody_pending_tl {#1}}{F}{\tl_set:Nn \l__ulsbs_melody_pending_tl {#1}}{G}{\tl_set:Nn \l__ulsbs_melody_pending_tl {#1}}{_}{\seq_put_right:Nn \l__ulsbs_melody_lex_seq {#1}}{*}{\seq_put_right:Nn \l__ulsbs_melody_lex_seq {#1}}{/}{\seq_put_right:Nn \l__ulsbs_melody_lex_seq {#1}}}
+          {\__ulsbs_melody_error:n {Each~item~must~be~A--G~with~optional~sharp/flat,~_,~*,~or~/.}}}}}}
+\cs_new_protected:Npn \__ulsbs_melody_lex:Nn #1#2
+ {\seq_clear:N \l__ulsbs_melody_lex_seq\tl_clear:N \l__ulsbs_melody_pending_tl
+  \tl_map_function:nN {#2} \__ulsbs_melody_lex_token:n
+  \__ulsbs_melody_lex_commit:\seq_set_eq:NN #1 \l__ulsbs_melody_lex_seq}
+\cs_generate_variant:Nn \__ulsbs_melody_lex:Nn { NV }
+\cs_new_eq:NN \ulsbs@melodyparsecontent \__ulsbs_melody_parse:n
+\ExplSyntaxOff
+
+% Dispatch the optional leading ! without expanding the remaining token list.
+% Keeping this one-token modifier parser outside expl3 preserves active
+% accidental tokens verbatim for the content lexer and transposition.
+\def\ulsbs@melodyparse#1{%
+  \expandafter\ulsbs@melodyparsemodifier#1\ulsbs@melodyend%
+}
+\def\ulsbs@melodyparsemodifier{%
+  \@ifnextchar!\ulsbs@melodyparsezero\ulsbs@melodyparsenormal%
+}
+\def\ulsbs@melodyparsezero!#1\ulsbs@melodyend{%
+  \ulsbs@melodyzeroadvancetrue
+  \ulsbs@annotationminimumdisabledfalse
+  \ulsbs@melodyparsecontent{#1}%
+}
+\def\ulsbs@melodyparsenormal#1\ulsbs@melodyend{%
+  \ulsbs@melodyzeroadvancefalse
+  \ulsbs@annotationminimumdisabledfalse
+  \ulsbs@melodyparsecontent{#1}%
+}
+
+% Resolve the semantic primary/secondary role to the currently selected visual
+% style immediately before drawing each note.
+\newcommand{\ulsbs@melodystyle}[1]{%
+  \ifulsbs@melodyswapped%
+    \ifstrequal{#1}{primary}{\ulsbs@altmnstyletrue}{\ulsbs@altmnstylefalse}%
+  \else%
+    \ifstrequal{#1}{primary}{\ulsbs@altmnstylefalse}{\ulsbs@altmnstyletrue}%
+  \fi%
+}
+\ExplSyntaxOn
+% Beat drawing is visibility-aware. The legacy .30ex lead is visual only: it
+% shifts the glyph but is deliberately excluded from reserved layer width.
+\newcommand{\ulsbs@melodybeatdraw}{%
+  \ifulShowBeats%
+    {\ulLyricFontStyle\kern\ulsbs@bmleadspace}\ulsbs@bmdraw%
+  \fi%
+}
+\cs_new_protected:Npn \__ulsbs_melody_sequence:Nnn #1#2#3
+ { \seq_map_inline:Nn #1
+   { \str_if_eq:eeF {\tl_to_str:n {##1}} {*} { \str_if_eq:eeTF {\tl_to_str:n {##1}} {_}
+       {\makebox[\ulsbs@melodyslotwidth][c]{}}
+       {\makebox[\ulsbs@melodyslotwidth][c]{#2\ulsbs@note[#3]{##1}}} } } }
+\cs_new_protected:Npn \__ulsbs_melody_beats:N #1
+ { \seq_map_inline:Nn #1
+   { \str_if_eq:eeTF {\tl_to_str:n {##1}} {*} {\hbox~to~0pt{\ulsbs@melodybeatdraw\hss}}
+       {\hskip\ulsbs@melodyslotwidth} } }
+\cs_new_protected:Npn \__ulsbs_melody_beat_extent:N #1
+ {
+  \ulsbs@melodycurrentextent=0pt\relax
+  \seq_map_inline:Nn #1
+   { \str_if_eq:eeTF {\tl_to_str:n {##1}} {*}
+      {\@tempdima=\dimexpr\ulsbs@melodycurrentextent+\ulsbs@melodybeatwidth\relax
+       \ifdim\@tempdima>\ulsbs@melodybeatextent\ulsbs@melodybeatextent=\@tempdima\fi}
+      {\advance\ulsbs@melodycurrentextent by \ulsbs@melodyslotwidth\relax} }
+ }
+\cs_new_protected:Npn \__ulsbs_melody_mark_note_visible:N #1
+ {
+  \seq_map_inline:Nn #1
+   {
+    \str_if_eq:eeF {\tl_to_str:n {##1}} {*}
+     {
+      \str_if_eq:eeF {\tl_to_str:n {##1}} {_}
+       {\ulsbs@annotationvisibletrue\seq_map_break:}
+     }
+   }
+ }
+\ExplSyntaxOff
+
+% --- Integration with chord memorization and replay ---
+%
+% A zero-output payload is stored in the chord register beside ordinary
+% chord tokens. On replay it recovers the raw melody block, which is parsed and
+% rendered again under the replay location's visibility, placement and style.
+\newif\ifulsbs@melodypayloadempty
+\newif\ifulsbs@melodyhadpayload
+\global\let\ulsbs@melodyreplayraw\@empty
+% #1 = raw block; #2 = 1 when this annotation has no chord remainder.
+\def\ulsbs@melodyreplaypayload#1#2{%
+  \global\ulsbs@melodyhadpayloadtrue
+  \global\def\ulsbs@melodyreplayraw{#1}%
+  \ifnum#2=1 \global\ulsbs@melodypayloademptytrue\else\global\ulsbs@melodypayloademptyfalse\fi%
+}
+
+\begingroup\catcode`\^=\active\global\let\ulsbs@melodyactivehat=^\endgroup
+
+% === Melody beat marks ===
+
+% BEAT MARKS feature
+%
+% Beat marks are written as `*` in a melody block, for example \[<* C>Am].
+% They are small dots just below the chord baseline and share the block's
+% horizontal offset and annotation width calculation.
+%
+% To disable showing of the beats for the whole document, set \ulShowBeats{false}
+% in the main document preamble (after including this package).
+%
+% Call \beatsoff command between verses to disable showing of beat marks in the
+% following verses of the song. \beatson puts them back for the next verses
+% (unless \ulShowBeats{false} is set in the main doc).
+%
+
+% Private drawing defaults: absolute dimensions except the font-relative lead.
+\providecommand*{\ulsbs@bmradius}{1.1pt}    % mark radius
+\providecommand*{\ulsbs@bmdrop}{1.1pt}      % how far mark's bottom goes below baseline
+\providecommand*{\ulsbs@bmdepth}{.7pt}      % mark's reported depth
+\providecommand*{\ulsbs@bmleadspace}{.30ex} % leading space before mark (rel. to \ulLyricFontStyle)
+
+% Draws the beat mark.
+%
+% NOTE: without raisebox, the TikZ image's bottom would be placed on baseline,
+% and left would be put horizontally at current position.
+% With raisebox{-1.1pt} the bottom of the circle goes 1.1pt below baseline.
+% The default ulChordLineParams has lineskiplimit=.5pt and lineskip=.5pt, which
+% ensures there is always a minimum of .5pt space between chord line's bottom
+% and lyric line's top, when we set the beat mark to have .7pt depth (when
+% it really is 1.1pt), so it goes .4 pt deeper than informed, so there is
+% always at least .1pt between lyric top and beat mark bottom.
+% TODO: use saved box (had problems with dynamic color when tried)
+\newcommand*{\ulsbs@bmdraw}{%
+  \begingroup%
+  \color{ulMeasureBarColor}%
+  \raisebox{-\ulsbs@bmdrop}[0pt][\ulsbs@bmdepth]{%
+    \tikz\fill (0,0) circle [radius=\ulsbs@bmradius];%
+  }%
+  \endgroup%
+}
+
+% Beat permission, grouped requests and short switches belong to ulsbs-visibility.code.tex.

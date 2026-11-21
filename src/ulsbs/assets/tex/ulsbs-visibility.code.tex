@@ -1,0 +1,654 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Effective visibility runtime and related musical policy.
+% This file is part of the 'ulsbs' package.
+%
+% Loaded by ulsbs-book-defaults.code.tex after ulsbs-init.code.tex and utilities,
+% with @ a letter; requires the boolean factory, etoolbox and expl3/xparse.
+% Owns permission/request state, effective predicates, local dispatch, short
+% switches and musical guards. Effective visibility is permission AND request;
+% requests obey ordinary grouping and never grant book permission. Permissions
+% freeze globally at begindocument/before; local requests remain scope-local.
+% Also owns the ordinary alternate-chord transposition flag: related musical
+% policy retained here to preserve declaration and default-assignment order.
+% The verse domain module installs the scoped measure-catcode callback later.
+% Adds no group or catcode changes around loading. This is an internal module,
+% not a configuration file to input directly; see WRITING_SONGBOOKS.md.
+
+\ProvidesFile{ulsbs-visibility.code.tex}[Effective visibility runtime]
+
+% === Display switches ===
+
+% Inline notation, scores, alternate sets, prelude metadata and independent prose:
+% permission AND grouped request.
+% Keep each public query a real conditional, even inside a skipped branch.
+% Ordinary presentation switches remain separate from permission/request policy.
+\newif\ifulsbs@visibilityfrozen
+\newif\ifulsbs@chordpermission\ulsbs@chordpermissiontrue
+\newif\ifulsbs@chordrequest\ulsbs@chordrequesttrue
+\let\ifulShowChords\iftrue
+\newcommand*\ulsbs@effectivechordson{\let\ifulShowChords\iftrue}
+\newcommand*\ulsbs@refreshchords{%
+  \let\ifulShowChords\iffalse
+  \ifulsbs@chordpermission\ifulsbs@chordrequest
+    \ulsbs@effectivechordson
+  \fi\fi}
+% {true|false}: configure book permission before the document boundary only.
+\newcommand*\ulShowChords[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowChords\space is preamble-only}%
+      {Use \string\ulLocalShow{chords}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@chordpermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@chordpermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshchords
+  \fi}
+% Inline melody pitches have independent permission and requests, not prose or beats.
+\newif\ifulsbs@notepermission\ulsbs@notepermissiontrue
+\newif\ifulsbs@noterequest\ulsbs@noterequesttrue
+\let\ifulShowNotes\iftrue
+\newcommand*\ulsbs@effectivenoteson{\let\ifulShowNotes\iftrue}
+\newcommand*\ulsbs@refreshnotes{%
+  \let\ifulShowNotes\iffalse
+  \ifulsbs@notepermission\ifulsbs@noterequest
+    \ulsbs@effectivenoteson
+  \fi\fi}
+% {true|false}: configure pitch permission only; preserve the current request.
+\newcommand*\ulShowNotes[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowNotes\space is preamble-only}%
+      {Use \string\ulLocalShow{notes}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@notepermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@notepermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshnotes
+  \fi}
+% Inline beats are independent of pitches, chord symbols and measure bars.
+\newif\ifulsbs@beatpermission\ulsbs@beatpermissiontrue
+\newif\ifulsbs@beatrequest\ulsbs@beatrequesttrue
+\let\ifulShowBeats\iftrue
+\newcommand*\ulsbs@effectivebeatson{\let\ifulShowBeats\iftrue}
+\newcommand*\ulsbs@refreshbeats{%
+  \let\ifulShowBeats\iffalse
+  \ifulsbs@beatpermission\ifulsbs@beatrequest
+    \ulsbs@effectivebeatson
+  \fi\fi}
+% {true|false}: configure beat permission only; preserve the current request.
+\newcommand*\ulShowBeats[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowBeats\space is preamble-only}%
+      {Use \string\ulLocalShow{beats}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@beatpermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@beatpermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshbeats
+  \fi}
+% Measures share one effective ink/catcode policy, independent of legacy identity.
+\newif\ifulsbs@measurepermission\ulsbs@measurepermissiontrue
+\newif\ifulsbs@measurerequest\ulsbs@measurerequesttrue
+\let\ifulShowMeasures\iftrue
+\newcommand*\ulsbs@effectivemeasureson{\let\ifulShowMeasures\iftrue}
+% The verse owner installs this scoped catcode callback after loading.
+\newcommand*\ulsbs@measurecatcodes{}
+\newcommand*\ulsbs@refreshmeasures{%
+  \let\ifulShowMeasures\iffalse
+  \ifulsbs@measurepermission\ifulsbs@measurerequest
+    \ulsbs@effectivemeasureson
+  \fi\fi
+  \ulsbs@measurecatcodes}
+% {true|false}: configure bar permission only; preserve the current request.
+\newcommand*\ulShowMeasures[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowMeasures\space is preamble-only}%
+      {Use \string\ulLocalShow{measures}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@measurepermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@measurepermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshmeasures
+  \fi}
+% {feature}{true|false}: canonical local API; requests never grant permission.
+% Dispatch public feature names to their independent request and refresh owners.
+\newcommand*\ulLocalShow[2]{%
+  \ifstrequal{#1}{chords}{%
+    \ifstrequal{#2}{true}{\ulsbs@chordrequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@chordrequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshchords
+  }{\ifstrequal{#1}{notes}{%
+    \ifstrequal{#2}{true}{\ulsbs@noterequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@noterequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshnotes
+  }{\ifstrequal{#1}{beats}{%
+    \ifstrequal{#2}{true}{\ulsbs@beatrequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@beatrequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshbeats
+  }{\ifstrequal{#1}{measures}{%
+    \ifstrequal{#2}{true}{\ulsbs@measurerequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@measurerequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshmeasures
+  }{\ifstrequal{#1}{scores}{%
+    \ifstrequal{#2}{true}{\ulsbs@scorerequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@scorerequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshscores
+  }{\ifstrequal{#1}{altchords}{%
+    \ifstrequal{#2}{true}{\ulsbs@altchordrequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@altchordrequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshaltchords
+  }{\ifstrequal{#1}{translation}{%
+    \ifstrequal{#2}{true}{\ulsbs@translationrequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@translationrequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshtranslation
+  }{\ifstrequal{#1}{explanation}{%
+    \ifstrequal{#2}{true}{\ulsbs@explanationrequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@explanationrequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshexplanation
+  }{\ifstrequal{#1}{passage}{%
+    \ifstrequal{#2}{true}{\ulsbs@passagerequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@passagerequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshpassage
+  }{\ifstrequal{#1}{feeler}{%
+    \ifstrequal{#2}{true}{\ulsbs@feelerrequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@feelerrequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshfeeler
+  }{\ifstrequal{#1}{key}{%
+    \ifstrequal{#2}{true}{\ulsbs@keyrequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@keyrequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshkey
+  }{\ifstrequal{#1}{goodkeys}{%
+    \ifstrequal{#2}{true}{\ulsbs@goodkeysrequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@goodkeysrequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshgoodkeys
+  }{\ifstrequal{#1}{musiccomments}{%
+    \ifstrequal{#2}{true}{\ulsbs@musiccommentrequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@musiccommentrequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshmusiccomments
+  }{\ifstrequal{#1}{authors}{%
+    \ifstrequal{#2}{true}{\ulsbs@authorsrequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@authorsrequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshauthors
+  }{\ifstrequal{#1}{offeredto}{%
+    \ifstrequal{#2}{true}{\ulsbs@offeredtorequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@offeredtorequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshofferedto
+  }{\ifstrequal{#1}{extrainfo}{%
+    \ifstrequal{#2}{true}{\ulsbs@extrainforequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@extrainforequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshextrainfo
+  }{\ifstrequal{#1}{tags}{%
+    \ifstrequal{#2}{true}{\ulsbs@tagsrequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@tagsrequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshtags
+  }{\ifstrequal{#1}{phase}{%
+    \ifstrequal{#2}{true}{\ulsbs@phaserequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@phaserequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshphase
+  }{\ifstrequal{#1}{phaseintoc}{%
+    \ifstrequal{#2}{true}{\ulsbs@phaseintocrequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@phaseintocrequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshphaseintoc
+  }{\ifstrequal{#1}{imageinchaptername}{%
+    \ifstrequal{#2}{true}{\ulsbs@imageinchapternamerequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@imageinchapternamerequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshimageinchaptername
+  }{\ifstrequal{#1}{imageonchapterfrontpage}{%
+    \ifstrequal{#2}{true}{\ulsbs@imageonchapterfrontpagerequesttrue}{%
+      \ifstrequal{#2}{false}{\ulsbs@imageonchapterfrontpagerequestfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #2}{Use true or false.}}}%
+    \ulsbs@refreshimageonchapterfrontpage
+  }{\PackageError{ulsbs}{Unknown local visibility feature: #1}%
+      {Currently supported: chords, notes, beats, measures, scores, altchords, translation, explanation, passage, feeler, key, goodkeys, musiccomments, authors, offeredto, extrainfo, tags, phase, phaseintoc, imageinchaptername, imageonchapterfrontpage.}}}}}}}}}}}}}}}}}}}}}}}
+\newcommand*\chordson{\ulLocalShow{chords}{true}}
+\newcommand*\chordsoff{\ulLocalShow{chords}{false}}
+\newcommand*\noteson{\ulLocalShow{notes}{true}}
+\newcommand*\notesoff{\ulLocalShow{notes}{false}}
+\newcommand*\beatson{\ulLocalShow{beats}{true}}
+\newcommand*\beatsoff{\ulLocalShow{beats}{false}}
+\newcommand*\measureson{\ulLocalShow{measures}{true}}
+\newcommand*\measuresoff{\ulLocalShow{measures}{false}}
+\newcommand*\translationon{\ulLocalShow{translation}{true}}
+\newcommand*\translationoff{\ulLocalShow{translation}{false}}
+\AddToHook{begindocument/before}{\global\let\ifulsbs@visibilityfrozen\iftrue}
+
+% Introduce toggles for some global features and set their defaults. If you
+% want a specific feature enabled or disabled, set its public setter to
+% true or false in the main document preamble (after including this package).
+% Example: \ulShowTags{false} would disable showing tags in song preludes, and
+%          \ulShowTags{true} would enable showing them.
+% Query with the real predicate \ifulShowTags ...\else ...\fi. Setters obey
+% ordinary grouping; do not predefine or renew these commands/conditionals.
+
+% Toggle for showing extra info in song preludes. Set the song metadata with
+% \beginsong{Title}[ex={this song is good}].
+\newif\ifulsbs@extrainfopermission\ulsbs@extrainfopermissiontrue
+\newif\ifulsbs@extrainforequest\ulsbs@extrainforequesttrue
+\let\ifulShowExtraInfo\iftrue
+\newcommand*\ulsbs@effectiveextrainfoon{\let\ifulShowExtraInfo\iftrue}
+\newcommand*\ulsbs@refreshextrainfo{%
+  \let\ifulShowExtraInfo\iffalse
+  \ifulsbs@extrainfopermission\ifulsbs@extrainforequest
+    \ulsbs@effectiveextrainfoon
+  \fi\fi}
+% {true|false}: configure extra-info display permission, not metadata capture.
+\newcommand*\ulShowExtraInfo[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowExtraInfo\space is preamble-only}%
+      {Use \string\ulLocalShow{extrainfo}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@extrainfopermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@extrainfopermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshextrainfo
+  \fi}
+
+% Toggle for showing the dedication in song preludes. Set the song metadata with
+% \beginsong{Title}[off={My Muse}].
+\newif\ifulsbs@offeredtopermission\ulsbs@offeredtopermissiontrue
+\newif\ifulsbs@offeredtorequest\ulsbs@offeredtorequesttrue
+\let\ifulShowOfferedTo\iftrue
+\newcommand*\ulsbs@effectiveofferedtoon{\let\ifulShowOfferedTo\iftrue}
+\newcommand*\ulsbs@refreshofferedto{%
+  \let\ifulShowOfferedTo\iffalse
+  \ifulsbs@offeredtopermission\ifulsbs@offeredtorequest
+    \ulsbs@effectiveofferedtoon
+  \fi\fi}
+% {true|false}: configure dedication display permission; preserve its request.
+\newcommand*\ulShowOfferedTo[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowOfferedTo\space is preamble-only}%
+      {Use \string\ulLocalShow{offeredto}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@offeredtopermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@offeredtopermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshofferedto
+  \fi}
+
+% Toggle for showing key info in song preludes. To set it for a song,
+% use \beginsong{Title}[key={Am}]. Make sure that
+% it is correct, that the key set here corresponds to the actual key displayed
+% in the final document (after possible transpose).
+% Display permission never disables metadata capture, key validation or transposition.
+\newif\ifulsbs@keypermission\ulsbs@keypermissiontrue
+\newif\ifulsbs@keyrequest\ulsbs@keyrequesttrue
+\let\ifulShowKey\iftrue
+\newcommand*\ulsbs@effectivekeyon{\let\ifulShowKey\iftrue}
+\newcommand*\ulsbs@refreshkey{%
+  \let\ifulShowKey\iffalse
+  \ifulsbs@keypermission\ifulsbs@keyrequest
+    \ulsbs@effectivekeyon
+  \fi\fi}
+% {true|false}: configure main-key badge permission only, before the shared freeze.
+\newcommand*\ulShowKey[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowKey\space is preamble-only}%
+      {Use \string\ulLocalShow{key}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@keypermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@keypermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshkey
+  \fi}
+
+% Toggle for showing good keys in song preludes. To set it/them for a song,
+% use \beginsong{Title}[gk={Am, Gm--Bm}]. The first
+% is the preferred one, and then comes the range of keys suitable for singing
+% in such a way that the melody falls within (including) a G note in the low
+% end, and a B note of the next octave in the high end. If such a range is
+% impossible, put the keys in the range in parenthesis.
+\newif\ifulsbs@goodkeyspermission\ulsbs@goodkeyspermissiontrue
+\newif\ifulsbs@goodkeysrequest\ulsbs@goodkeysrequesttrue
+\let\ifulShowGoodKeys\iftrue
+\newcommand*\ulsbs@effectivegoodkeyson{\let\ifulShowGoodKeys\iftrue}
+\newcommand*\ulsbs@refreshgoodkeys{%
+  \let\ifulShowGoodKeys\iffalse
+  \ifulsbs@goodkeyspermission\ifulsbs@goodkeysrequest
+    \ulsbs@effectivegoodkeyson
+  \fi\fi}
+% {true|false}: configure recommendation badge permission, not main-key policy.
+\newcommand*\ulShowGoodKeys[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowGoodKeys\space is preamble-only}%
+      {Use \string\ulLocalShow{goodkeys}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@goodkeyspermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@goodkeyspermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshgoodkeys
+  \fi}
+
+% Toggle for showing phase info in song preludes. To set it for a song,
+% use \beginsong{Title}[ph={I, II}].
+\newif\ifulsbs@phasepermission\ulsbs@phasepermissiontrue
+\newif\ifulsbs@phaserequest\ulsbs@phaserequesttrue
+\let\ifulShowPhase\iftrue
+\newcommand*\ulsbs@effectivephaseon{\let\ifulShowPhase\iftrue}
+\newcommand*\ulsbs@refreshphase{%
+  \let\ifulShowPhase\iffalse
+  \ifulsbs@phasepermission\ifulsbs@phaserequest
+    \ulsbs@effectivephaseon
+  \fi\fi}
+% {true|false}: configure prelude phase permission only, not TOC or metadata.
+\newcommand*\ulShowPhase[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowPhase\space is preamble-only}%
+      {Use \string\ulLocalShow{phase}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@phasepermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@phasepermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshphase
+  \fi}
+
+% Toggle for showing phase info in the TOC:
+\newif\ifulsbs@phaseintocpermission\ulsbs@phaseintocpermissiontrue
+\newif\ifulsbs@phaseintocrequest\ulsbs@phaseintocrequesttrue
+\let\ifulShowPhaseInToc\iftrue
+\newcommand*\ulsbs@effectivephaseintocon{\let\ifulShowPhaseInToc\iftrue}
+\newcommand*\ulsbs@refreshphaseintoc{%
+  \let\ifulShowPhaseInToc\iffalse
+  \ifulsbs@phaseintocpermission\ifulsbs@phaseintocrequest
+    \ulsbs@effectivephaseintocon
+  \fi\fi}
+% {true|false}: configure TOC phase permission independently of prelude phase.
+\newcommand*\ulShowPhaseInToc[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowPhaseInToc\space is preamble-only}%
+      {Use \string\ulLocalShow{phaseintoc}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@phaseintocpermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@phaseintocpermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshphaseintoc
+  \fi}
+
+% Toggle for showing tags in song preludes. To set them for a song,
+% use \beginsong{Title}[tags={love, light}].
+% Consumer books may define their tag vocabulary in include/tags.txt.
+\newif\ifulsbs@tagspermission\ulsbs@tagspermissiontrue
+\newif\ifulsbs@tagsrequest\ulsbs@tagsrequesttrue
+\let\ifulShowTags\iftrue
+\newcommand*\ulsbs@effectivetagson{\let\ifulShowTags\iftrue}
+\newcommand*\ulsbs@refreshtags{%
+  \let\ifulShowTags\iffalse
+  \ifulsbs@tagspermission\ifulsbs@tagsrequest
+    \ulsbs@effectivetagson
+  \fi\fi}
+% {true|false}: configure tag badge permission only, not index collection.
+\newcommand*\ulShowTags[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowTags\space is preamble-only}%
+      {Use \string\ulLocalShow{tags}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@tagspermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@tagspermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshtags
+  \fi}
+
+% Author display is independent of dedication, other metadata and author indices.
+\newif\ifulsbs@authorspermission\ulsbs@authorspermissiontrue
+\newif\ifulsbs@authorsrequest\ulsbs@authorsrequesttrue
+\let\ifulShowAuthors\iftrue
+\newcommand*\ulsbs@effectiveauthorson{\let\ifulShowAuthors\iftrue}
+\newcommand*\ulsbs@refreshauthors{%
+  \let\ifulShowAuthors\iffalse
+  \ifulsbs@authorspermission\ifulsbs@authorsrequest
+    \ulsbs@effectiveauthorson
+  \fi\fi}
+% {true|false}: configure author display permission only, before the shared freeze.
+\newcommand*\ulShowAuthors[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowAuthors\space is preamble-only}%
+      {Use \string\ulLocalShow{authors}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@authorspermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@authorspermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshauthors
+  \fi}
+
+% Whole-score display is independent of inline notation, engraving and media.
+\newif\ifulsbs@scorepermission\ulsbs@scorepermissiontrue
+\newif\ifulsbs@scorerequest\ulsbs@scorerequesttrue
+\let\ifulShowLilypond\iftrue
+\newcommand*\ulsbs@effectivescoreson{\let\ifulShowLilypond\iftrue}
+\newcommand*\ulsbs@refreshscores{%
+  \let\ifulShowLilypond\iffalse
+  \ifulsbs@scorepermission\ifulsbs@scorerequest
+    \ulsbs@effectivescoreson
+  \fi\fi}
+% {true|false}: configure printed-score permission only, before the shared freeze.
+\newcommand*\ulShowLilypond[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowLilypond\space is preamble-only}%
+      {Use \string\ulLocalShow{scores}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@scorepermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@scorepermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshscores
+  \fi}
+
+% Musical prose is independent of inline pitches, chords and the musical aggregate.
+\newif\ifulsbs@musiccommentpermission\ulsbs@musiccommentpermissiontrue
+\newif\ifulsbs@musiccommentrequest\ulsbs@musiccommentrequesttrue
+\let\ifulShowMusicComments\iftrue
+\newcommand*\ulsbs@effectivemusiccommentson{\let\ifulShowMusicComments\iftrue}
+\newcommand*\ulsbs@refreshmusiccomments{%
+  \let\ifulShowMusicComments\iffalse
+  \ifulsbs@musiccommentpermission\ifulsbs@musiccommentrequest
+    \ulsbs@effectivemusiccommentson
+  \fi\fi}
+% {true|false}: configure comment permission only, before the shared freeze.
+\newcommand*\ulShowMusicComments[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowMusicComments\space is preamble-only}%
+      {Use \string\ulLocalShow{musiccomments}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@musiccommentpermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@musiccommentpermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshmusiccomments
+  \fi}
+
+% {yes}{no}: query effective musical presentation at call time, not identity or
+% actual song contents. Beats/measures are excluded. Keep unchosen tokens opaque
+% to TeX's conditional scanner; the chosen branch runs once in the caller's scope.
+\ExplSyntaxOn
+% #1: the complete display operation, not just its text. Hidden arguments stay
+% opaque to TeX's skip scanner and cannot trigger placement, glue or font hooks.
+\cs_new_protected:Npn \ulsbs@musiccomment #1
+  {\legacy_if:nT {ulShowMusicComments} {#1}}
+\NewDocumentCommand \ulIfMusical {+m +m}
+  {
+    \bool_if:nTF
+      {\legacy_if_p:n {ulShowChords} || \legacy_if_p:n {ulShowNotes}
+        || \legacy_if_p:n {ulShowLilypond}}
+      {#1} {#2}
+  }
+\ExplSyntaxOff
+
+% Passage prose is independent of in-song prose, notation and variant identity.
+\newif\ifulsbs@passagepermission\ulsbs@passagepermissiontrue
+\newif\ifulsbs@passagerequest\ulsbs@passagerequesttrue
+\let\ifulShowPassage\iftrue
+\newcommand*\ulsbs@effectivepassageon{\let\ifulShowPassage\iftrue}
+\newcommand*\ulsbs@refreshpassage{%
+  \let\ifulShowPassage\iffalse
+  \ifulsbs@passagepermission\ifulsbs@passagerequest
+    \ulsbs@effectivepassageon
+  \fi\fi}
+% {true|false}: configure passage permission only, before the shared freeze.
+\newcommand*\ulShowPassage[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowPassage\space is preamble-only}%
+      {Use \string\ulLocalShow{passage}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@passagepermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@passagepermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshpassage
+  \fi}
+
+% Explanation prose is independent of translations, notation and variant identity.
+\newif\ifulsbs@explanationpermission\ulsbs@explanationpermissiontrue
+\newif\ifulsbs@explanationrequest\ulsbs@explanationrequesttrue
+\let\ifulShowExplanation\iftrue
+\newcommand*\ulsbs@effectiveexplanationon{\let\ifulShowExplanation\iftrue}
+\newcommand*\ulsbs@refreshexplanation{%
+  \let\ifulShowExplanation\iffalse
+  \ifulsbs@explanationpermission\ifulsbs@explanationrequest
+    \ulsbs@effectiveexplanationon
+  \fi\fi}
+% {true|false}: configure explanation permission only, before the shared freeze.
+\newcommand*\ulShowExplanation[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowExplanation\space is preamble-only}%
+      {Use \string\ulLocalShow{explanation}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@explanationpermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@explanationpermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshexplanation
+  \fi}
+
+% Translation prose is independent of notation and immutable variant identity.
+\newif\ifulsbs@translationpermission\ulsbs@translationpermissiontrue
+\newif\ifulsbs@translationrequest\ulsbs@translationrequesttrue
+\let\ifulShowTranslation\iftrue
+\newcommand*\ulsbs@effectivetranslationon{\let\ifulShowTranslation\iftrue}
+\newcommand*\ulsbs@refreshtranslation{%
+  \let\ifulShowTranslation\iffalse
+  \ifulsbs@translationpermission\ifulsbs@translationrequest
+    \ulsbs@effectivetranslationon
+  \fi\fi}
+% {true|false}: configure translation permission only, before the shared freeze.
+\newcommand*\ulShowTranslation[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowTranslation\space is preamble-only}%
+      {Use \string\ulLocalShow{translation}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@translationpermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@translationpermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshtranslation
+  \fi}
+
+% Feeler prose is independent of other prose, notation and variant identity.
+\newif\ifulsbs@feelerpermission\ulsbs@feelerpermissiontrue
+\newif\ifulsbs@feelerrequest\ulsbs@feelerrequesttrue
+\let\ifulShowFeeler\iftrue
+\newcommand*\ulsbs@effectivefeeleron{\let\ifulShowFeeler\iftrue}
+\newcommand*\ulsbs@refreshfeeler{%
+  \let\ifulShowFeeler\iffalse
+  \ifulsbs@feelerpermission\ifulsbs@feelerrequest
+    \ulsbs@effectivefeeleron
+  \fi\fi}
+% {true|false}: configure feeler permission only, before the shared freeze.
+\newcommand*\ulShowFeeler[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowFeeler\space is preamble-only}%
+      {Use \string\ulLocalShow{feeler}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@feelerpermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@feelerpermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshfeeler
+  \fi}
+
+% Standalone alternate-set permission is separate from inline chord visibility.
+% Rendering requires both effective features; inline \ac references are chord-only.
+\newif\ifulsbs@altchordpermission\ulsbs@altchordpermissiontrue
+\newif\ifulsbs@altchordrequest\ulsbs@altchordrequesttrue
+\let\ifulShowAltChords\iftrue
+\newcommand*\ulsbs@effectivealtchordson{\let\ifulShowAltChords\iftrue}
+\newcommand*\ulsbs@refreshaltchords{%
+  \let\ifulShowAltChords\iffalse
+  \ifulsbs@altchordpermission\ifulsbs@altchordrequest
+    \ulsbs@effectivealtchordson
+  \fi\fi}
+% {true|false}: configure alternate-set permission only, before the shared freeze.
+\newcommand*\ulShowAltChords[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowAltChords\space is preamble-only}%
+      {Use \string\ulLocalShow{altchords}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@altchordpermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@altchordpermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshaltchords
+  \fi}
+
+% Toggle transposing alternate chord sets with the current \transpose factor.
+% This is disabled by default because alternate sets usually represent chords
+% in a different key and should remain unchanged when the main chords move.
+\ulsbs@newbool\ifulTransposeAltChords\ulsbs@transposealtchordstrue\ulsbs@transposealtchordsfalse\ulTransposeAltChords\ulsbs@transposealtchordsfalse
+
+% Toggle appending the (optional) chapter image or symbol appended to the
+% chapter name wherever it shows up, e.g. in TOC and page headers. The image is
+% never shown in PDF index though, as only characters are supported there.
+\newif\ifulsbs@imageinchapternamepermission\ulsbs@imageinchapternamepermissiontrue
+\newif\ifulsbs@imageinchapternamerequest\ulsbs@imageinchapternamerequesttrue
+\let\ifulShowImageInChapterName\iftrue
+\newcommand*\ulsbs@effectiveimageinchapternameon{\let\ifulShowImageInChapterName\iftrue}
+\newcommand*\ulsbs@refreshimageinchaptername{%
+  \let\ifulShowImageInChapterName\iffalse
+  \ifulsbs@imageinchapternamepermission\ifulsbs@imageinchapternamerequest
+    \ulsbs@effectiveimageinchapternameon
+  \fi\fi}
+\newcommand*\ulShowImageInChapterName[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowImageInChapterName\space is preamble-only}%
+      {Use \string\ulLocalShow{imageinchaptername}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@imageinchapternamepermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@imageinchapternamepermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshimageinchaptername
+  \fi}
+
+% Toggle showing the (optional) chapter image or symbol on the front page of
+% a chapter.
+\newif\ifulsbs@imageonchapterfrontpagepermission\ulsbs@imageonchapterfrontpagepermissiontrue
+\newif\ifulsbs@imageonchapterfrontpagerequest\ulsbs@imageonchapterfrontpagerequesttrue
+\let\ifulShowImageOnChapterFrontPage\iftrue
+\newcommand*\ulsbs@effectiveimageonchapterfrontpageon{\let\ifulShowImageOnChapterFrontPage\iftrue}
+\newcommand*\ulsbs@refreshimageonchapterfrontpage{%
+  \let\ifulShowImageOnChapterFrontPage\iffalse
+  \ifulsbs@imageonchapterfrontpagepermission\ifulsbs@imageonchapterfrontpagerequest
+    \ulsbs@effectiveimageonchapterfrontpageon
+  \fi\fi}
+\newcommand*\ulShowImageOnChapterFrontPage[1]{%
+  \ifulsbs@visibilityfrozen
+    \PackageError{ulsbs}{\string\ulShowImageOnChapterFrontPage\space is preamble-only}%
+      {Use \string\ulLocalShow{imageonchapterfrontpage}{true|false} in document scopes.}%
+  \else
+    \ifstrequal{#1}{true}{\ulsbs@imageonchapterfrontpagepermissiontrue}{%
+      \ifstrequal{#1}{false}{\ulsbs@imageonchapterfrontpagepermissionfalse}{%
+        \PackageError{ulsbs}{Invalid boolean value: #1}{Use true or false.}}}%
+    \ulsbs@refreshimageonchapterfrontpage
+  \fi}

@@ -1,0 +1,337 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Song IDs, position records, anchors, prelude metadata/metrics and audio keys.
+% This file is part of the 'ulsbs' package.
+%
+% Load: ulsbs.sty, after melody and before attached notes in the content phase.
+% Requires: PDF layer setup, registered variant presentation, final typography
+% and style, hyperref and keyval. The song owner consumes this state later.
+% State: owns the position output stream, engine-position adapters, anchor
+% deduplication, song metadata, prelude geometry and audio key values. Inherits
+% @ as a letter with no enclosing group; retains local probes and global IDs.
+% Begin/end-document hooks register now. Font initialization, title measurement
+% and em offsets execute eagerly here in their original font context. Public
+% providecommand prelude hooks can be defined before loading or renewed later,
+% but later changes do not rerun measurements. Allocated lengths use setlength;
+% per-song fields are populated by lifecycle keys. Audio capture preserves its
+% local active-accidental catcodes and defers key assignment until use.
+
+\ProvidesFile{ulsbs-song-metadata.code.tex}[ULSBS song metadata and prelude metrics]
+
+% === Song IDs, physical positions and PDF anchors ===
+
+% Machine-readable output file: <jobname>.ulsbs.psv
+\newwrite\ulsbs@idtopagefile
+
+% Cross-engine support for recording physical positions:
+% - pdfTeX:   \pdfsavepos / \pdflastypos (sp)
+% - LuaTeX:   \savepos    / \lastsavedpos (sp)
+\newif\ifulsbs@havepos
+\ulsbs@haveposfalse
+
+\begingroup
+  % Prefer pdfTeX-style primitives if available
+  \ifx\pdfsavepos\undefined
+  \else
+    \ifx\pdflastypos\undefined
+    \else
+      \global\ulsbs@havepostrue
+      \gdef\ulsbs@savepos{\pdfsavepos}%%
+      \gdef\ulsbs@lastypos{\pdflastypos}%%
+    \fi
+  \fi
+  % Fallback to LuaTeX primitives if pdfTeX ones are missing
+  \ifulsbs@havepos\else
+    \ifx\savepos\undefined
+    \else
+      \ifx\lastypos\undefined
+      \else
+        \global\ulsbs@havepostrue
+        \gdef\ulsbs@savepos{\savepos}%%
+        \gdef\ulsbs@lastypos{\lastypos}%%
+      \fi
+    \fi
+  \fi
+\endgroup
+
+% Open the output file when the document begins, and write a comment line(s)
+% describing content.
+\AtBeginDocument{%
+  \immediate\openout\ulsbs@idtopagefile=\jobname.ulsbs.psv
+  \write\ulsbs@idtopagefile{%
+    \string# ID-NR-PAGE-Y|<id>|<songnumber>|<page>|<y-pos(sp)>
+  }%
+}
+
+% Close the output file when the document ends.
+\AtEndDocument{%
+  \immediate\closeout\ulsbs@idtopagefile
+}
+
+% Write one line to the psv file: ID-NR-PAGE-Y|<id>|<songnumber>|<page>|<y-pos>
+% Note that \ulsbs@anchorbyid should be called before this command, as it
+% will create a deduplicated form of the song's id this macro uses if
+% available.
+\newcommand\ulsbs@writeidtopage{%
+  \ifx\ulSongId\@empty
+    % no id for this song -> write nothing
+  \else
+    \begingroup
+      % Use the resolved id (with possible -2, -3, ...) if available;
+      % fall back to \ulSongId if for some reason it wasn't set.
+      \edef\ulsbs@fileid{%
+        \ifx\ulsbs@idwithsuffix\relax
+          \ulSongId
+        \else
+          \ulsbs@idwithsuffix
+        \fi
+      }%
+      % Freeze id and songnum *now*; delay \thepage (and y-pos) to shipout
+      \edef\ulsbs@tmp{%
+        \write\ulsbs@idtopagefile{%
+          ID-NR-PAGE-Y|\ulsbs@fileid|\theulSongNumber|\noexpand\thepage%
+          \ifulsbs@havepos
+            |\noexpand\the\ulsbs@lastypos%
+          \fi
+        }%
+      }%
+      % Asynchronous write: expands \thepage and y-pos at shipout
+      \ulsbs@tmp
+    \endgroup
+  \fi
+}
+
+% Invisible anchor for each song, based on \ulSongId
+% If the same \ulSongId occurs multiple times, the first gets
+%   songid:<id>
+% and later ones get
+%   songid:<id>-2, songid:<id>-3, ...
+% This deduplication is done for the anchors only, not for the PSV file
+% written by \ulsbs@writeidtopage
+\newcommand\ulsbs@anchorbyid{%
+  \ifx\ulSongId\@empty
+    % no id for this song -> no anchor, no file id
+  \else
+    % Always compute a unique id (even without hyperref), and store it in
+    % \ulsbs@idwithsuffix (e.g., 'forca-da-cura-a4fe5a', 'forca-da-cura-a4fe5a-2', ...)
+    % and \ulsbs@anchorname (e.g., 'songid:<id[-n]>').
+    \begingroup
+      \edef\ulsbs@id{\ulSongId}%
+      % Check whether we've seen this id before
+      \expandafter\ifx\csname ulsbs@seen@\ulsbs@id\endcsname\relax
+        % First occurrence: remember it as 1, no suffix
+        \expandafter\xdef\csname ulsbs@seen@\ulsbs@id\endcsname{1}%
+        \xdef\ulsbs@idwithsuffix{\ulsbs@id}%
+      \else
+        % Later occurrence: increment counter and add -<n> suffix
+        \expandafter\xdef\csname ulsbs@seen@\ulsbs@id\endcsname{%
+          \number\numexpr\csname ulsbs@seen@\ulsbs@id\endcsname+1\relax}%
+        \xdef\ulsbs@idwithsuffix{\ulsbs@id-\csname ulsbs@seen@\ulsbs@id\endcsname}%
+      \fi
+      \xdef\ulsbs@anchorname{songid:\ulsbs@idwithsuffix}%
+    \endgroup
+    % Only if hyperref's hypertarget is available, create the actual anchor
+    \ifx\hypertarget\undefined\else
+      \ifx\hypertarget\relax\else
+        % Record current position (for y-offset) if available
+        \ifulsbs@havepos
+          \ulsbs@savepos
+        \fi
+        \hypertarget{\ulsbs@anchorname}{}%
+      \fi
+    \fi
+  \fi
+}
+
+% The song lifecycle calls the anchor before writing its page record.
+
+% To set this for a song, use the optional id={} parameter for \beginsong.
+% NOTE: Id's are to consist only of lowercase letters, numbers and a dash.
+% Recommended format: song's main title sluggified, spaces converted to dashes,
+%                     followed by 6-char random string.
+% Example:
+%   \beginsong{Força da Cura}[id={forca-da-cura-a4fe5a}]
+%
+\newcommand{\ulSongId}{}
+
+
+% === Prelude metadata and measurements ===
+% Font/text providecommand defaults remain beside their prelude consumers:
+% define before loading or renew afterward. They expand during prelude building.
+% The measurements below execute now; changing font hooks later does not repeat
+% them. Preserve their order and font context even when reorganizing defaults.
+
+% Shared row/sample font and per-field style defaults follow registered
+% presentation, not visibility or mutable legacy identity. Authored hooks win.
+\providecommand{\ulPreludeBadgeFont}{\ulsbs@variantbadgefont\normalfont}
+
+% Tag-list style, applied inside the tag block; lyric presentation defaults gray.
+\providecommand{\ulPreludeTagStyle}{\ulsbs@variantbadgestyle}
+
+% Text style for the key line in the prelude, meant for changing the font
+% and size -- colors, italics and bolds are set implicitly. Can be set before
+% including this file.
+\providecommand{\ulPreludeKeyLineStyle}{\ulsbs@variantbadgestyle}
+
+\providecommand{\ulPreludePhaseStyle}{\ulsbs@variantbadgestyle}
+
+% Support for "offered to" information, used in astral books. This is displayed
+% after the by field in the song prelude, prepended with "offered to:" text and
+% parenthesized.
+% To disable displaying this extra info in the song preludes for the whole
+% document, set \ulShowOfferedTo{false} in the main document preamble (after including
+% this package).
+% To set this for a song, use the optional off={} parameter for \beginsong.
+\newcommand{\ulOfferedTo}{}
+
+
+% Support for extra song information. The extra information can be used for
+% example to contain information about song origins or language.
+% To disable displaying this extra info in the song preludes for the whole
+% document, set \ulShowExtraInfo{false} in the main document preamble (after including
+% this package).
+% To set this for a song, use the optional ex={} parameter for \beginsong.
+\newcommand{\ulExtraInfo}{}
+
+
+% Support for key information. This key is supposed to hold the musical key
+% (for example "C" or "Am" without quotes) of the song, after transposing.
+% So remember to change this if you transpose.
+% To enable displaying these keys in the song preludes for the whole
+% document, set \ulShowKey{true} in the main document preamble (after including
+% this package).
+% To set this for a song, use the optional key={} parameter for \beginsong.
+\newcommand{\ulSongKey}{}
+
+
+% Texts for key info in prelude. Can be set before including this file.
+\providecommand{\ulPreludeTextKey}{\ulIfLanguage{portuguese}{Tom:}{Key:}}
+
+
+
+\providecommand{\ulPreludeTextGoodKeysAlone}{\ulIfLanguage{portuguese}{Boas tons:}{Good keys:}}
+
+% Support for a list of good keys (range) for a song. This keyval is supposed
+% to hold the good (for singing) keys this song to be played in.
+%
+% To set this for a song, use the optional gk={} parameter for \beginsong.
+% The preferred format for this text is {X, Y--Z}, where X is the preferred
+% "best" key, and the Y--Z is the range of keys where the melody stays within
+% a range limited by G note in the low end, and the B note of the next octave
+% in the high end. Example: gk={Bm, Gm--Cm}. If such a range is impossible,
+% put the keys in the range in parenthesis.
+%
+% The good keys list is displayed in the song preamble. To disable displaying
+% this for the whole document, set \ulShowGoodKeys{false} in the main document
+% preamble (after including this package).
+\newcommand{\ulGoodKeys}{}
+
+
+
+% Support for phase hints for songs.
+% To disable displaying these phases in the song preludes for the whole
+% document, set \ulShowPhase{false} in the main document preamble (after including
+% this package).
+% To set this for a song, use the optional ph={} parameter for \beginsong.
+\newcommand{\ulPhaseList}{}%
+
+
+% Tag metadata
+
+% Support for tags for songs.
+% To disable displaying the tags in the song preludes for the whole
+% document, set \ulShowTags{false} in the main document preamble (after including
+% this package).
+% To set these for a song, use the optional tags={} parameter for \beginsong.
+% An example: \beginsong{Songname}[tags={fire, water}]. Valid tags are defined
+% in 'include/tags.txt', or the file selected with \ulTagFile in the preamble.
+
+\newcommand{\ulTagList}{}% defined below for each song
+
+
+% Prelude font initialization and geometry used by the song renderer.
+
+% Initialize the number printer's fonts without retaining an unused height.
+\begingroup\settoheight\@tempdima{\ulPrintSongNumber{1}}\endgroup
+% Title height with default letters (no accented capitals), used in \ulMakePrelude.
+\newlength\ulSongTitleDefaultHeight
+\settoheight\ulSongTitleDefaultHeight{\ulSongTitleFont\relax Tih}
+
+% Load-time offsets for the prelude's right-side metadata box, relative to the
+% main-title baseline. These em dimensions capture the current font here;
+% measuring the title above does not select its font for these assignments.
+\newdimen{\ulsbs@preludeRTfirstraise}\setlength{\ulsbs@preludeRTfirstraise}{1.03em}%
+\newdimen{\ulsbs@preludeRTsecondraise}\setlength{\ulsbs@preludeRTsecondraise}{0pt}%
+\newdimen{\ulsbs@preludeRTthirdraise}\setlength{\ulsbs@preludeRTthirdraise}{-1.03em}%
+\newdimen{\ulsbs@preludeRTfourthraise}\setlength{\ulsbs@preludeRTfourthraise}{-2.06em}%
+
+% The UI point remains available without badges. These discarded boxes measure
+% enabled, nonempty badges' possible top edge; the marker never reserves space.
+% Hidden/absent badges must not execute their display hooks even for this sample.
+\newcommand{\ulsbs@pdfheaderanchor}{%
+  \ifulsbs@pdflayers\ifx\ulsbs@pdfpreludesongid\@empty\else
+    \begingroup
+    \dimen@=0pt
+    \ifulShowKey\ifx\ulSongKey\@empty\else
+      \sbox\ulsbs@pdfanchorbox{{\ulPreludeBadgeFont\ulPreludeKeyLineStyle
+        \ulsbs@mainkeybox{\symudarrow\textbf{\ulsbs@vphantommaxtext}}}}%
+      \dimen@=\ht\ulsbs@pdfanchorbox
+    \fi\fi
+    \ifulShowTags\ifx\ulTagList\@empty\else
+      \sbox\ulsbs@pdfanchorbox{{\ulPreludeBadgeFont\itshape\ulPreludeTagStyle
+        \ulsbs@tagsbox{\ulsbs@vphantommaxtext}}}%
+      \ifdim\ht\ulsbs@pdfanchorbox>\dimen@\dimen@=\ht\ulsbs@pdfanchorbox\fi
+    \fi\fi
+    \ifulShowPhase\ifx\ulPhaseList\@empty\else
+      \sbox\ulsbs@pdfanchorbox{{\ulPreludeBadgeFont\rmfamily\ulPreludePhaseStyle
+        \ulsbs@tagsbox{\ulsbs@vphantommaxtext}}}%
+      \ifdim\ht\ulsbs@pdfanchorbox>\dimen@\dimen@=\ht\ulsbs@pdfanchorbox\fi
+    \fi\fi
+    \makebox[0pt][l]{\raisebox{\dimexpr\ulsbs@preludeRTfirstraise+\dimen@\relax}[0pt][0pt]{%
+      \kern2bp%
+      \ifulsbs@havepos\ulsbs@savepos\fi
+      \edef\ulsbs@pdfanchorcode{\noexpand\latelua{
+        ulsbs_multikey.anchor("\ulsbs@pdfpreludesongid")}}%
+      \ulsbs@pdfanchorcode
+    }}%
+    \endgroup
+  \fi\fi
+}
+
+% === Audio metadata ===
+
+% Audio system is used to set URL's for audio for songs and chapters. These
+% will be utilized in the future.
+
+% keyval: Setup keys to be used as \audio macro's argument:
+\define@key{audio}{title}{\def\ulsbs@audio@title{#1}}%
+\define@key{audio}{key}{\def\ulsbs@audio@key{#1}}%
+\define@key{audio}{pitch}{\def\ulsbs@audio@pitch{#1}}%
+\setkeys{audio}{title={},key={},pitch={440}}%
+
+% Use this command to set a URL link to audio for the current song or chapter.
+% Must be called within a song or a chapter. Multiple \audio definitions can be
+% set for each song/chapter; the first is the primary one. Mandatory argument
+% is the URL, and the preceding optional argument contains keyval pairs,
+% currently supported keys are 'title', 'key' and 'pitch'. Pitch is the
+% frequency of A (default: 440).
+% In the URL, TeX special characters must be escaped as usual. The key value
+% accepts # and & as sharp and flat accidentals.
+
+%
+% Example: \audio[title={Good version},key={C#m}]{https://link-to-audio.com}
+% Delay argument collection so raw accidentals are tokenized like chord input.
+\newcommand{\audio}{%
+  \begingroup%
+  \catcode`\#\active\catcode`\&\active%
+  \ulsbs@audio%
+}
+\newcommand{\ulsbs@audio}[2][]{%
+  \endgroup%
+  \setkeys{audio}{#1}% Set new keys
+  % Access title with: \ulsbs@audio@title,
+  %          key with: \ulsbs@audio@key,
+  %        pitch with: \ulsbs@audio@pitch,
+  %          URL with: #2
+}

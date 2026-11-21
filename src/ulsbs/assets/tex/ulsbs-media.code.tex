@@ -1,0 +1,129 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Score graphics fitting, lazy score blocks and general image helpers.
+% This file is part of the 'ulsbs' package.
+%
+% Load: ulsbs.sty, after prose and before melody in the song-content phase.
+% Requires: graphicx, xstring, xparse, expl3, file hooks and book visibility
+% policy. Layout installs block-start/fill implementations before runtime use.
+% State: owns score boxes, argument tokens, scoped graphics interception flags
+% and the image-width scratch dimension. Inherits @ as a letter with no wrapper
+% group; generated systems files alone receive the original graphics groups.
+% File hooks are registered now, in order; image widths and score fitting are
+% resolved at use time. Public image arguments retain their existing defaults;
+% whole-score display permission is read lazily, without evaluating hidden bodies.
+
+\ProvidesFile{ulsbs-media.code.tex}[ULSBS score graphics and images]
+
+% Generated system files own score graphics, including bare lilypondfile output.
+% Keep the graphics override local; unrelated images retain graphicx's behavior.
+\ExplSyntaxOn
+\box_new:N \l__ulsbs_score_graphic_box
+\tl_new:N \l__ulsbs_score_graphic_args_tl
+\bool_new:N \l__ulsbs_score_graphics_active_bool
+\bool_new:N \l__ulsbs_score_graphics_raw_bool
+% Shrink retained score boxes uniformly only when wider than the current line.
+% Layered callers fit alternatives first, keeping their scale policy unchanged.
+\cs_new_protected:Npn \__ulsbs_score_emit:N #1
+  {\dim_compare:nNnT {\dim_min:nn {\linewidth}{\hsize}}>{0pt}
+    {\dim_compare:nNnT {\box_wd:N #1}>{\dim_min:nn {\linewidth}{\hsize}}
+      {\box_resize_to_wd:Nn #1 {\dim_min:nn {\linewidth}{\hsize}}}}
+   \leavevmode\box_use_drop:N #1}
+\cs_new_protected:Npn \__ulsbs_score_graphic:n #1
+  {\group_begin:
+   \bool_set_true:N \l__ulsbs_score_graphics_raw_bool
+   \hbox_set:Nn \l__ulsbs_score_graphic_box {\includegraphics{#1}}
+   \__ulsbs_score_emit:N \l__ulsbs_score_graphic_box
+   \group_end:}
+\cs_new_eq:NN \ulsbs@scoregraphic \__ulsbs_score_graphic:n
+\NewDocumentCommand \__ulsbs_score_includegraphics {s o o m}
+  {\group_begin:
+   \tl_clear:N \l__ulsbs_score_graphic_args_tl
+   \IfBooleanT{#1}{\tl_put_right:Nn \l__ulsbs_score_graphic_args_tl {*}}
+   \IfValueT{#2}{\tl_put_right:Nn \l__ulsbs_score_graphic_args_tl {[#2]}}
+   \IfValueT{#3}{\tl_put_right:Nn \l__ulsbs_score_graphic_args_tl {[#3]}}
+   \tl_put_right:Nn \l__ulsbs_score_graphic_args_tl {{#4}}
+   \bool_if:NTF \l__ulsbs_score_graphics_raw_bool
+     {\exp_after:wN \__ulsbs_score_raw_graphics: \l__ulsbs_score_graphic_args_tl}
+     {\hbox_set:Nn \l__ulsbs_score_graphic_box
+       {\exp_after:wN \__ulsbs_score_raw_graphics: \l__ulsbs_score_graphic_args_tl}
+      \__ulsbs_score_emit:N \l__ulsbs_score_graphic_box}
+   \group_end:}
+\cs_new_protected:Npn \__ulsbs_score_graphics_begin:
+  {\group_begin:
+   \bool_if:NF \l__ulsbs_score_graphics_active_bool
+     {\bool_set_true:N \l__ulsbs_score_graphics_active_bool
+      \cs_set_eq:NN \__ulsbs_score_raw_graphics: \includegraphics
+      \cs_set_eq:NN \includegraphics \__ulsbs_score_includegraphics}}
+\cs_new_protected:Npn \__ulsbs_score_file:n #1
+  {\exp_args:Nne \regex_match:nnT {-systems\.tex\Z}{\CurrentFile}{#1}}
+\AddToHook{file/before}{\__ulsbs_score_file:n {\__ulsbs_score_graphics_begin:}}
+\AddToHook{file/after}{\__ulsbs_score_file:n {\group_end:}}
+\ExplSyntaxOff
+
+% Whole-score display gate, after LilyPond preprocessing. Capture without expansion
+% and guard lazily: hidden bodies never start blocks, request layers or change fill.
+% Unlike environ's cleanup stream, +b keeps unmatched hidden conditionals opaque.
+\ExplSyntaxOn
+\NewDocumentEnvironment {lilywrap} {+b}
+  {\legacy_if:nT {ulShowLilypond}
+    {\ulEndSongVfill{true}\ulsbs@blockstart #1}}
+  {\ignorespacesafterend}
+\ExplSyntaxOff
+
+% === Images inside and outside songs ===
+
+% \image?? macros include an image here. It is scaled so that its width is
+% a power of golden ratio conjugate of \linewidth. The optional parameter is
+% the power [0..7] and if not given, defaults to 1. Value 0 will scale the
+% image to maximum size, so its width is \linewidth. The mandatory parameter
+% is the image file name without path. Put the image in content/img (or other
+% path configured through \graphicspath). These commands can be used within and
+% outside of songs.
+%
+%   - \imagel puts the image exactly at the current position
+%   - \imager pushes the image to the right
+%   - \imagec centers the image horizontally
+%   - \imagecc centers the image horizontally and vertically
+%   - \imagecb centers the image horizontally and pushes it to the bottom of the page
+%   - \imagelc centers the image vertically
+%   - \imagerc pushes the image to the right and centers it vertically
+%   - \imagerb pushes the image to the right and bottom of page
+%
+% Example: \imagecc[2]{nicepic.png}
+%   This scales the image width to 0.618034^2 * \linewidth and centers it both
+%   horizontally and vertically in the space available.
+
+\newcommand{\imagel}[2][1]{%
+  \ulsbs@setgrcwidth[#1]%
+  \includegraphics[width=\ulsbs@grcwidth]{#2}%
+}
+
+\newcommand{\imager}[2][1]{%
+  \hfill\imagel[#1]{#2}%
+}
+
+\newcommand{\imagec}[2][1]{%
+  \begin{center}%
+    \imagel[#1]{#2}%
+  \end{center}%
+}
+
+\newdimen\ulsbs@grcwidth% Set by \ulsbs@setgrcwidth and used in \imagel.
+
+% Sets \ulsbs@grcwidth to hold a power of golden ratio conjugate (0.618034^n)
+% Optional parameter (given within []) is the exponent as integer in
+% [0..7] and if omitted, defaults to 1.
+% Used in \imagel.
+% Keep this fixed scale table in sync with the documented exponent range.
+\newcommand{\ulsbs@setgrcwidth}[1][1]{%
+  \IfEq{#1}{0}{\setlength\ulsbs@grcwidth{1\linewidth}}{}% 1
+  \IfEq{#1}{1}{\setlength\ulsbs@grcwidth{.618034\linewidth}}{}% 0.618034
+  \IfEq{#1}{2}{\setlength\ulsbs@grcwidth{.381966\linewidth}}{}% 0.618034^2
+  \IfEq{#1}{3}{\setlength\ulsbs@grcwidth{.236067\linewidth}}{}% 0.618034^3
+  \IfEq{#1}{4}{\setlength\ulsbs@grcwidth{.145898\linewidth}}{}% 0.618034^4
+  \IfEq{#1}{5}{\setlength\ulsbs@grcwidth{.090169\linewidth}}{}% 0.618034^5
+  \IfEq{#1}{6}{\setlength\ulsbs@grcwidth{.055728\linewidth}}{}% 0.618034^6
+  \IfEq{#1}{7}{\setlength\ulsbs@grcwidth{.034441\linewidth}}{}% 0.618034^7
+}

@@ -25,11 +25,21 @@ COMPANIONS = (
     "ulsbs-package-defaults.code.tex",
     "ulsbs-init.code.tex",
     "ulsbs-book-defaults.code.tex",
+    "ulsbs-visibility.code.tex",
     "ulsbs-style.code.tex",
     "ulsbs-pdf-layer-setup.code.tex",
     "ulsbs-utilities.code.tex",
     "ulsbs-typography.code.tex",
     "ulsbs-frontmatter.code.tex",
+    "ulsbs-song-helpers.code.tex",
+    "ulsbs-prose.code.tex",
+    "ulsbs-media.code.tex",
+    "ulsbs-melody.code.tex",
+    "ulsbs-song-metadata.code.tex",
+    "ulsbs-notes.code.tex",
+    "ulsbs-repeats.code.tex",
+    "ulsbs-repeats.lua",
+    "ulsbs-spacing.code.tex",
     "ulsbs-boolmap.code.tex",
     "ulsbs-chapter-marks.code.tex",
     "ulsbs-multikey.lua",
@@ -59,6 +69,14 @@ def assert_package_license(check, names):
 
 
 class RuntimeIsolationTests(unittest.TestCase):
+    def test_companion_inventory_covers_private_tex_and_lua_modules(self):
+        # The packaging smoke must exercise every private module, including new
+        # extractions, rather than silently omitting an unlisted resource.
+        modules = {path.name for path in TEX_ASSETS.iterdir()
+                   if path.name.endswith(".code.tex") or path.suffix == ".lua"}
+        self.assertEqual(modules, set(COMPANIONS) | set(VARIANT_PRESETS)
+                         | {"ulsbs-score-layers.lua"})
+
     def test_l3build_source_and_install_patterns_cover_companions(self):
         config = (ROOT / "build.lua").read_text()
         companions = [path for path in TEX_ASSETS.iterdir()
@@ -149,7 +167,7 @@ class ModuleEngineTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout)
                 self.assertTrue(pdf, result.stdout)
                 required = {name for name in COMPANIONS if name.endswith(".code.tex")}
-                required.update(("expl3.sty", "ulsbs-layout.lua"))
+                required.update(("expl3.sty", "ulsbs-layout.lua", "ulsbs-repeats.lua"))
                 self.assertTrue(required.issubset(loaded), loaded)
 
     def test_variants_preserve_source_effects(self) -> None:

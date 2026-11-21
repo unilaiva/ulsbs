@@ -1,0 +1,186 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Bar geometry and verse-spacing setters, validation and initial policy calls.
+% This file is part of the 'ulsbs' package.
+%
+% Load: ulsbs-repeats.code.tex, after repeat dimensions and before repeat state.
+% Requires: initialized verse-separation storage, final lyric/verse font hooks,
+% xparse and expl3. Music-context synchronization is conditional until the late
+% music owner installs it; Lua consumers snapshot expanded numeric macros.
+% State: owns validated bar/verse policy macros, scalar/dimension scratch state
+% and nominal baseline glue. Inherits @ as a letter without a wrapper group;
+% retains the complete original expl3 span and setter-local measurement group.
+% Default calls execute eagerly here, in order. Verse setters expand expressions
+% once in the configured lyric font and freeze resolved skips; later font changes
+% do not rescale them. Public setters are scoped and must follow custom font
+% configuration. ulVerseSpacingScale reads the stored scalar policy, not glue.
+
+\ProvidesFile{ulsbs-spacing.code.tex}[ULSBS bar policy and verse spacing]
+
+% Verse-left bar policy. Store expanded numbers, not registers or expressions:
+% the line builder snapshots these local values with token.get_macro.
+\ExplSyntaxOn
+\tl_new:N \l__ulsbs_bar_value_tl
+\seq_new:N \l__ulsbs_bar_dimension_seq
+\cs_generate_variant:Nn \regex_match:nnTF {nV}
+\cs_generate_variant:Nn \regex_extract_once:nnNTF {nV}
+\cs_new_protected:Npn \__ulsbs_bar_error:n #1
+  {\PackageError{ulsbs}{Invalid~bar~setting:~#1}
+    {Use~N=0..3,~L=0..N,~finite~nonnegative~scales,~a~boolean,~or~a~nonnegative~dimension.}}
+\prg_new_protected_conditional:Npnn \__ulsbs_bar_scalar:n #1 {TF}
+  {
+    \tl_set:Nx \l__ulsbs_bar_value_tl {#1}
+    \regex_match:nVTF
+      {\A\s*[+\-]?(\d+(\.\d*)?|\.\d+)([eE][+\-]?\d+)?\s*\Z}
+      \l__ulsbs_bar_value_tl
+      % Keep normalized values finite when the Lua consumer reads a double.
+      {\fp_compare:nTF {0 <= (\l__ulsbs_bar_value_tl) <= 1.797693134862315e308}
+        {\prg_return_true:}{\prg_return_false:}}
+      {\prg_return_false:}
+  }
+\cs_new_protected:Npn \__ulsbs_bar_top:nnnn #1#2#3#4
+  {
+    \tl_set:Nx \l__ulsbs_bar_value_tl {#2}
+    \regex_match:nVTF {\A\s*\+?0*[0-3]\s*\Z} \l__ulsbs_bar_value_tl
+      {
+        \tl_set:Nx \l__ulsbs_bar_value_tl {#3}
+        \regex_match:nVTF {\A\s*\+?0*[0-3]\s*\Z} \l__ulsbs_bar_value_tl
+          {\int_compare:nNnTF {#3} > {#2}
+            {\__ulsbs_bar_error:n {#1~top~level~must~not~exceed~N}}
+            {\__ulsbs_bar_scalar:nTF {#4}
+              {
+                \cs_set:cpx {ulsbs@#1@level@\int_eval:n{#2}} {\int_eval:n{#3}}
+                \cs_set:cpx {ulsbs@#1@scale@\int_eval:n{#2}} {\fp_to_decimal:n{#4}}
+              }
+              {\__ulsbs_bar_error:n {#1~top~scale~must~be~finite~and~nonnegative}}}}
+          {\__ulsbs_bar_error:n {#1~top~level~must~be~an~integer~0..N}}
+      }
+      {\__ulsbs_bar_error:n {#1~top~N~must~be~an~integer~0..3}}
+    \cs_if_exist:NT \__ulsbs_music_context: {\__ulsbs_music_context:}
+  }
+\NewDocumentCommand \ulMeasureBarTop {mmm}
+  {\__ulsbs_bar_top:nnnn {measure}{#1}{#2}{#3}}
+\NewDocumentCommand \ulRepeatBarTop {mmm}
+  {\__ulsbs_bar_top:nnnn {repeat}{#1}{#2}{#3}}
+\NewDocumentCommand \ulUseVerseAnnotationMinimum {m}
+  {
+    \tl_set:Nx \l__ulsbs_bar_value_tl {\str_lowercase:f {#1}}
+    \tl_trim_spaces:N \l__ulsbs_bar_value_tl
+    \str_case:VnF \l__ulsbs_bar_value_tl
+      {{true}{\cs_set:cpn {ulsbs@bar@verseminimum}{1}}
+       {yes}{\cs_set:cpn {ulsbs@bar@verseminimum}{1}}
+       {on}{\cs_set:cpn {ulsbs@bar@verseminimum}{1}}
+       {1}{\cs_set:cpn {ulsbs@bar@verseminimum}{1}}
+       {false}{\cs_set:cpn {ulsbs@bar@verseminimum}{0}}
+       {no}{\cs_set:cpn {ulsbs@bar@verseminimum}{0}}
+       {off}{\cs_set:cpn {ulsbs@bar@verseminimum}{0}}
+       {0}{\cs_set:cpn {ulsbs@bar@verseminimum}{0}}}
+      {\__ulsbs_bar_error:n {verse~annotation~minimum~must~be~boolean}}
+    \cs_if_exist:NT \__ulsbs_music_context: {\__ulsbs_music_context:}
+  }
+\NewDocumentCommand \ulRepeatBarBottomScale {m}
+  {\__ulsbs_bar_scalar:nTF {#1}
+    {\cs_set:cpx {ulsbs@repeat@bottomscale}{\fp_to_decimal:n{#1}}}
+    {\__ulsbs_bar_error:n {repeat~bottom~scale~must~be~finite~and~nonnegative}}
+    \cs_if_exist:NT \__ulsbs_music_context: {\__ulsbs_music_context:}}
+\cs_new_protected:Npn \__ulsbs_bar_dimension:nnn #1#2#3
+  {
+    \tl_set:Nx \l__ulsbs_bar_value_tl {#1}
+    \regex_match:nVTF {\A\s*[+\-]?0+(\.0*)?\s*\Z} \l__ulsbs_bar_value_tl
+      {\cs_set:cpn {#2}{0}}
+      {
+        \regex_extract_once:nVNTF
+          {\A\s*([+\-]?(\d+(\.\d*)?|\.\d+))\s*(pt|pc|in|bp|cm|mm|dd|cc|sp|em|ex)\s*\Z}
+          \l__ulsbs_bar_value_tl \l__ulsbs_bar_dimension_seq
+          {
+            % Check the TeX dimension limit before conversion, including in nonstop mode.
+            \fp_compare:nTF
+              {0 <= (\seq_item:Nn \l__ulsbs_bar_dimension_seq {2}) <=
+                1073741823 / (65536 * \dim_to_fp:n {1\seq_item:Nn \l__ulsbs_bar_dimension_seq {5}})}
+              {\cs_set:cpx {#2}{\dim_to_decimal_in_sp:n{#1}}}
+              {\__ulsbs_bar_error:n {#3~minimum~gap~must~be~nonnegative~and~within~TeX's~dimension~limit}}
+          }
+          {\__ulsbs_bar_error:n {#3~minimum~gap~requires~a~number~and~dimension~unit}}
+      }
+    \cs_if_exist:NT \__ulsbs_music_context: {\__ulsbs_music_context:}
+  }
+\NewDocumentCommand \ulRepeatBarMinimumGap {m}
+  {\__ulsbs_bar_dimension:nnn {#1}{ulsbs@repeat@minimumgap}{repeat}}
+
+% Resolve scalar glue once, at the call site, against the configured lyric font.
+% Call these setters after custom font configuration; later font changes do not
+% rescale the skips, and lyric/source material is never evaluated here. Argument
+% expressions expand once inside that font context, before validation or writes.
+\skip_new:N \l__ulsbs_verse_nominal_skip
+\cs_new_protected:Npn \__ulsbs_verse_error:n #1
+  {\PackageError{ulsbs}{Invalid~verse~setting:~#1}
+    {Use~three~finite~nonnegative~scales~whose~resolved~dimensions~fit~TeX's~dimension~limit.}}
+\cs_new_protected:Npn \__ulsbs_verse_spacing:nnnn #1#2#3#4
+  {
+    \group_begin:
+      \ulLyricFontStyle\ulVerseFont\relax
+      \use:x {\group_end:
+        \__ulsbs_verse_spacing_apply:nnnnn {#1}{#2}{#3}{#4}
+          {\dim_eval:n {\tex_fontcharht:D \tex_font:D `A}}}
+  }
+\cs_new_protected:Npn \__ulsbs_verse_spacing_apply:nnnnn #1#2#3#4#5
+  {
+    \__ulsbs_bar_scalar:nTF {#2}
+      {\__ulsbs_bar_scalar:nTF {#3}
+        {\__ulsbs_bar_scalar:nTF {#4}
+          {
+            \fp_compare:nTF
+              {max(#2,#3,#4) * \dim_to_fp:n {#5}
+                <= 1073741823 / 65536}
+              {
+                \cs_set:cpx {ulsbs@verse@#1@natural}{\fp_to_decimal:n {#2}}
+                \cs_set:cpx {ulsbs@verse@#1@stretch}{\fp_to_decimal:n {#3}}
+                \cs_set:cpx {ulsbs@verse@#1@shrink}{\fp_to_decimal:n {#4}}
+                \skip_set:cn {\str_if_eq:nnTF {#1}{baseline}
+                    {l__ulsbs_verse_nominal_skip}{ulsbs@verse@separation}}
+                  {\fp_to_dim:n {#2 * \dim_to_fp:n {#5}}
+                    plus \fp_to_dim:n {#3 * \dim_to_fp:n {#5}}
+                    minus \fp_to_dim:n {#4 * \dim_to_fp:n {#5}}}
+              }
+              {\__ulsbs_verse_error:n {#1~glue~exceeds~TeX's~dimension~limit}}
+          }
+          {\__ulsbs_verse_error:n {#1~shrink~must~be~finite~and~nonnegative}}}
+        {\__ulsbs_verse_error:n {#1~stretch~must~be~finite~and~nonnegative}}}
+      {\__ulsbs_verse_error:n {#1~natural~must~be~finite~and~nonnegative}}
+    \cs_if_exist:NT \__ulsbs_music_context: {\__ulsbs_music_context:}
+  }
+\NewDocumentCommand \ulVerseBaseline {mmm}
+  {\__ulsbs_verse_spacing:nnnn {baseline}{#1}{#2}{#3}}
+\NewDocumentCommand \ulVerseSeparation {mmm}
+  {\__ulsbs_verse_spacing:nnnn {separation}{#1}{#2}{#3}}
+\NewDocumentCommand \ulVerseMinimumGap {m}
+  {\__ulsbs_bar_dimension:nnn {#1}{ulsbs@verse@minimumgap}{verse}}
+\msg_new:nnn {ulsbs}{verse-spacing-key}
+  {Invalid~verse~spacing~key~'#1'.~Use~baseline~or~separation,~then~natural,~stretch~or~shrink.}
+\cs_new:Npn \__ulsbs_verse_spacing_scale:nn #1#2
+  {\str_case:nnF {#2}
+    {{natural}{\use:c {ulsbs@verse@#1@natural}}
+     {stretch}{\use:c {ulsbs@verse@#1@stretch}}
+     {shrink}{\use:c {ulsbs@verse@#1@shrink}}}
+    {\msg_expandable_error:nnn {ulsbs}{verse-spacing-key}{#1/#2}}}
+\NewExpandableDocumentCommand \ulVerseSpacingScale {mm}
+  {\str_case:nnF {#1}
+    {{baseline}{\__ulsbs_verse_spacing_scale:nn {baseline}{#2}}
+     {separation}{\__ulsbs_verse_spacing_scale:nn {separation}{#2}}}
+    {\msg_expandable_error:nnn {ulsbs}{verse-spacing-key}{#1/#2}}}
+\ulMeasureBarTop{0}{0}{1.3}
+\ulMeasureBarTop{1}{1}{1.3}
+\ulMeasureBarTop{2}{2}{.85}
+\ulMeasureBarTop{3}{2}{.85}
+\ulRepeatBarTop{0}{0}{1.3}
+\ulRepeatBarTop{1}{1}{1.3}
+\ulRepeatBarTop{2}{2}{.85}
+\ulRepeatBarTop{3}{2}{.85}
+\ulUseVerseAnnotationMinimum{true}
+\ulRepeatBarBottomScale{.025}
+\ulRepeatBarMinimumGap{3pt}
+\ulVerseBaseline{1.618034}{0}{0}
+\ulVerseSeparation{1.618034}{0}{.4}
+\ulVerseMinimumGap{1.25pt}
+\ExplSyntaxOff

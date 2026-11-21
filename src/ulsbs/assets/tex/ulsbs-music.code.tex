@@ -7,7 +7,8 @@
 % Private module loaded after song/layout/verse/chords and common typography,
 % melody lexer/voice renderers, and repeat primitives. The early
 % ulsbs-pdf-layer-setup.code.tex module supplies PDF key tables and runtime seams;
-% ulsbs.sty orchestrates loading and supplies common melody/repeat helpers.
+% ulsbs.sty orchestrates loading; ulsbs-melody.code.tex and ulsbs-repeats.code.tex
+% supply the common melody/repeat helpers before runtime installation.
 % Chords owns source scanning and memory; this module supplies its single-box
 % annotation renderer. Multikey loads next and replaces the visual/text seams,
 % without taking ownership of semantic source execution or stanza layout.

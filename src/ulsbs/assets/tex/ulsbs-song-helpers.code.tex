@@ -1,0 +1,216 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Song navigation, indentation, alternate-chord declarations and lyric helpers.
+% This file is part of the 'ulsbs' package.
+%
+% Load: ulsbs.sty, immediately after front matter in the song-content phase.
+% Requires: typography, final style, book policy, xcolor, etoolbox and xparse.
+% State: owns alternate-chord color and capture declarations; inherits @ as a
+% letter without an enclosing group. Expl3 syntax switches remain local to
+% their original declaration spans. Color initialization executes on load;
+% song lifecycle code later resets it and the chord owner installs capture.
+% Verse spacing and translation state are supplied before document-time use.
+% Public providecommand style defaults may be defined before loading or renewed
+% afterward; styles and indentation dimensions are read when helpers are used.
+
+\ProvidesFile{ulsbs-song-helpers.code.tex}[ULSBS song and lyric helpers]
+
+% === Navigation and verse indentation helpers ===
+% Vertical spacing uses vspaceifnotinverse from the verse owner.
+\newcommand{\ulsbs@gotovspace}{.618034\baselineskip}
+
+% These commands will display some text followed by three dots, and aligned to
+% the right of the page. The idea is to use it as a signal for the reader to
+% go to a different part of the song, for example the chorus. You can use it
+% on the last line of a verse or between verses (in such a case it will be put
+% on its own line). The only parameter is to be the first words of the lyrics
+% to go to.
+%
+% There are four versions of the command, each taking different number of
+% parameters. It is recommended to use the one-parameter version \goto
+% and if needed, use it on consecutive lines to signal consecutive jumps.
+% But, if for space reasons it is deemed necessary, one can use the other
+% versions to squeeze more than one successive jump on one line.
+\newcommand{\goto}[1]{%
+  \hfill\ulsbs@gtctext{#1}\par%
+}%
+\newcommand{\gotoii}[2]{%
+  \vspaceifnotinverse{\ulsbs@gotovspace}%
+  \hfill\ulsbs@gtctext{#1} \ulsbs@gtctext{#2}\par%
+}
+\newcommand{\gotoiii}[3]{%
+  \vspaceifnotinverse{\ulsbs@gotovspace}%
+  \hfill\ulsbs@gtctext{#1} \ulsbs@gtctext{#2} \ulsbs@gtctext{#3}\par%
+}
+\newcommand{\gotoiv}[4]{%
+  \vspaceifnotinverse{\ulsbs@gotovspace}%
+  \hfill\ulsbs@gtctext{#1} \ulsbs@gtctext{#2} \ulsbs@gtctext{#3} \ulsbs@gtctext{#4}\par%
+}
+% Used by \goto?? commands:
+\newcommand{\ulsbs@gtctext}[1]{{\normalsize\bfseries{\ulSymbolTwoFont➞} \textit{#1}\ldots}}
+
+% This command will make a small horizontal space. Use this in the beginning
+% of each line you want to indent. The optional parameter specifies the indent
+% depth factor. The default is 1.
+%
+% To indent complete verses, use \beginverse[<n>] instead.
+\newcommand\ind[1][1]{%
+  \leavevmode\kern\dimexpr #1\ulVerseIndentWidth\relax%
+}
+
+% This command puts an arrow with a text "next song" above it to the end of
+% the current line. It is meant to be used on the last line of the last
+% verse, to suggest that one can continue playing the next song straight.
+\newcommand{\tonextsongmark}[0]{
+  \hfill%
+  \makebox[0pt][l]{\raisebox{1ex}{%
+    \tiny\textit{\ulIfLanguage{portuguese}{seguinte}{next song}}%
+  }}%
+  $\Longrightarrow$
+}
+
+
+% === Alternate chords ===
+% Initialize the color variable.
+\definecolor{ulsbs@currentaltchordcolor}{rgb}{0,0,0}%
+% Set default color to ulAltChordColorA, will also be reset to this at each
+% song's end.
+\colorlet{ulsbs@currentaltchordcolor}{ulAltChordColorA}%
+
+% Set the color for displaying alternate chords, given as a number 1..6.
+% The color will be reset to 1 at the beginning of the document, and at the
+% end of each song. Called from \ulsbs@altchordsid and the song lifecycle.
+\newcommand{\ulsbs@setaltchordscolor}[1]{%
+  \ifnum#1=1%
+    \xglobal\colorlet{ulsbs@currentaltchordcolor}{ulAltChordColorA}%
+  \fi%
+  \ifnum#1=2%
+    \xglobal\colorlet{ulsbs@currentaltchordcolor}{ulAltChordColorB}%
+  \fi%
+  \ifnum#1=3%
+    \xglobal\colorlet{ulsbs@currentaltchordcolor}{ulAltChordColorC}%
+  \fi%
+  \ifnum#1=4%
+    \xglobal\colorlet{ulsbs@currentaltchordcolor}{ulAltChordColorD}%
+  \fi%
+  \ifnum#1=5%
+    \xglobal\colorlet{ulsbs@currentaltchordcolor}{ulAltChordColorE}%
+  \fi%
+  \ifnum#1=6%
+    \xglobal\colorlet{ulsbs@currentaltchordcolor}{ulAltChordColorF}%
+  \fi%
+}
+
+% [set number]{id text}: visible IDs change the alternate-set color until the
+% song ends or another ID changes it. Hidden arguments must remain opaque, even
+% to TeX's conditional scanner, and must not change that persistent color.
+\ExplSyntaxOn
+\NewDocumentCommand \ulsbs@altchordsid {O{1} m}
+  {\bool_if:nT {\legacy_if_p:n {ulShowChords} && \legacy_if_p:n {ulShowAltChords}}
+   {
+    \ulsbs@setaltchordscolor{#1}%
+    \color{ulsbs@currentaltchordcolor}%
+    \tl_if_empty:nF {#2}{
+      \renewcommand\capo[1]{%
+        {\normalfont (capo~##1)}%
+      }%
+      \makebox[0pt][r]{\raisebox{3.75ex}[0pt][0pt]{%
+        \tiny%
+        \ulsbs@altchordidbox{\color{ulsbs@currentaltchordcolor}\normalfont\textbf{#2}:\ulsbs@vphantommaxtext}%
+      }}%
+    }
+   }}
+\ExplSyntaxOff
+
+% Consumer override: define this providecommand default before loading or renew
+% after loading. It is added to the normal chord style at each use.
+\providecommand{\ulAltChordsStyle}{%
+  \footnotesize\itshape%
+}
+
+\ExplSyntaxOn
+% True if within \altchords parameter
+\bool_new:N \l__ulsbs_chord_in_altchords_bool
+
+
+% Meant to be used at the end of a lyric line to specify an alternate set
+% of chords for that line to be displayed floated to the right of the line
+% in question. Do NOT set chords with \[] macro inside this, as it would mess
+% with the chord repeats etc. Instead use plain text for chord names. They are
+% transposed only when \ulTransposeAltChords{true} is set. Not displayed on books
+% without chords. Only place bar lines, plain text, \id, \ac, \notrans and \e
+% within the parameter. Sharps and flats may be written as # and &, or with
+% the retained \shrp and \flt macros.
+%
+% To show an ID text, use \id macro within \altchords, preferably as the first
+% thing on the first line of this chord set. The optional parameter of \id sets
+% the color 1..6 for this chord set, which will be held until the end of the
+% song. Numbers 1..3 are meant to be used for different keys with same chords,
+% and numbers 4..6 are for alternate chordings in the default key.
+% See \ulsbs@altchordsid.
+%
+% Example:
+%
+%  \altchords{\id[1]{Peter (C)}|C | |G |C#}
+%
+% The chord owner installs argument capture/catcodes and the lazy display guard.
+\newcommand{\altchords}{}
+\ExplSyntaxOff
+
+% === Lyric helpers ===
+
+% Just prints a dash if measure bar lines are enabled and does nothing otherwise.
+% Use this if a line would end at a new measure starting without any lyrics in that
+% bar on the same line. This signifies that there indeed is a measure here. The
+% measure might or might not continue on the next line. You can think of this as
+% an abbreviation for "Empty" or "End". :)
+\newcommand{\e}{\ifulShowMeasures--\fi}
+
+% Simply a shortened form for \textsuperscript
+\newcommand{\up}[1]{%
+  \textsuperscript{#1}%
+}
+
+\ExplSyntaxOn
+% Print an alternate chord for a numbered repetition.
+% Usage: \ac{<repetition>}{<chord>}, for example \ac{2}{Am}.
+% Modules install these declared public command implementations below.
+\NewDocumentCommand{\ac}{m m}{}
+\ExplSyntaxOff
+
+% Display alternate lyrics, but without any vertical or horizontal space. Is called
+% from \altlyr
+\newcommand{\altlyrnospace}[2][*]{%
+  {\ifulsbs@intranslation\else\small\fi\up{#1}\emph{#2}}%
+}
+
+% Display alternate lyrics. If inside a verse, show them on the same line
+% (pushed to the right), otherwise include a small vertical space before.
+% Usage \altlyr[<superscript>]{<lyrics>}
+% If the optional argument is omitted, it will be replaced with an asterisk.
+% Example: \altlyr[2]{with love}
+\newcommand{\altlyr}[2][*]{%
+  \vspaceifnotinverse{.618034\baselineskip}%
+  \hfill%
+  \altlyrnospace[#1]{#2}%
+}
+
+% Put tiny sublyrics, given as the parameter, below the main lyrics (could be
+% used for a second voice). This is not very robust; a good idea might be to
+% put each bar's sublyrics as it's own \sublyr command. The sublyrics are
+% left-aligned with whatever comes immediately after the command, which might
+% cause overlapping of \sublyr text with the previous one.
+\newcommand{\sublyr}[1]{%
+  \makebox[0pt][l]{\raisebox{-1ex}[0pt][1ex]{%
+    \tiny #1%
+  }}%
+}
+
+% Same as \sublyr, but this pushes the main lyrics to the right to make room
+% for the sublyrics, instead of aligning. Use carefully.
+\newcommand{\sublyrpush}[1]{%
+  \makebox{\raisebox{-1ex}[0pt][1ex]{%
+    \tiny #1%
+  }}%
+}

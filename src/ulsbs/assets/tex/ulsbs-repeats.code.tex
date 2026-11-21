@@ -1,0 +1,222 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Repeat-bar dimensions, fragment state/drawing and inline repeat declarations.
+% This file is part of the 'ulsbs' package.
+%
+% Load: ulsbs.sty, after attached notes and before musical navigation marks.
+% Requires: init registers, prose content indent, final fonts/style, visibility
+% policy, shared boolean/repeat utilities, xparse and expl3. Late verse/music
+% owners install lifecycle integration, line metrics and final inline markers.
+% State: owns repeat dimensions, nesting/serial counters, continuation map and
+% fragment scratch registers. Inherits @ as a letter without a wrapper group;
+% retains all original expl3 spans and conditional engine branches.
+% ulsbs-spacing.code.tex executes setters/default measurements at the original
+% site; the following directlua loads ulsbs-repeats.lua once, allocating the
+% attributes and shipout callback before fragment definitions. Public lengths
+% may be changed after loading with setlength. ContinuingOverlap expands against
+% the current baseline at use time; spacing policy uses its public setters.
+
+\ProvidesFile{ulsbs-repeats.code.tex}[ULSBS repeat bars and inline marks]
+
+% === Line repeat bars ===
+
+% Line repeat bars inside verses. This prints vertical repeat
+% bars for the lyric lines within it's effect. Can be nested. Use only within
+% verses
+%
+% Usage example:
+%
+%   \beginverse
+%     lyric line without repeat
+%     \beginrep
+%       lyric line with one repeat level
+%       lyric line with one repeat level (2nd line of the same repeat)
+%       \beginrep
+%         lyric line with two repeat levels
+%       \endrep
+%     \endrep
+%   \endverse
+%
+% The verse machinery installed later supplies repeat lifecycle integration.
+
+% Consumer settings: lengths/dimensions are initialized here; override them after
+% loading with \setlength. Renew \ulRepeatBarContinuingOverlap after loading;
+% unlike the dimensions, it evaluates the current baseline each time it is used.
+
+% Repetition bar width (register provided by init).
+\setlength{\ulRepeatBarWidth}{1.4pt}
+% The horizontal gap between line repeat bars, and minimum gap between the
+% last (deepest level) bar and the start of the lyrics
+\newdimen\ulRepeatBarGap\ulRepeatBarGap=2.265pt
+
+% NOTE: Be careful if changing the following settings. Test all situations:
+% with chords, lyric-only, without measure bars. Separate bars following each
+% must leave enough gap between them, and multiline repeat bars ought to have
+% no gaps in between lyric lines.
+
+% Inline lrep/rrep metrics. Verse-left top/bottom geometry uses the policy below.
+\newdimen\ulRepeatBarDepth\ulRepeatBarDepth=.25pt
+\newdimen\ulRepeatBarHeightAdjustmentWithChords\ulRepeatBarHeightAdjustmentWithChords=-2.5pt
+\newdimen\ulRepeatBarHeightAdjustmentNoChords\ulRepeatBarHeightAdjustmentNoChords=.5pt
+% At a page/column break, add two short vertical dashes beyond each end of the
+% solid bar. These dimensions control dash length and the gaps between the
+% solid bar and dashes, and between the two dashes.
+\newdimen\ulRepeatBarContinuationDashLength
+\ulRepeatBarContinuationDashLength=2pt
+\newdimen\ulRepeatBarContinuationDashGap
+\ulRepeatBarContinuationDashGap=1.25pt
+% How much extra upward reach continuation lines get to bridge interline glue
+% when having multiline repeat bars.
+\newcommand{\ulRepeatBarContinuingOverlap}{\the\dimexpr .7\baselineskip\relax}
+
+\input{ulsbs-spacing.code.tex}
+
+% State: key->boolean map for
+%        <repeat nesting level> -> <repeat started on previous line>
+\ExplSyntaxOn
+\prop_new:N \g__ulsbs_repeat_cont_prop
+\ExplSyntaxOff
+
+% State: Current line repeat bar's nesting depth.
+% Updated by \beginrep and \endrep.
+\newcount\ulsbs@rep@level\ulsbs@rep@level=0\relax%
+% Give every repeat occurrence its own id. On LuaTeX the id is attached to
+% its rule fragments, which are coalesced into one rule at shipout.
+\newcount\ulsbs@rep@serial\ulsbs@rep@serial=0\relax%
+
+% LuaTeX can alter the final node list after layout splits it into physical
+% pages and columns. Group tagged fragments by repeat id and absolute x
+% position, retain the uppermost rule, and extend it through the lowest one.
+% A repeat crossing a page or column boundary is therefore represented by one
+% rule in each resulting segment. Other engines keep the fragment fallback.
+\ifdefined\directlua
+  \directlua{dofile(kpse.find_file('ulsbs-repeats.lua'))}
+  \def\ulsbs@rep@tagrule#1#2#3#4{%
+    \begingroup%
+      \csname __ulsbs_music_context:\endcsname%
+      \attribute\ulsbs@rep@attribute=\csname ulsbs@rep@id@#1\endcsname\relax%
+      \attribute\ulsbs@rep@heightattribute=\number#3\relax%
+      \ifnum#2=1\relax%
+        \attribute\ulsbs@rep@startattribute=1\relax%
+      \fi%
+      #4%
+    \endgroup%
+  }
+  \def\ulsbs@rep@endmarker{%
+    \begingroup%
+      \attribute\ulsbs@rep@attribute=\csname ulsbs@rep@id@\the\ulsbs@rep@level\endcsname\relax%
+      \attribute\ulsbs@rep@endattribute=1\relax%
+      \directlua{%
+        local marker = node.new("whatsit", "user_defined")
+        marker.type = 100
+        marker.value = 0
+        node.write(marker)
+      }%
+    \endgroup%
+  }
+\else
+  % Inactive fallback branch: the public engine guard rejects non-Lua engines
+  % before this point. Its per-line fragment drawing is not a supported backend;
+  % the Lua branch above owns coalescing and page/column continuation dashes.
+  \PackageInfo{ulsbs}{Non-Lua engine: repeat bars use per-line fragments;^^J%
+    single-object bars and break continuation dashes require LuaTeX}%
+  \def\ulsbs@rep@tagrule#1#2#3#4{#4}%
+  \let\ulsbs@rep@endmarker\relax
+\fi
+
+% Scratch registers:
+\newlength\ulsbs@tmp@rep@allbarswidth
+\newcount\ulsbs@tmp@rep@prevlinestoreach
+\newdimen\ulsbs@tmp@rep@barhtbase
+\newdimen\ulsbs@tmp@rep@normalbarhtbase
+
+% Draw one line repetition bar (fragment) for current lyric line. Called
+% repetitiously from \ulsbs@rep@drawbars.
+\newcommand{\ulsbs@rep@drawbars@iter}[1]{%
+  \rlap{%
+    \ulIfBool{g__ulsbs_repeat_cont_prop}{#1}{% for the repeat started on earlier lyric line
+      % If current bar was started on earlier lyric line (par), increase the
+      % current line's repeat bar height to reach through the gap
+      \advance\ulsbs@tmp@rep@barhtbase by \ulRepeatBarContinuingOverlap\relax
+      % If previous lyric line (par) was (long and) wrapped to more than one
+      % line, make the current line's repeat bar higher to reach through
+      % them all.
+      \ifnum\ulsbs@prevparlines>1\relax%
+        \ulsbs@tmp@rep@prevlinestoreach=\ulsbs@prevparlines%
+        \advance\ulsbs@tmp@rep@prevlinestoreach by -1\relax%
+        \advance\ulsbs@tmp@rep@barhtbase by
+         \dimexpr \baselineskip * \numexpr\ulsbs@tmp@rep@prevlinestoreach\relax\relax%
+      \fi%
+      % Draw the repeat bar with smash to take no vertical space
+      \ulsbs@rep@tagrule{#1}{0}{\ulsbs@tmp@rep@normalbarhtbase}{\smash{%
+        \vrule\@width\ulRepeatBarWidth%
+              \@height\ulsbs@tmp@rep@barhtbase%
+              \@depth\ulRepeatBarDepth%
+      }}%
+    }{%
+      % We are on the first line of the repeat: smash or no?
+      \ulsbs@rep@tagrule{#1}{1}{\ulsbs@tmp@rep@normalbarhtbase}{\smash{%
+        \vrule\@width\ulRepeatBarWidth%
+              \@height\ulsbs@tmp@rep@barhtbase%
+              \@depth\ulRepeatBarDepth%
+      }}%
+    }%
+    \ulBoolSetTrue{g__ulsbs_repeat_cont_prop}{#1}% The bar at this nesting level has been started
+  }%
+  \kern\ulRepeatBarWidth%
+  \kern\ulRepeatBarGap%
+  \addtolength{\ulsbs@tmp@rep@allbarswidth}{\ulRepeatBarWidth}%
+  \addtolength{\ulsbs@tmp@rep@allbarswidth}{\ulRepeatBarGap}%
+}
+
+% Legacy inline-sign height only; verse fragments use the music owner's policy.
+\def\ulsbs@rep@setbarhtbase{%
+  \ifulShowChords%
+    \global\ulsbs@tmp@rep@barhtbase=\baselineskip%
+    \global\advance\ulsbs@tmp@rep@barhtbase \ulRepeatBarHeightAdjustmentWithChords\relax%
+  \else%
+    \global\settoheight{\ulsbs@tmp@rep@barhtbase}{\vphantom{A}}%
+    \global\advance\ulsbs@tmp@rep@barhtbase \ulRepeatBarHeightAdjustmentNoChords\relax%
+  \fi%
+}
+
+% Draw all repetition bars (fragments) for the current lyric line.
+\def\ulsbs@rep@drawbars{%
+  {% block to contain color
+    \color{ulRepetitionSignColor}%
+    \ulsbs@rep@setlinebase%
+    \ulsbs@tmp@rep@normalbarhtbase=\ulsbs@tmp@rep@barhtbase%
+    \setlength{\ulsbs@tmp@rep@allbarswidth}{0pt}%
+    % Call \ulsbs@rep@drawbars@iter for each repeat level
+    \ulRepeatTimes{\ulsbs@rep@level}{\ulsbs@rep@drawbars@iter}%
+    \ifdim\ulsbs@tmp@rep@allbarswidth<\ulContentIndentWidth%
+      \kern\dimexpr\ulContentIndentWidth-\ulsbs@tmp@rep@allbarswidth\relax%
+    \fi%
+  }%
+}
+
+% === Inline repeat marks ===
+
+% The music module owns \lrep/\rrep after the stanza/chord machinery loads.
+% Their upper dots follow effective chord policy, never mutable book identity.
+% Colorize \rep and use our default font's Unicode × (Noto supports it)
+\DeclareDocumentCommand\rep{m}{%
+  {\color{ulRepetitionSignColor}(×#1)}%
+}
+
+% Use this instead of \rep to signify number of repeats on the first line
+% of a line repeat. The parameter is the number of repetitions, as in \rep
+% macro.
+% Example:
+%   \beginverse
+%     \beginrep\prep{3}
+%       lyric line
+%     \endrep
+%   \endverse
+\newcommand{\prep}[1]{%
+  % The music owner replaces this fallback with a retained line-aware marker.
+  \raisebox{1ex}{%
+    {\color{ulRepetitionSignColor}#1×:}%
+  }%
+}

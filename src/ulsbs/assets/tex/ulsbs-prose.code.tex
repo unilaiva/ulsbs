@@ -1,0 +1,420 @@
+% SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
+% SPDX-License-Identifier: GPL-3.0-or-later
+%
+% Shared language sections, passages and in-song prose environments.
+% This file is part of the 'ulsbs' package.
+%
+% Load: ulsbs.sty, after song helpers and before media in the song-content phase.
+% Requires: final typography/style, book policy, Polyglossia, xstring, xparse,
+% xcolor, ragged2e, enumitem and verbatim. Layout/verse owners install block
+% starts, fill state and verse machinery later, before document-time use.
+% State: owns language-section defaults, shared content indent, translation flag
+% and prose counters reset by the song lifecycle. Inherits @ as a letter with
+% no enclosing group; preserves environment-local groups and raw source skips.
+% Passage em lengths are measured now in the post-typography font context;
+% change allocated lengths afterward with setlength. Public providecommand
+% defaults can be defined before loading or renewed afterward and expand at
+% environment entry. Hiding policy and language lists are checked at use time.
+
+\ProvidesFile{ulsbs-prose.code.tex}[ULSBS language sections and song prose]
+
+% === Shared language-section environment ===
+
+% Shared content indentation. Override after loading with
+% \setlength{\ulContentIndentWidth}{<dimension>}; used by passages and repeats.
+\newlength\ulContentIndentWidth%
+\setlength\ulContentIndentWidth{7.33pt}
+
+% Private language-section defaults
+% NOTE: These are meant to be locally renewed in environments using the
+% ulsbs@langsect environment. Be sure to renew locally only, as other environments
+% might depend on these defaults.
+\newif\ifulsbs@upcaselangsecttitle\ulsbs@upcaselangsecttitlefalse%
+\newcommand{\ulsbs@langsectfont}{}% style for the default text
+\newcommand{\ulsbs@langsecttitlefont}{}% style for the title text
+% Amount of indentation for default text inside langsect environment
+\newlength\ulsbs@langsectleftskipadd\setlength\ulsbs@langsectleftskipadd{0pt}%
+\newlength\ulsbs@langsectrightskip\setlength\ulsbs@langsectrightskip{0pt}%
+\newcommand{\ulsbs@langsectbaselinemultiplier}{1}%
+\newcommand{\ulsbs@langsectbeginextra}{}%
+\newcommand{\ulsbs@langsectendextra}{}%
+% Omit the displaying of the language codes in the title line for the languages
+% listed in this comma separated list. Only the *codes* are omitted, the rest
+% of the possible title nor the content is affected.
+\newcommand{\ulsbs@langsectomitlangcodes}{}%
+
+% Starts a new subsubsection and prints it's title given as the only parameter.
+% Used in the definition of passage environment.
+\newcommand\ulsbs@langsectstart{\@startsection{subsubsection}{3}{\ulContentIndentWidth}%\z@
+                                 {-3.25ex\@plus -1ex \@minus -.2ex}%
+                                 {1.3ex \@plus .2ex}%
+                                 {\ulsbs@langsecttitlefont}}
+
+
+
+% Returns the formatted version of a language code given as an argument, plus
+% a small horizontal space after it. If the code is in the omit list, nothing
+% is returned.
+\NewDocumentCommand{\ulsbs@langcodeformatted}{m}{%
+  \IfValueT{#1}{% must not be empty for string check to work
+    \IfSubStr{\ulsbs@langsectomitlangcodes}{#1}{% is in the omit list, return nothing
+    }{% current langcode is not in the omit list
+      {%
+        \colorlet{ulsbs@currcolor}{.}%
+        \ulsbs@langcodebox{\color{ulsbs@currcolor}\normalfont\bfseries #1}%
+        \hspace{.618034em}%
+      }%
+    }%
+  }%
+}
+
+
+
+\newcommand{\ulsbs@langcodewithtitle}[2]{%
+  \ulsbs@langcodeformatted{#1}#2%
+}
+
+% Environment for text that can be put inside a song environment and elsewhere,
+% with support for languages. Supports colouring and hyphenation of language
+% texts. Intended for use within this package.
+% Requires packages: xstring, xparse, xcolor
+% Usage: \begin{langsect}*[LANGCODE]{<title>}*
+%   - 1st star: language code is displayed (and section started) even if title
+%     is empty
+%   - If LANGCODE is present, it is displayed before the title in brackets.
+%     If it is one of the supported ones: PT, EN, or FI (must be uppercase),
+%     the langsect text is coloured and hyphenation for that language is used.
+%   - 2nd star: obey lines
+%   - If <title> is empty and 1st star is present, no title is displayed
+\NewDocumentEnvironment{ulsbs@langsect}{s o m s}{% pre env
+  \bgroup%
+  \let\ulsbs@oldobeylines\obeylines%
+  \let\ulsbs@olddisobeylines\disobeylines%
+  \renewcommand{\obeylines}{\ulsbs@oldobeylines\parskip=0pt}%
+  \renewcommand{\disobeylines}{%
+    \ulsbs@olddisobeylines%
+    \justifying% ragged2e package: force justifying
+    \parskip=.381966\baselineskip%
+  }%
+  \newcommand{\polpar}{\par\vspace{.618034\baselineskip}}%
+  \renewcommand{\up}[1]{\textsuperscript{\color{ulLanguageSectionMarkColor}##1}}%
+  \def\ulsbs@langsecttitle{#3}%
+  \IfValueTF{#2}{% optional lang id (must be upcase) signifying translation
+    \def\ulsbs@langsectlang{#2}%
+    \def\ulsbs@langsectfulltitle{\ulsbs@langcodewithtitle{\ulsbs@langsectlang}{\ulsbs@langsecttitle}}%
+    \IfBooleanF{#1}{% if title is empty and there is no star, display no title
+      \ifx\ulsbs@langsecttitle\empty%
+        \def\ulsbs@langsectfulltitle{}%
+      \fi%
+    }%
+    \IfStrEq{\ulsbs@langsectlang}{PT}{%
+      \color{ulLanguagePortugueseColor}%
+      \begin{portuguese}%
+    }{}%
+    \IfStrEq{\ulsbs@langsectlang}{EN}{%
+      \color{ulLanguageEnglishColor}%
+      \begin{english}%
+    }{}%
+    \IfStrEq{\ulsbs@langsectlang}{FI}{%
+      \color{ulLanguageFinnishColor}%
+      \begin{finnish}%
+    }{}%
+  }{% there was no lang set
+    \def\ulsbs@langsectlang{}%
+    \ifx\ulsbs@langsecttitle\empty%
+      \def\ulsbs@langsectfulltitle{}%
+    \else%
+      \def\ulsbs@langsectfulltitle{\ulsbs@langsecttitle}%
+    \fi%
+  }%
+  \ulsbs@langsectfont%
+  % Restore font leading even when the font hook selects the size already active.
+  \baselineskip=\normalbaselineskip%
+  \ifhmode\par\fi%
+  \ifx\ulsbs@langsectfulltitle\empty\else%
+    \ifulsbs@upcaselangsecttitle%
+      \ulsbs@langsectstart{\protect\MakeUppercase{\expandafter\ulsbs@langsectfulltitle}}% Create section
+    \else%
+      \ulsbs@langsectstart{\ulsbs@langsectfulltitle}% Create section
+    \fi%
+  \fi%
+  \baselineskip=\ulsbs@langsectbaselinemultiplier\baselineskip plus 0pt minus 0pt%
+  \IfBooleanTF{#4}{% 2nd star: obey lines
+    \vspace{.25cm}%
+    \obeylines%
+  }{% no star: do not obey lines
+    \disobeylines% use the renewed version above to set up parskip etc
+  }%
+  \advance\leftskip\ulsbs@langsectleftskipadd%
+  \rightskip=\ulsbs@langsectrightskip%
+  \parindent=0pt\relax%
+  \noindent%
+  \ulsbs@langsectbeginextra%
+  \ignorespaces%
+}{% post env
+  \par%
+  \IfStrEq{\ulsbs@langsectlang}{PT}{%
+    \end{portuguese}%
+  }{}%
+  \IfStrEq{\ulsbs@langsectlang}{EN}{%
+    \end{english}%
+  }{}%
+  \IfStrEq{\ulsbs@langsectlang}{FI}{%
+    \end{finnish}%
+  }{}%
+  \ulsbs@langsectendextra%
+  \egroup%
+}
+
+% === Passages ===
+
+% Consumer defaults: define providecommand macros before loading or renew after
+% loading; they are read when the passage starts. These lengths are allocated
+% here, with 2em evaluated in the current post-typography font context. Change
+% them after loading with \setlength, not \renewcommand; do not move their
+% initialization into the pre-typography book-defaults phase.
+\providecommand{\ulPassageFont}{\ulLyricFontStyle}%
+% Style for the default text for alt. passage env (starred):
+\providecommand{\ulAltPassageFont}{\ulLyricFontStyle\normalsize\sffamily\itshape}%
+\providecommand{\ulPassageTitleFont}{\ulSongTitleFont}%
+% Baseline multiplier, must be a number:
+\providecommand{\ulPassageBaselineMultiplier}{1}%
+% Amount of indentation for default text:
+\newlength\ulPassageLeftSkipAdd\setlength\ulPassageLeftSkipAdd{2em}\relax%
+\newlength\ulPassageRightSkip\setlength\ulPassageRightSkip{2em}\relax%
+% The content in languages that have their code in in this comma separated
+% list are not shown at all:
+\providecommand{\ulPassageLanguagesToSkip}{}%
+% The language *codes* held in this comma separated list are not displayed:
+\providecommand{\ulPassageOmitLangCodes}{}%
+
+% Starts a new subsubsection and prints it's title given as the only parameter.
+% Used in the definition of passage environment.
+\newcommand\ulsbs@passagestart{\@startsection{subsubsection}{3}{\ulContentIndentWidth}%\z@
+                          {-3.25ex\@plus -1ex \@minus -.2ex}%
+                          {1.3ex \@plus .2ex}%
+                          {\ulPassageTitleFont}}
+
+% Environment for a passage of text that can be put inside a song environment
+% and elsewhere. Supports colouring and hyphenation of language texts.
+% Uses ulsbs@langsect environment.
+% Requires packages: xstring, xparse, xcolor
+% Usage: \begin{passage}*[LANGCODE]{<title>}
+%   - If star is present, another version of the environment is used, meant
+%     for notes.
+%   - If LANGCODE is present, it is displayed before the title in brackets.
+%     If it is one of the supported ones, the passage text is coloured and
+%     hyphenation for that language is used.
+%   - If <title> is empty, no title is displayed. To display it in such a
+%     case, make the title a whitespace: { }
+%   - \obeylines and \disobeylines (the default) macros are supported within
+% Policy and language hiding retain verbatim's raw line-oriented source skip;
+% the terminator must be on its own source line, not inside a captured argument.
+\NewDocumentEnvironment{passage}{s o m}{% pre env
+  % Check if this environment needs hiding:
+  \newif\ifulsbs@hide\ulsbs@hidefalse%
+  \ifulShowPassage\else\ulsbs@hidetrue\fi%
+  % Test for skipped languages:
+  \IfValueT{#2}{%
+    \IfSubStr{\ulPassageLanguagesToSkip}{#2}{%
+      \ulsbs@hidetrue% environment-local decision, never a change to feature policy
+    }{}%
+  }%
+  % If hiding is needed, hide the rest using verbatim's \comment:
+  \ifulsbs@hide\expandafter\comment\fi%
+  \bgroup%
+  \renewcommand{\ulsbs@langsectstart}{\ulsbs@passagestart}%
+  \renewcommand{\ulsbs@langsectfont}{\ulPassageFont}%
+  \renewcommand{\ulsbs@langsecttitlefont}{\ulPassageTitleFont}%
+  \renewcommand{\ulsbs@langsectbaselinemultiplier}{\ulPassageBaselineMultiplier}%
+  \renewcommand{\ulsbs@langsectbeginextra}{}%
+  \renewcommand{\ulsbs@langsectendextra}{\vfil}%
+  \renewcommand{\ulsbs@langsectomitlangcodes}{\ulPassageOmitLangCodes}%
+  \ulsbs@langsectleftskipadd=\ulPassageLeftSkipAdd%
+  \ulsbs@langsectrightskip=\ulPassageRightSkip%
+  \IfBooleanT{#1}{% starred version
+    \renewcommand{\ulsbs@langsectfont}{\ulAltPassageFont}%
+    \renewcommand{\ulsbs@langsectbeginextra}{\vspace{1cm}\vfil}%
+  }
+  \IfValueTF{#2}{%
+    \begin{ulsbs@langsect}[#2]{#3}
+  }{% no lang
+    \begin{ulsbs@langsect}{#3}
+  }%
+}{% post env
+  \ifulsbs@hide% End hidden section (\endcomment from verbatim package):
+    \expandafter\endcomment%
+  \else% Execute the post command(s):
+    \end{ulsbs@langsect}
+    \egroup%
+  \fi%
+}
+
+% === In-song blocks, translations and explanations ===
+
+\newcounter{ulsbs@aftersongblocks}\setcounter{ulsbs@aftersongblocks}{0}% reset to 0 in endsong
+
+% Layout owns fill state and the in-song block-start implementation.
+
+% Define \blockstart to be able to use in-song block feature manually also
+% elsewhere than in the environments defined below.
+\newcommand{\blockstart}{\ulsbs@blockstart}
+
+% Displays the parameter text centered in a large font. Use within songs, but outside
+% verses. Intended to be used for short mantras for recitation.
+\newcommand{\showmantra}[1]{%
+  \ulEndSongVfill{true}%
+  % Do not call \ulsbs@blockstart here, as this is not really an after-song block...
+  \vspace{1.618034em}%
+  \begin{center}%
+    {\Large #1}%
+  \end{center}%
+}
+
+% Feeler prose, in songs or standalone intersong blocks. Capture balanced bodies
+% without expansion; unlike environ's cleanup stream, lazy selection keeps hidden
+% conditional tokens opaque. This is not the raw line-oriented prose skip.
+\ExplSyntaxOn
+\NewDocumentEnvironment {feeler} {+b}
+  {\legacy_if:nT {ulShowFeeler}
+    {
+      \ulEndSongVfill{true}
+      \ulsbs@blockstart
+      \small
+      \par\noindent\ignorespaces
+      \begin{center}\begin{em}
+        #1
+      \end{em}\end{center}
+    }}
+  {\ignorespacesafterend}
+\ExplSyntaxOff
+
+% Translation font default: define before loading or renew afterward. It is
+% applied inside each translation block, after the built-in \small selection.
+\providecommand{\ulTranslationFont}{}
+
+\newif\ifulsbs@intranslation\ulsbs@intranslationfalse%
+
+% Environment for song translation, to be used only inside a song.
+% Keep verbatim's line-oriented skip: hidden source need not have balanced TeX
+% braces/conditionals. The terminator must remain on its own source line.
+\NewDocumentEnvironment{translation}{o}{% pre env
+  % Check if this environment needs hiding
+  \newif\ifulsbs@hide\ulsbs@hidefalse%
+  \ifulShowTranslation\else\ulsbs@hidetrue\fi%
+  % If hiding is needed, hide the rest using verbatim's \comment
+  \ifulsbs@hide\expandafter\comment\fi%
+  % The following, including the environment body, is only expanded and
+  % processed, if no hiding is needed.
+  \ulsbs@intranslationtrue%
+  \ulEndSongVfill{true}%
+  \newcommand{\nextverse}{\ulBreakPenalty=\ulTranslationVersePenalty\brk\vspace{.5em}}% some vertical space between verses
+  \IfValueTF{#1}{% optional lang id (must be upcase) signifying translation
+    \def\ulsbs@langsectlang{#1}%
+    \IfStrEq{\ulsbs@langsectlang}{PT}{%
+      \color{ulLanguagePortugueseColor}%
+      \begin{portuguese}%
+    }{}%
+    \IfStrEq{\ulsbs@langsectlang}{EN}{%
+      \color{ulLanguageEnglishColor}%
+      \begin{english}%
+    }{}%
+    \IfStrEq{\ulsbs@langsectlang}{FI}{%
+      \color{ulLanguageFinnishColor}%
+      \begin{finnish}%
+    }{}%
+  }{% no lang id given
+    \def\ulsbs@langsectlang{}%
+  }%
+  \beginverse*%
+  \vspace{-\ulsbs@verse@separation}% remove the vertical space created by \beginverse
+  \ulsbs@blockstart%
+  \chordsoff%
+  \small\ulTranslationFont%
+}{% post env
+  \ifulsbs@hide% End hidden section (\endcomment from verbatim package):
+    \expandafter\endcomment%
+  \else% Execute the post command(s):
+    \endverse%
+    \IfStrEq{\ulsbs@langsectlang}{PT}{%
+      \end{portuguese}%
+    }{}%
+    \IfStrEq{\ulsbs@langsectlang}{EN}{%
+      \end{english}%
+    }{}%
+    \IfStrEq{\ulsbs@langsectlang}{FI}{%
+      \end{finnish}%
+    }{}%
+  \fi%
+}
+
+% Explanation defaults: define before loading or renew afterward. Font hooks,
+% numeric baseline multiplier and language lists are read at environment entry.
+\providecommand{\ulExplanationFont}{\rmfamily\footnotesize}%
+\providecommand{\ulExplanationTitleFont}{\bfseries}%
+% Baseline multiplier, must be a number:
+\providecommand{\ulExplanationBaselineMultiplier}{1}%
+% The content in languages that have their code in in this comma separated
+% list are not shown at all:
+\providecommand{\ulExplanationLanguagesToSkip}{}%
+% The language *codes* held in this comma separated list are not displayed:
+\providecommand{\ulExplanationOmitLangCodes}{}%
+
+\newcounter{ulsbs@explcounter}\setcounter{ulsbs@explcounter}{0} % reset to 0 in endsong
+
+% Environment for 'song explanation'
+% Uses ulsbs@langsect environment
+% Requires packages: xstring, xparse, xcolor
+% Usage: \begin{explanation}[LANGCODE]
+%   - If LANGCODE is present, it is displayed before the title in brackets.
+%     If it is one of the supported ones, the passage text is coloured and
+%     hyphenation for that language is used.
+% Policy and language hiding retain verbatim's raw line-oriented source skip;
+% the terminator must be on its own source line, not inside a captured argument.
+\NewDocumentEnvironment{explanation}{o}{% pre env
+  % Check if this environment needs hiding:
+  \newif\ifulsbs@hide\ulsbs@hidefalse%
+  \ifulShowExplanation\else\ulsbs@hidetrue\fi%
+  % Test for skipped languages:
+  \IfValueT{#1}{%
+    \IfSubStr{\ulExplanationLanguagesToSkip}{#1}{%
+      \ulsbs@hidetrue% environment-local decision, never a change to feature policy
+    }{}%
+  }%
+  % If hiding is needed, hide the rest using verbatim's \comment:
+  \ifulsbs@hide\expandafter\comment\fi%
+  \bgroup%
+  \ifnum\value{ulsbs@explcounter}<1%
+    \ulsbs@blockstart%
+  \else%
+    \vspace{1ex}%
+  \fi%
+  \addtocounter{ulsbs@explcounter}{1}%
+  \ulEndSongVfill{false}% so far explanation is last block, no vfill needed at song end
+  \setlist[description]{% modify description list (enumitem package)
+    %topsep=30pt,%      % space before start / after end of list
+    %itemsep=5pt,%      % space between items
+    leftmargin=3em%     % left margin
+    %font={\rmfamily}%   % set the label font
+  }%
+  \ulsbs@langsectleftskipadd=0pt\relax%
+  \ulsbs@langsectrightskip=0pt\relax%
+  \renewcommand{\ulsbs@langsectbaselinemultiplier}{\ulExplanationBaselineMultiplier}%
+  \renewcommand{\ulsbs@langsectfont}{\ulExplanationFont}%
+  \renewcommand{\ulsbs@langsecttitlefont}{\ulExplanationTitleFont}%
+  \renewcommand{\ulsbs@langsectendextra}{}%
+  \renewcommand{\ulsbs@langsectomitlangcodes}{\ulExplanationOmitLangCodes}%
+  \IfValueTF{#1}{% language code is given
+    \renewcommand\ulsbs@langsectstart[1]{\noindent{\ulsbs@langcodeformatted{#1}}}%
+    \begin{ulsbs@langsect}*[#1]{}%
+  }{% no language code
+    \begin{ulsbs@langsect}{}%
+  }%
+}{% post env
+  \ifulsbs@hide% End hidden section (\endcomment from verbatim package):
+    \expandafter\endcomment%
+  \else% Execute the post command(s):
+    \end{ulsbs@langsect}%
+    \egroup%
+  \fi%
+}

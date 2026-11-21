@@ -89,12 +89,21 @@ author packages:
 | `ulsbs-package-defaults.code.tex` | Pre-import paper, margin, header and chord-line defaults |
 | `ulsbs-variants.code.tex`, `ulsbs-variants.def.tex` | Literal main-source availability, immutable active identity, shared registry and automatic preset lifecycle |
 | `ulsbs-variant-*.code.tex` | Selected preset's post-class rendering defaults, never identity setters |
-| `ulsbs-init.code.tex` | Public flags, counters, lengths and initial font defaults |
-| `ulsbs-book-defaults.code.tex` | Visibility switches, early verse indentation and localized book metadata defaults |
+| `ulsbs-init.code.tex` | Bootstrap public flags, counters, lengths, font hooks and pre-typography measurements; not the final style defaults |
+| `ulsbs-book-defaults.code.tex` | Visibility installation, simple book presentation switches, early verse indentation and localized book metadata defaults |
+| `ulsbs-visibility.code.tex` | Book permissions, local requests, effective visibility, lazy musical guards and the document-start permission freeze |
 | `ulsbs-style.code.tex` | Final colors, font policy, page headers, boxes and stanza-break styling |
 | `ulsbs-utilities.code.tex` | General typesetting helpers, circle measurement/cache, paragraph tracking and repeat loops |
 | `ulsbs-typography.code.tex` | Font families, document font defaults, additional languages and Unicode symbols |
 | `ulsbs-frontmatter.code.tex` | Cover icons/pages, imprint, TOC and main chapter presentation |
+| `ulsbs-song-helpers.code.tex` | Navigation/indentation, alternate-chord display helpers and lyric annotations |
+| `ulsbs-prose.code.tex` | Shared language sections, passages, translations, explanations and in-song prose blocks |
+| `ulsbs-media.code.tex` | Width-safe score graphics, whole-score display gate and image placement |
+| `ulsbs-melody.code.tex` | Melody syntax, lane/style policy, parser state, beat drawing and raw replay payloads |
+| `ulsbs-song-metadata.code.tex` | Song IDs/anchors, physical-position records, prelude fields/measurements and audio metadata |
+| `ulsbs-notes.code.tex` | Attached text/music-note helpers and capo instructions |
+| `ulsbs-spacing.code.tex` | Shared validated bar/verse spacing setters and their font-resolved initial policy |
+| `ulsbs-repeats.code.tex`, `ulsbs-repeats.lua` | Repeat-bar fragments/state, inline repeat signs and shipout coalescing/continuation dashes |
 | `ulsbs-boolmap.code.tex`, `ulsbs-chapter-marks.code.tex` | Boolean-map utilities and chapter corner marks |
 | `ulsbs-song.code.tex` | Metadata, custom keys, titles, numbering, selection, anchors, lifecycle hooks and once-only index events |
 | `ulsbs-layout.code.tex`, `ulsbs-layout.lua` | Song boxes, page/column positioning, break penalties, bottom glue and prose/block adapters |
@@ -149,14 +158,23 @@ PDF option defaults, validation and the optional `ocgx2` import stay in the entr
 second-phase registries and scanner load from `ulsbs-pdf-layer-setup.code.tex`
 immediately after `\makeatletter`. Main-language selection precedes
 `ulsbs-utilities.code.tex`, which loads boolean maps at its end.
-`ulsbs-book-defaults.code.tex` follows those helpers: localized book defaults use
-`\ulIfLanguage`, and the initial `1em` verse indent is captured before typography.
+`ulsbs-book-defaults.code.tex` follows those helpers and first installs the visibility
+owner. Visibility owns its baseline permission/request state together with its API;
+the book-defaults module then supplies ordinary casing/color/chord-adjustment
+switches and book strings. Localized defaults use `\ulIfLanguage`, and the initial `1em` verse indent
+is captured before typography.
 Typography loads after the PDF color-profile setup and before
 `ulsbs-style.code.tex`; that style phase loads chapter marks after TikZ calc,
 chapter colors and dimensions. Front matter loads after shared styles and before
-song-content helpers. These common styling, notation and PDF helpers precede the
-ordered subsystem owners: index serialization/state/
-sorting, song lifecycle, layout, verses, chords, music, multikey, diagrams, then
+song-content helpers. The entry then loads song helpers, prose, media, melody,
+song metadata, attached notes and repeats in that order. Each extraction retains
+its original load-time assignments and measurements, not just its macro bodies.
+Repeats installs the shared bar/verse spacing API at its original point before
+allocating repeat attributes and registering its shipout callback. Its Lua companion
+executes once through `dofile(kpse.find_file('ulsbs-repeats.lua'))` there; it does not
+defer callback installation until document start or first drawing. These common
+styling, notation and PDF helpers precede the ordered subsystem owners: index
+serialization/state/sorting, song lifecycle, layout, verses, chords, music, multikey, diagrams, then
 index display. The module table above is an ownership map, not a replacement for
 this dependency order.
 
@@ -169,6 +187,13 @@ allocation/measurement order. In particular, passage indentation captures `em`
 later than the early verse-indent default, and prelude title metrics run after
 the final title-font policy.
 
+Default values live with the phase or subsystem that owns their meaning. Keep
+bootstrap declarations distinct from final shared style and from subsystem-local
+policy. The author-facing [layout and style reference](WRITING_SONGBOOKS.md#layout-and-style-reference)
+is the customization catalog; do not make a private companion a second author
+configuration entry point. Public current-song fields are data, not book defaults,
+and replaceable renderers remain with their rendering implementation.
+
 Consumer overrides follow the declaration's contract, documented inline:
 pre-load `\providecommand` defaults accept an earlier `\newcommand`, while
 post-load macro hooks use `\renewcommand`. Use `\setlength` for lengths, integer
@@ -178,6 +203,13 @@ change does not retroactively reconfigure an already-loaded package or captured
 dimension. Book PDF metadata defaults are finalized after the preamble as described
 below; changing strings in the body does not republish them. Private default files are not consumer
 configuration files to input directly.
+
+Derived geometry also has an evaluation boundary: cover dimensions capture page
+geometry when front matter loads, chapter-mark segment length is computed when
+chapter marks load, and circle diameter/radius are cached on first use for each
+font size. Changing an input later does not automatically rerun these computations.
+Index typography may be evaluated repeatedly while measuring/wrapping fragments;
+style hooks are not once-only source-effect callbacks.
 
 Companion `.code.tex` modules load without an extra TeX group. The style owns
 `\makeatletter`; modules must restore syntax, grouping and active-character state.
@@ -300,7 +332,7 @@ rejects non-default selectors with a class-declaration diagnostic, and applies i
 default at package completion. Neither entry reapplies presets at begin-document.
 Early font measurements and optional ocgx2 imports stay at their existing load
 sites; the new presets do not retroactively recompute them or change edition setup.
-The visibility owner in `ulsbs-book-defaults.code.tex` keeps independent private
+The visibility owner in `ulsbs-visibility.code.tex` keeps independent private
 book permission and grouped local requests for chords, melody pitches, beats,
 measures, whole scores, alternate sets, key badges, music comments, translations,
 explanations, passages, feelers, tags, prelude/TOC phases, prelude
@@ -897,8 +929,8 @@ Early initialization retains its pre-typography chord sample solely for font
 allocation and PDF range identities, not as a leading strut. Number/title
 measurements, early verse indent and later passage `em` captures retain their
 respective font contexts. Feature switches do not reallocate fonts or recapture
-unrelated dimensions. Live defaults belong in `ulsbs.sty` and the selected presets,
-not duplicated numeric tables here.
+unrelated dimensions. Live defaults belong in their phase/subsystem companions
+and the selected presets, not duplicated numeric tables here.
 
 ### Chord diagrams for guitar
 
@@ -1629,8 +1661,8 @@ snippet identities while preserving their existing inter-system break tokens.
 Repeated references to the same system retain their original placements.
 
 Generated `*-systems.tex` inputs install a scoped graphics adapter through the
-LaTeX file hooks in `ulsbs.sty`. It retains each included system once, preserving
-the authored graphics command, star and optional arguments. The shared emitter
+LaTeX file hooks in `ulsbs-media.code.tex`. It retains each included system once,
+preserving the authored graphics command, star and optional arguments. The shared emitter
 shrinks a retained box proportionally only if it exceeds the smaller of
 `\linewidth` and `\hsize`; fitting systems remain unchanged. The override ends
 with the system file, so unrelated images retain their original behavior. This

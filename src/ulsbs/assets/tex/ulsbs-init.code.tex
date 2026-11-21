@@ -12,7 +12,9 @@
 % definitions here are defaults for later overrides, not song/shipout handlers.
 %
 % Layered setup: bootstrap definitions here are followed by the shared visual
-% policy in ulsbs-style.code.tex and subsystem-local defaults in ulsbs.sty.
+% policy in ulsbs-style.code.tex and effective defaults in the domain modules.
+% ulsbs-book-defaults.code.tex supplies early book defaults and loads the
+% permission/request runtime in ulsbs-visibility.code.tex at its original point.
 % These newcommand hooks are not pre-load providecommand extension points:
 % consumers renew them after loading the package. In particular, common style
 % replaces ulLyricFontStyle, ulPrintChord and several note/index font hooks.
@@ -23,6 +25,8 @@
 % counts directly (e.g. \ulVerseVersePenalty=200\relax). For LaTeX counters use
 % \setcounter{ulSongNumber}{1}. Public boolean setters take true or false and
 % obey grouping; query their real \iful... predicates rather than redefining them.
+% This is an internal bootstrap module, not a configuration file to input
+% directly. See WRITING_SONGBOOKS.md for the author customization contract.
 
 \ProvidesFile{ulsbs-init.code.tex}[Public initialization]
 

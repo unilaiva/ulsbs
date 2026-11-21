@@ -28,6 +28,17 @@ ULSBS can also be used with your own independent repository or local directory.
 **Start here:** follow [Quick start](#quick-start) to build your first book, then
 use [Writing Songbooks](WRITING_SONGBOOKS.md) for song syntax and customization.
 
+Use `ulsbs-compile` for normal authoring and final builds. It manages the tools,
+typesetting passes and configured outputs; invoking LuaLaTeX directly is an
+advanced diagnostic workflow, not the normal way to build a book.
+
+- This README covers installation, the first working project, compiler
+  configuration and generated outputs.
+- [Writing Songbooks](WRITING_SONGBOOKS.md) covers song notation, book assembly
+  and LaTeX appearance/visibility settings. Most books can use the standard defaults.
+- [Architecture](ARCHITECTURE.md) covers implementation contracts and development,
+  not everyday authoring.
+
 ## Contents
 
 - [Contents](#contents)
@@ -258,6 +269,12 @@ which outputs you want.
 
 ## Compiling songbooks
 
+**Use the `ulsbs-compile` script for normal builds**, both in a container and on
+the host. It processes scores, runs the required typesetting/index passes,
+optimizes PDFs and produces the configured variants, editions and extra outputs.
+Use `--quick` for a faster editing cycle. To use host tools without a container,
+use `--no-container` rather than switching to raw LuaLaTeX commands.
+
 Run these commands from your songbook project root:
 
 | Task | Command |
@@ -308,34 +325,21 @@ ULSBS automatically optimizes PDF size, including in quick builds.
 
 Each job is one book, variant, and ordinary or multikey edition. Successful jobs
 remain `SUCCESS` even with warnings. Their completion block prints a compact
-warning breakdown and `SEE` paths before `SUCCESS ... with N warnings` and the
-output path. Related lines print together, without interleaving other jobs.
-
-Use `--verbose` for individual diagnostics and detailed score-fallback information.
-
-The summary groups repeated warnings and shows occurrence or affected-item counts
-where available, such as eight songs missing IDs. A warning spanning multiple log
-lines counts once. Typesetting warnings reflect the final LuaLaTeX run;
-intermediate rerun requests are progress messages.
+warning breakdown, `SEE` paths and the output path. Use `--verbose` for individual
+diagnostics and score-fallback details; the summary groups repeated warnings.
 Missing glyphs and overfull boxes are warnings. Underfull horizontal and vertical
-boxes are spacing advisories: their counts are visible per job and in the final
-summary, with grouped details under `--verbose`. They do not affect warning
-counts, the `SUCCESS` warning qualifier, exit status, or deployment.
-Configuration, resource, and cleanup advisories are separate from job counts.
-Some messages appear as `unclassified warnings`; use `--verbose` to read them
-or follow the `SEE` links to their logs.
+boxes are spacing advisories, not warnings, and do not affect exit status or
+deployment. Their counts are still shown. Follow `SEE` links or use `--verbose`
+when a summary needs explanation.
 
 The final summary identifies warned jobs, failures, blocked companions, and
 intentionally skipped outputs. Per-job `<book-basename>_DIAGNOSTICS.json` reports
 remain under `result/diagnostics/`, with separate warning and advisory lists, even
-when temporary files are cleaned. Advisory-only runs also link these reports.
-Paths in these reports use host locations, including during container builds.
-Failed jobs also retain TeX error locations when available, and display
-a clickable file-and-line link independently of the log-tail limit. These lines
-refer to the file TeX actually read, which can be staged or generated TeX; they
-are not guessed mappings back to the original document. Full raw tool logs
-require `--keep-temp`; warning-bearing logs are linked as jobs finish so they can
-be inspected while other jobs continue.
+when temporary files are cleaned. Paths use host locations, including in container
+builds. TeX error links can refer to staged/generated files rather than the
+original source. Use `--keep-temp` to retain full raw tool logs. See
+[diagnostic details](ARCHITECTURE.md#build-diagnostics) for classification and
+reporting contracts.
 
 A failed job does not abort independent jobs. A multikey companion whose ordinary
 edition failed is blocked from publication. Any failure or dependency block
@@ -361,8 +365,7 @@ or `bassclef`. They are peers, generated from the same source.
 An **edition** determines how that variant is published: an ordinary PDF or an
 optional multikey package with reader-selectable keys.
 
-Declare availability literally in the main document, including with a derived
-`ulsbs-songbook...` class:
+The main document declares which variants are available:
 
 ```tex
 \documentclass[
@@ -371,9 +374,9 @@ Declare availability literally in the main document, including with a derived
 ]{ulsbs-songbook}
 ```
 
-Omission means `{default}`. Include `default` exactly once; empty lists,
-duplicates, unknown names, repeated declarations and computed values are errors.
-Do not hide availability in a macro, input file or custom class.
+Omitting the option makes only `default` available. See the writing guide for
+[source declaration rules and preset visibility settings](WRITING_SONGBOOKS.md#variants-and-visibility).
+Compiler selection and output eligibility are described here.
 
 Normal selection is `all` declared variants. Set `variants = "all"` or
 `variants = ["default", "lyric"]` in TOML; `--variants all`,
@@ -395,28 +398,25 @@ not gain songbook variants or multikey companions.
 
 ### Default variant
 
-`default` preserves the source class's baseline presentation; it is not a musical
-book type. Direct compilation needs no variant selector. `--quick` builds only
+`default` uses the source class's baseline presentation. `--quick` builds only
 its ordinary edition. It rejects conflicting explicit selectors, including CLI
 `--variants all`; use `--variants default` or omit the CLI selector. A configured
 `"all"` permits quick mode, but a configured non-default subset conflicts.
 
 ### Lyrics-only variant
 
-Declare and select `lyric` to reuse the same songs without inline chords,
-pitches, beats, full scores, alternate chords, key badges or music comments by
-default. Measures and independent prose remain available. Author preamble
-settings can override preset permissions; local song switches cannot bypass them.
+Declare and select `lyric` for a lyrics-only presentation of the same songs.
 Its output filename uses `_LYRICS-ONLY`, for example
-`my-songbook_LYRICS-ONLY_A5.pdf`.
+`my-songbook_LYRICS-ONLY_A5.pdf`. For the exact features shown or hidden and how
+to customize them, see the [preset table](WRITING_SONGBOOKS.md#variants-and-visibility).
 
 ### Instrument variants
 
 Declare and select `charango` or `bassclef` to apply the bundled presets and
-score recipes. Charango uses its tuning/tab setup; bass clef hides inline chords,
-pitches and beats but shows bass-clef scores without tablature. Score `ChordNames`
-remain independent of inline chord visibility, including in bass clef. These
-recipes do not automatically arrange arbitrary music for another instrument.
+score recipes. Charango uses its tuning/tab setup; bass clef produces bass-clef
+scores without tablature. The writing guide describes their
+[inline notation defaults](WRITING_SONGBOOKS.md#variants-and-visibility).
+These recipes do not automatically arrange arbitrary music for another instrument.
 
 Each selected instrument variant also gets a multikey edition when
 `multikey-books` is enabled.
@@ -492,24 +492,12 @@ score alternatives are cached for later builds. `--clear-score-cache` clears
 that cache in the actual build environment (container or host). Use
 `--no-multikey` or `--quick` to skip multikey editions for one build.
 
-Other optional settings:
-
-- `multikey-layer-ui = "native"` (default) requests the viewer's layer list;
-  `"hidden"` requests hiding it for viewers with their own controls. Some viewers
-  still expose the list.
-- `multikey-min-chordname-scale = 0.85` limits alternative chord-name shrinking
-  (range `0.5` to `1`); use `1` to disable shrinking. Long names may then overhang.
-  This does not control full-score image fitting.
-- `multikey-require-song-ids = true` (default `false`) or `--require-song-ids`
-  makes missing or invalid song IDs an error in multikey editions.
-- `multikey-max-pages-per-range = 50` is the nominal maximum physical pages per range.
-- `multikey-target-max-range-bytes = 33554432` targets 32 MiB per extracted file.
-
-Both sizing options require positive TOML integers and follow normal profile
-inheritance; dashed and snake_case names are accepted. Smaller ranges may be
-created to meet the byte target. A single page over the target is kept with a
-warning. Range numbers refer to physical PDF pages, including covers, not printed
-page labels; use the index rather than assuming fixed 50-page ranges.
+Optional viewer controls, chord-name scaling, strict song-ID checks and range
+sizing are documented beside their defaults in the
+[annotated configuration](ulsbs-config-example.toml). Range numbers refer to
+physical PDF pages, including covers, not printed page labels. Ranges may be
+smaller to meet the byte target; a single page over that target is kept with a
+warning. Use the index rather than assuming fixed 50-page ranges.
 
 If packaging fails validation, the build reports an error rather than publishing
 an incomplete multikey edition. [Architecture](ARCHITECTURE.md#multikey-books)
@@ -542,6 +530,9 @@ container's persistent home-cache volume, including cached score alternatives.
 
 ### Host build (`--no-container`)
 
+Host builds still use `ulsbs-compile --no-container`: this changes where the tools
+run, not the build workflow.
+
 Host mode requires a compatible toolchain, including:
 
 - A recent LaTeX distribution with `lualatex` (LuaLaTeX).
@@ -563,9 +554,9 @@ These outputs are enabled by default, but depend on suitable input and available
 tools. Disabling them does not remove the core LaTeX/LilyPond requirements.
 Your TeX installation must also provide the LaTeX packages used by ULSBS.
 
-For a standalone lyrics-and-chords document, you can run LuaLaTeX directly
-without the Python compiler or LilyPond. See the
-[manual-build instructions](WRITING_SONGBOOKS.md#manual-lualatex-builds).
+Direct LuaLaTeX invocation bypasses the compiler's orchestration and is not
+intended for normal use. The [manual-build notes](WRITING_SONGBOOKS.md#manual-lualatex-builds)
+are an advanced troubleshooting reference, not an alternative everyday setup.
 
 ### Platform-specific setup examples
 
@@ -619,6 +610,10 @@ editions; the distribution's default package may be older. Modified cover images
 require the `magick` executable, which older ImageMagick packages may not supply.
 
 ## Configuration
+
+This is **compiler configuration**: which books and outputs to build and how to
+run the toolchain. Fonts, spacing and other LaTeX book settings belong in the
+[writing guide's layout and style reference](WRITING_SONGBOOKS.md#layout-and-style-reference).
 
 ULSBS reads `ulsbs-config.toml` in your songbook project root. Start with the
 minimal configuration, then add settings as needed. The
@@ -711,13 +706,11 @@ Convert ULSBS-style LilyPond lyric output into songbook text. See the
 
 ### `ulsbs-migrate-syntax-v1`
 
-For existing projects with legacy syntax, migrate `\mn*`, `\ma*`, beat-mark,
-and `\ac<n>{Chord}` forms to melody blocks and `\ac{n}{Chord}`. It also replaces
-`\shrp` and `\flt` with `#` and `&` inside `\altchords`, `\beginsong`'s
-`key`/`gk` values, and `\audio`'s `key` value; accidental macros elsewhere stay
-unchanged. This command retains its v1 destination contract, including the old
-melody-setting command names. New projects should use the writing guide's current
-syntax; existing projects should run v2 after v1.
+For existing projects with legacy melody/beat syntax, convert annotations to
+melody blocks and brace-based chord alternatives. This command retains its v1
+destination syntax; it does not upgrade everything to the current API. For
+pre-v1 sources, review and apply v1 first, then [v2](#ulsbs-migrate-syntax-v2).
+New projects do not need either migration tool.
 
 ```sh
 ./ulsbs/ulsbs-migrate-syntax-v1 --check content/
@@ -725,57 +718,21 @@ syntax; existing projects should run v2 after v1.
 ./ulsbs/ulsbs-migrate-syntax-v1 --write content/
 ```
 
-The version identifies the destination syntax. `ulsbs-migrate-melody-syntax` is
-retained as a compatibility alias. `--check` never writes and exits nonzero while
-legacy syntax remains. `--diff` previews safe conversions; `--write` updates only
-files without diagnostics, although it may change other safe files in a directory.
-
-Malformed arguments, compound pitches, incompatible offsets, ambiguous
-secondary placement, and low `\mnd`/`\mad` forms need review. Use `--normalize-low`
-only after review; it normalizes those slots but never changes verse environments.
-The migrator does not infer missing secondary-note slots. Review diagnostics
-and converted notation before committing. See
-[migration details](ARCHITECTURE.md#syntax-migration) for preservation rules.
+Review diagnostics and the diff before `--write`; some legacy forms need manual
+decisions. In particular, use `--normalize-low` only after reviewing affected
+melody placements. See the [v1 conversion boundaries](ARCHITECTURE.md#v1-melody-syntax)
+for supported forms and preservation rules. `ulsbs-migrate-melody-syntax` remains
+an alias for this v1 tool, not for the latest migration.
 
 ### `ulsbs-migrate-syntax-v2`
 
-The v2 command combines the naming upgrade with supported named-variant
-and visibility migration. It upgrades
-configuration, book-assembly, font and metadata-accessor names to the current
-`ulCamelCase` API. Short lowercase song-content commands remain short.
-For example, `\ulTOC` becomes `\ulToc`, `\ultextnote{...}` becomes
-`\attachednote{...}`, and `\showtagsfalse` becomes `\ulShowTags{false}`.
-Boolean setters take an explicit `true` or `false` argument. Visibility setters
-configure preamble book policy; supported body uses become local requests.
-No old runtime command aliases are provided.
-Class option keys, remaining song metadata keys and public hook paths do not change.
-The inherited `sr=` field and three-braced song metadata form have been removed;
-v2 diagnoses them for review rather than converting scripture references into tags.
-Use optional `tags=`, `by=` and `cr=` metadata as appropriate. The old `\songrefs`
-and intermediate `\ulSongRefs` accessors likewise diagnose as removed.
-Book/index assembly environments also change: `songs` becomes `ulSongs`, and
-`idxblock` becomes `ulIndexBlock`. Use the new names in both `\begin` and `\end`.
-The title-index constructor stays `\ulNewIndex`; `\ulNewScriptureIndex` becomes
-`\ulNewTagIndex`, and `\ulIndexScriptureFont` becomes `\ulIndexTagFont`.
-
-Obsolete `\beginchorus` (also `\chorus`) and `\endchorus` become
-`\beginverse\beginrep` and `\endrep\endverse`: a numbered verse with an explicit
-repeat region, not an unnumbered verse. The `chorus` environment similarly becomes
-a `verse` environment with explicit repeat boundaries. Removed chorus-only fonts,
-hooks, justification, marks, penalties and repeat switches require review in both
-their old and `ul...` spellings; they are not converted to verse settings.
-Remove obsolete configuration after reviewing any custom definitions or uses.
-Other removed controls (partial-list/raw-text switches, last-column glue,
-index-book and note-name/printer hooks, `\ulPreludeTextGood` and
-`\ulSongNumberDefaultHeight`) likewise diagnose in either spelling instead of
-being renamed to removed APIs.
-
-Verse spacing is now automatic: existing `\beginverse+` forms are still read,
-but `+` has no layout effect. New sources should use `\beginverse` (optionally
-starred or indented). Removed `\ulBaselineAdjustment` and `\ulVerseSep`
-settings require manual review; use the writing guide's
-[scalar verse settings](WRITING_SONGBOOKS.md#optional-spacing-and-bar-styling)
-rather than translating old dimensions mechanically.
+Upgrade configuration, book-assembly, font and metadata-accessor names to the
+current `ulCamelCase` API, along with supported variant/visibility conversions.
+Short lowercase song-content commands remain short. Old runtime aliases are not
+provided, and removed settings or ambiguous uses may require manual changes.
+See the [v2 conversion boundaries](ARCHITECTURE.md#v2-naming-and-semantics) for the
+detailed conversion and removal inventory; the [writing guide](WRITING_SONGBOOKS.md)
+documents the resulting API, including [current verse spacing](WRITING_SONGBOOKS.md#optional-spacing-and-bar-styling).
 
 ```sh
 ./ulsbs/ulsbs-migrate-syntax-v2 --check content/ include/ my-songbook_A5.tex
@@ -783,21 +740,19 @@ rather than translating old dimensions mechanically.
 ./ulsbs/ulsbs-migrate-syntax-v2 --write content/ include/ my-songbook_A5.tex
 ```
 
-Supported conversions are deliberately narrow: a single leading,
-standalone literal `ULSBS-EXTRA-VARIANTS` marker before the main class declaration becomes
-`variants={default,lyric,...}`. Historical `none` means no instruments, retaining
-the implicit lyric companion. No marker means no inferred companions: review
-availability manually for those existing books. Existing new declarations combined
-with a marker, and conflicting, repeated, nonleading or unknown markers require
-review. Direct body display setters with a safely recognized scope become
-`\ulLocalShow{feature}{true|false}`; supported literal body measure setters and
-balanced instrument-only pagination conditionals are also converted.
+For both tools, `--check` never writes; `--diff` previews safe conversions and
+`--write` applies them. Pending changes make `--check` exit nonzero; review
+diagnostics and I/O errors also produce nonzero exits. Files with diagnostics are
+not rewritten, but safe files in the same batch may still be updated: migration
+is not an all-or-nothing project transaction. V2 also omits partial diffs for
+files with diagnostics.
 
-Other type/capability conditionals, mutable identity, broad legacy `\chordsoff`,
-removed measure queries/preamble forms, delayed hooks, unrecognized execution
-contexts, and more complex conditional contents are diagnostic-only. Choose
-effective feature guards or immutable identity tests according to intent rather
-than applying a blind rename. Valid current preamble settings remain valid.
+Include custom classes and shared sources in the review, not only songs. Review
+diagnostics and diffs before writing, then inspect the changes and build the book
+with `ulsbs-compile`. V2 does not replace v1's melody conversion; older projects
+need the v1-then-v2 sequence. Removed scripture references are not automatically
+converted into tags, and removed/custom behavior needs manual review rather than
+blind search-and-replace.
 
 Select compiler configs explicitly for diagnostics:
 
@@ -805,13 +760,11 @@ Select compiler configs explicitly for diagnostics:
 ./ulsbs/ulsbs-migrate-syntax-v2 --check --config-file ulsbs-config.toml
 ```
 
-`--config-file FILE` is repeatable and **diagnostic-only in every mode, including
-`--write`**: it never converts or writes selected configs. Manually replace
-`lyricbooks` / `extrainstrumentbooks` and their negative forms with `variants`
-after reviewing each book's literal availability and root/profile settings.
-Replace removed CLI flags `--no-lyric` / `--no-extrainstr` in known scripts
-manually. The migrator neither guesses a selector from old booleans nor discovers
-configs, follows book paths from them, or rewrites shell invocations.
+`--config-file FILE` is repeatable and **diagnostic-only, including with
+`--write`**: selected configs are never rewritten. Review legacy variant settings
+and build scripts manually against [compiler configuration](#configuration) and
+each book's [declared availability](WRITING_SONGBOOKS.md#variants-and-visibility).
+Config files are not discovered automatically, nor are sources selected from them.
 
 Convert a legacy tag-definition file explicitly, either alone or alongside
 source migration. `--tags-file FILE` requires one of `--check`, `--diff`, or
@@ -823,39 +776,14 @@ source migration. `--tags-file FILE` requires one of `--check`, `--diff`, or
 ./ulsbs/ulsbs-migrate-syntax-v2 --write --tags-file include/tags.can content/ include/ my-songbook_A5.tex
 ```
 
-The conversion removes legacy `1` count lines and renames the file to `.txt`,
-preserving its basename (`tags.can` becomes `tags.txt`). It refuses destination
-collisions and symlinks. Ordinary source migration reminds you about tag-file
-migration but never auto-discovers `.can` files. Review the diff before writing.
-The runtime reads only the new ordered UTF-8 plain-text format, one
-`canonical|alias|alias` definition per line, not legacy `.can` syntax. The default
-lookup checks `include/tags.txt` first, then `tags.txt` through TeX lookup. For a
-custom basename, add `\ulTagFile{my-tags.txt}` in the preamble; an explicitly
-configured missing file is an error, not a fallback to the default. See
-[tag definitions](WRITING_SONGBOOKS.md#defining-your-own-tags).
+The conversion removes legacy count lines and renames `tags.can` to `tags.txt`
+(preserving the basename). It refuses destination collisions and symlinks.
+Ordinary source migration does not discover or convert `.can` files; select them
+explicitly and review the diff before writing. See the writing guide for the
+[current tag format and file lookup rules](WRITING_SONGBOOKS.md#defining-your-own-tags).
 Review explicit tag-index entries containing numbered references manually: the
 runtime matches raw tag names, and migration does not strip numeric suffixes that
 could be part of a legitimate tag name.
-
-For sources older than v1, first review and apply `ulsbs-migrate-syntax-v1`,
-then run v2, review the source diff and compile the book. V2 does not replace
-the v1 melody conversion or silently change its destination. Include custom
-classes and shared configuration sources in the naming review, not only songs.
-The tool accepts `.tex`, `.cls` and `.sty` sources or directories.
-`--check` never writes and exits nonzero for pending changes or
-review diagnostics. `--diff`
-previews safe conversions; `--write` applies them. Both exit nonzero for review
-diagnostics or I/O errors. A file with any diagnostic is neither changed nor
-shown as a partial diff; safe files in the same batch may still be updated.
-Diagnostics point to the original source. Files are updated individually, not
-as an all-or-nothing directory operation. Comments, literal regions, URLs and
-embedded LilyPond bodies are preserved. Computed names, delayed settings and
-ambiguous source constructs need manual review, not blind search-and-replace.
-Directory scans skip generated/VCS directories and engine checkouts. Choose
-explicit project source paths; symlinks and nonregular files are refused.
-
-The [writing guide](WRITING_SONGBOOKS.md) documents the resulting API;
-[architecture](ARCHITECTURE.md#syntax-migration) describes migration boundaries.
 
 ## Editor support
 

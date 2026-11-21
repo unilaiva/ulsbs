@@ -182,9 +182,11 @@ Outside.
 
     def test_inline_repeat_owner_is_unique_and_uses_effective_chord_policy(self):
         entry = (ROOT / "src/ulsbs/assets/tex/ulsbs.sty").read_text()
+        repeats = (ROOT / "src/ulsbs/assets/tex/ulsbs-repeats.code.tex").read_text()
         music = (ROOT / "src/ulsbs/assets/tex/ulsbs-music.code.tex").read_text()
         for name in ("lrep", "rrep"):
             self.assertNotRegex(entry, r"\\(?:DeclareDocumentCommand|newcommand)\\" + name)
+            self.assertNotRegex(repeats, r"\\(?:DeclareDocumentCommand|newcommand)\\" + name)
             self.assertEqual(music.count("\\cs_set_protected:Npn \\" + name), 1)
         inline = music.split("% Inline left/right signs", 1)[1].split("% #1 is repeat-count", 1)[0]
         self.assertEqual(inline.count(r"\ifulShowChords"), 2)
