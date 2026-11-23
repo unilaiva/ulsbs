@@ -59,6 +59,12 @@
 \int_const:Nn \c__ulsbs_music_end_fragment_attribute_int {\allocationnumber}
 \newattribute\__ulsbs_music_config_attribute
 \int_const:Nn \c__ulsbs_music_config_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_music_spacing_part_attribute
+\int_const:Nn \c__ulsbs_music_spacing_part_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_music_spacing_top_attribute
+\int_const:Nn \c__ulsbs_music_spacing_top_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_music_spacing_bottom_attribute
+\int_const:Nn \c__ulsbs_music_spacing_bottom_attribute_int {\allocationnumber}
 \dim_new:N \l__ulsbs_music_note_padding_dim
 \dim_new:N \l__ulsbs_music_note_raise_dim
 \dim_new:N \l__ulsbs_music_lyric_a_dim
@@ -377,9 +383,12 @@
          \bool_if:NT \l__ulsbs_chord_adjacent_bool {\kern.15em}
          \vphantom{/}\transposehere{#1}\kern.2em}}}}
    \dim_compare:nNnT {\box_wd:N \l__ulsbs_chord_box}>{0pt}
-      {\ulsbs@annotationvisibletrue\ulsbs@annotationfullclearancetrue
-       \directlua{node.set_attribute(tex.box[\number\l__ulsbs_chord_box],
-         \int_use:N\c__ulsbs_chord_row_attribute_int,1)}}}
+       {\ulsbs@annotationvisibletrue\ulsbs@annotationfullclearancetrue
+        \directlua{node.set_attribute(tex.box[\number\l__ulsbs_chord_box],
+          \int_use:N\c__ulsbs_chord_row_attribute_int,1)
+          \ifulLaneAwareAnnotationSpacing
+            ulsbs_music.tag_spacing_part(\number\l__ulsbs_chord_box)
+          \fi}}}
 
 % #1 is the single leading melody block, #2 chord tail. Reject another block in
 % the tail; compose the chord first, then overlay the parsed melody and beats.
@@ -458,9 +467,24 @@
      \__ulsbs_melody_beat_extent:N \l__ulsbs_melody_secondary_seq
      \ifdim\ulsbs@melodybeatextent>0pt\relax\ulsbs@annotationvisibletrue\fi
    \fi
-   \sbox\ulsbs@melodybeatbox{\legacy_if:nT {ulShowBeats}
-     {\rlap{\__ulsbs_melody_beats:N \l__ulsbs_melody_primary_seq}
-      \rlap{\__ulsbs_melody_beats:N \l__ulsbs_melody_secondary_seq}}}
+    \sbox\ulsbs@melodybeatbox{\legacy_if:nT {ulShowBeats}
+      {\rlap{\__ulsbs_melody_beats:N \l__ulsbs_melody_primary_seq}
+       \rlap{\__ulsbs_melody_beats:N \l__ulsbs_melody_secondary_seq}}}
+    \ifulLaneAwareAnnotationSpacing
+      \ifulsbs@melodyzeroadvance\bool_set_true:N \l__ulsbs_chord_spacing_excluded_bool\fi
+      \tl_if_empty:NF \l__ulsbs_melody_offset_tl
+        {\bool_set_true:N \l__ulsbs_chord_spacing_excluded_bool}
+      \bool_if:NF \l__ulsbs_chord_spacing_excluded_bool
+        {\directlua{
+          ulsbs_music.tag_spacing_voice(\number\ulsbs@melodyprimarybox)
+          ulsbs_music.tag_spacing_voice(\number\ulsbs@melodysecondarybox)
+          if~\number\ulsbs@melodybeatextent>0~then~
+            ulsbs_music.tag_spacing_part(\number\ulsbs@melodybeatbox,
+              \number\dimexpr\ulsbs@melodybeatextent+\ulsbs@bmleadspace\relax,
+              \number\dimexpr\ulsbs@bmradius*2-\ulsbs@bmdrop\relax,
+              \number\dimexpr-\ulsbs@bmdrop\relax)
+          end}}
+    \fi
    % Chord ink alone must not evaluate a hidden melody's authored dimension.
    \legacy_if:nT {ulsbs@annotationvisible}
      {\tl_if_empty:NF \l__ulsbs_melody_offset_tl
@@ -663,6 +687,11 @@
   ulsbs_music.setup{
     annotation = \number\csname c__ulsbs_chord_annotation_attribute_int\endcsname,
     row = \number\csname c__ulsbs_chord_row_attribute_int\endcsname,
+    spacing = \number\csname c__ulsbs_chord_spacing_attribute_int\endcsname,
+    lyric_advance = \number\csname c__ulsbs_chord_lyric_advance_attribute_int\endcsname,
+    spacing_part = \number\csname c__ulsbs_music_spacing_part_attribute_int\endcsname,
+    spacing_top = \number\csname c__ulsbs_music_spacing_top_attribute_int\endcsname,
+    spacing_bottom = \number\csname c__ulsbs_music_spacing_bottom_attribute_int\endcsname,
     note_center = \number\csname c__ulsbs_music_note_center_attribute_int\endcsname,
     note_radius = \number\csname c__ulsbs_music_note_radius_attribute_int\endcsname,
     note_level = \number\csname c__ulsbs_music_note_level_attribute_int\endcsname,

@@ -417,7 +417,8 @@
 
 \cs_set_protected:Npn \__ulsbs_chord_emit:
   {\dim_compare:nNnT {\l__ulsbs_diagram_lyric_indent_dim}>{0pt}
-     {\int_compare:nNnTF {\l__ulsbs_chord_hyphens_int}={1}
+     {\bool_set_true:N \l__ulsbs_chord_spacing_excluded_bool
+      \int_compare:nNnTF {\l__ulsbs_chord_hyphens_int}={1}
         {\tl_put_left:Nx \l__ulsbs_chord_before_hyphen_tl
           {\kern\dim_use:N \l__ulsbs_diagram_lyric_indent_dim\scan_stop:}}
         {\tl_put_left:Nx \l__ulsbs_chord_lyric_tl

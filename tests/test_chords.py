@@ -67,6 +67,282 @@ class ChordTests(unittest.TestCase):
 \end{ulSongs}
 """)
 
+    def test_lane_aware_spacing_uses_visual_lanes_and_preserves_anchors(self):
+        self.compile_checked(r"""
+\begin{ulSongs}{}
+\beginsong{Lane spacing}[id={lane-spacing},key={F}]
+\beginverse*
+{\ulLaneAwareAnnotationSpacing{false}
+\[<F>Fmaj7]lo\[<E>]ve\[<C>]ly Disabled
+}
+\[<F>]lo\[<E>]ve\[<C>]ly Control
+\[<F>Fmaj7]lo\[<E>]ve\[<C>]ly Default
+\[<* F>Fmaj7]lo\[<E>]ve\[<C>]ly Beat
+{\ulMelodyPrimaryPosition{low}\[<F>Fmaj7]lo\[<E>]ve\[<C>]ly Low}
+{\renewcommand{\ulMelodyHighHeightFactor}{4.2}\[<FFD>Fmaj7]lo\[<;E>]ve\[<;C>]ly High}
+{\ulMelodySecondaryPosition{same}\[<FFD>Fmaj7]lo\[<;E>]ve\[<;C>]ly Same}
+{\ulMelodySecondaryPosition{below}\[<F>Fmaj7]lo\[<;E>]ve\[<;C>]ly Below}
+\[<F>Fmaj7]lo\[<E>]ve\[<C>C]ly Carry
+\memorize[spacing]
+\[<F>Fmaj7]lo\[<E>]ve\[<C>]ly Recorded
+\replay[spacing]
+^lo^ve^ly Replayed
+\endverse
+\endsong
+\end{ulSongs}
+""", r"\newchords{spacing}")
+        rows = {tokens[-1]: " ".join(tokens[:-1]) for line in self.pdf_text().splitlines()
+                if (tokens := line.split())}
+        for label in ("Control", "Default", "Beat", "High", "Recorded", "Replayed"):
+            self.assertEqual(rows[label], "lovely", rows)
+        for label in ("Disabled", "Low", "Same", "Below"):
+            self.assertRegex(rows[label], r"^lo\s*-\s*vely$", rows)
+        self.assertRegex(rows["Carry"], r"^love\s*-\s*ly$", rows)
+
+        # The compact word and its melody reproduce the melody-only control's
+        # exact horizontal positions; the carried chord clears the first label.
+        words = words_and_geometry((self.book / "book.pdf").read_bytes())
+        for text in ("lo", "ve", "ly", "e", "c"):
+            matches = sorted((word for word in words if word[1] == text), key=lambda w: w[3])
+            control, compact = matches[1:3]
+            self.assertAlmostEqual(control[2], compact[2], delta=.02)
+            self.assertAlmostEqual(control[4], compact[4], delta=.02)
+        _, _, next_chord_x, next_chord_y, *_ = self.word_box("C")
+        previous_edge = max(w[4] for w in words if w[1] == "Fmaj7" and abs(w[3] - next_chord_y) < .1)
+        self.assertGreater(next_chord_x, previous_edge)
+
+    def test_chord_hyphen_allowance_is_configurable_and_fits_the_glyph(self):
+        output = self.compile_checked(r"""
+\begin{ulSongs}{}\beginsong{Hyphen allowance}[key={F}]
+\beginverse*
+\setbox0=\hbox{\char\hyphenchar\font}
+\dimen0=0.4em\relax
+\typeout{HYPHEN-WIDTH=\the\wd0;ALLOWANCE=\the\dimen0}
+\[C]admi-\[C]ro NormalDefault
+{\renewcommand{\ulChordHyphenAllowance}{0.4em+2pt}
+\[C]admi-\[C]ro NormalWider
+}
+{\renewcommand{\ulChordHyphenAllowance}{0pt}
+\[C]admi-\[C]ro NormalGlyph
+}
+\[<F>Fmaj7]lo\[<E>]ve\[<C>C]ly Default
+{\renewcommand{\ulChordHyphenAllowance}{0.4em}
+\[<F>Fmaj7]lo\[<E>]ve\[<C>C]ly Explicit
+}
+{\renewcommand{\ulChordHyphenAllowance}{0.4em+2pt}
+\[<F>Fmaj7]lo\[<E>]ve\[<C>C]ly Wider
+}
+{\renewcommand{\ulChordHyphenAllowance}{0pt}
+\[<F>Fmaj7]lo\[<E>]ve\[<C>C]ly Glyph
+}
+\[<F>Fmaj7]lo\[<E>]ve\[<C>C]ly Restored
+\endverse\endsong\end{ulSongs}
+""")
+        words = words_and_geometry((self.book / "book.pdf").read_bytes())
+        def position(label, text):
+            _, _, _, y, *_ = self.word_box(label)
+            x, = (w[2] for w in words if w[1] == text and abs(w[3] - y) < .1)
+            return x
+
+        glyph, allowance = map(float, re.search(r"HYPHEN-WIDTH=([\d.]+)pt;ALLOWANCE=([\d.]+)pt", output).groups())
+        self.assertGreater(allowance, glyph)
+        self.assertEqual(position("Default", "ly"), position("Explicit", "ly"))
+        self.assertEqual(position("Default", "ly"), position("Restored", "ly"))
+        for prefix, text in (("", "ly"), ("Normal", "ro")):
+            default = position(prefix + "Default", text)
+            self.assertAlmostEqual(position(prefix + "Wider", text) - default, 2 * 72 / 72.27, delta=.03)
+            self.assertAlmostEqual(default - position(prefix + "Glyph", text), (allowance - glyph) * 72 / 72.27, delta=.03)
+        self.assertNotIn("Overfull \\hbox", output)
+
+    def test_lane_aware_spacing_preserves_authored_boundaries_and_wraps(self):
+        source = r"""
+\[<F>Fmaj7]lo-\[<E>]ve\[<C>]ly Hyphen
+\[<F>Fmaj7]lo\[<E@.2em>]ve\[<C>]ly Offset
+\[<F>Fmaj7]lo\[<!E>]ve\[<C>]ly Overlay
+\[<F>Fmaj7]lo\[<E>]\[G]ve\[<C>]ly Adjacent
+\[<F>Fmaj7]lo|\[<E>]ve\[<C>]ly Bar
+\[<F>Fmaj7]lo {\notesoff\[<E>]ve}\[<C>]ly Hidden
+"""
+        output = self.compile_checked(r"""
+\begin{ulSongs}{}\beginsong{Authored spacing}[key={F}]
+\beginverse*
+""" + source + r"""
+{\ulLaneAwareAnnotationSpacing{false}
+""" + source + r"""
+}
+{
+\[<F>Fmaj7/G\kern2em]lo\[<E>]ve\[<C>]ly \[G]After
+}
+{\hsize=68pt
+Earlier \[<F>Fmaj7]lo\[<E>]ve\[<C>]ly
+}
+\endverse\endsong\end{ulSongs}
+""")
+        rows = [" ".join(line.split()) for line in self.pdf_text().splitlines()]
+        for label in ("Hyphen", "Offset", "Overlay", "Adjacent", "Bar", "Hidden"):
+            before, after = (row for row in rows if row.endswith(" " + label))
+            self.assertEqual(before, after)
+        self.assertGreater(self.word_box("After")[2], self.word_box("Fmaj7/G")[4])
+        self.assertIn("Earlier", rows)
+        self.assertEqual(rows.count("lovely"), 1, rows)
+        self.assertNotIn("Overfull \\hbox", output)
+
+    def test_lane_aware_spacing_keeps_multikey_lyric_anchors(self):
+        self.compile_checked(r"""
+\begin{ulSongs}{}\beginsong{Layered spacing}[id={layered-spacing},key={F}]
+\beginverse*
+\[<F>Fmaj7]lo\[<E>]ve\[<C>]ly
+\endverse\endsong\end{ulSongs}
+""", prefix=r"\def\ulPdfTranspositionLayers{true}", passes=3)
+        pdf = (self.book / "book.pdf").read_bytes()
+        original = words_and_geometry(pdf)
+        transposed = words_and_geometry(PdfStructure(pdf).selected_pdf(pdf, {1: 1}))
+        for text in ("lo", "ve", "ly"):
+            self.assertEqual([w for w in original if w[1] == text],
+                             [w for w in transposed if w[1] == text])
+        self.assertIn("Fmaj7", [w[1] for w in original])
+        self.assertNotIn("Fmaj7", [w[1] for w in transposed])
+        self.assertNotIn("-", [w[1] for w in original + transposed])
+
+    def test_ul_space_uses_real_scaled_lyric_glue(self):
+        output = self.compile_checked(r"""
+\begin{ulSongs}{}\beginsong{Space measurements}
+\beginverse*
+\spaceskip=5pt plus 2pt minus 1pt\relax
+\MeasureSpace{literal}{ }
+\MeasureSpace{default}{\ulSpace}
+\MeasureSpace{one}{\ulSpace[1]}
+\MeasureSpace{scaled}{\ulSpace[1.5] }
+\MeasureSpace{zero}{\ulSpace[0]}
+\meter{}{}\[<*>]|\[C]BarZero
+\meter{}{}\[<*>]\ulSpace|\[C]BarOne
+\meter{}{}\[<*>]\ulSpace[1.5]|\[C]BarWide
+\endverse\endsong\end{ulSongs}
+""", r"""
+\newcommand\MeasureSpace[2]{\setbox0=\hbox{X\spacefactor=1000\relax
+  #2\skip0=\lastskip\relax\typeout{SPACE-#1=\the\skip0}}}
+""")
+        widths = dict(re.findall(r"SPACE-([a-z]+)=([^\r\n]+)", output))
+        self.assertEqual(widths, {"literal": "5.0pt plus 2.0pt minus 1.0pt",
+                                  "default": "5.0pt plus 2.0pt minus 1.0pt",
+                                  "one": "5.0pt plus 2.0pt minus 1.0pt",
+                                  "scaled": "7.5pt plus 3.0pt minus 1.5pt", "zero": "0.0pt"})
+        bar_zero, bar_one, bar_wide = (self.word_box(label)[2]
+                                      for label in ("BarZero", "BarOne", "BarWide"))
+        self.assertAlmostEqual(bar_one - bar_zero, 5 * 72 / 72.27, delta=.03)
+        self.assertAlmostEqual(bar_wide - bar_zero, 7.5 * 72 / 72.27, delta=.03)
+
+    def test_ul_space_marks_only_selected_word_boundaries(self):
+        self.compile_checked(r"""
+\begin{ulSongs}{}\beginsong{Boundary geometry}
+\beginverse*
+\[<C>]Tu |luz, \[<E>]tu Control
+{\ulLaneAwareAnnotationSpacing{false}
+\[<C>]Tu |\[Fmaj7]luz,\ulSpace\[<E>]tu Disabled
+}
+\[<C>]Tu |\[Fmaj7]luz, \[<E>]tu Ordinary
+\[<C>]Tu |\[Fmaj7]luz,\ulSpace\[<E>]tu Marked
+\[<C>]Tu |\[Fmaj7]luz,\ulSpace[1.5]\[<E>]tu Scaled
+{\ulMelodyPrimaryPosition{low}\[<C>]Tu |\[Fmaj7]luz,\ulSpace\[<E>]tu Low}
+\[<C>]Tu |\[Fmaj7]luz,\ulSpace\[<E @ 0pt>]tu Offset
+\endverse\endsong\end{ulSongs}
+""")
+        words = words_and_geometry((self.book / "book.pdf").read_bytes())
+        gaps, note_starts = {}, {}
+        labels = ("Control", "Disabled", "Ordinary", "Marked", "Scaled", "Low", "Offset")
+        for label in labels:
+            _, _, _, y, *_ = self.word_box(label)
+            line = {w[1]: w for w in words if w[1] in {"luz,", "tu"} and abs(w[3] - y) < .1}
+            gaps[label] = line["tu"][2] - line["luz,"][4]
+            note_starts[label] = line["tu"][2]
+        self.assertAlmostEqual(gaps["Marked"], gaps["Control"], delta=.04)
+        self.assertAlmostEqual(gaps["Scaled"], 1.5 * gaps["Control"], delta=.05)
+        self.assertGreater(gaps["Ordinary"], gaps["Marked"] + 2)
+        self.assertAlmostEqual(gaps["Disabled"], gaps["Ordinary"], delta=.02)
+        self.assertAlmostEqual(gaps["Offset"], gaps["Ordinary"], delta=.02)
+        _, _, _, low_y, *_ = self.word_box("Low")
+        chord_edge = max(w[4] for w in words if w[1] == "Fmaj7" and 0 < low_y - w[3] < 15)
+        self.assertGreater(note_starts["Low"], chord_edge)
+        self.assertNotIn("-", [w[1] for w in words])
+
+    def test_ul_space_wrap_reserves_the_chord_without_a_hyphen(self):
+        output = self.compile_checked(r"""
+\begin{ulSongs}{}\beginsong{Wrapping spaces}
+\beginverse*
+\hsize=32pt\setlength\ulContentIndentWidth{0pt}
+\[Fmaj7]luz,\ulSpace\[<E>]tu
+\[Fmaj7]luz, \[<E>]tu
+\hsize=53pt
+Way \[Fmaj7]luz,\ulSpace\[<E>]tu
+\endverse\endsong\end{ulSongs}
+""")
+        words = words_and_geometry((self.book / "book.pdf").read_bytes())
+        first, second, last = sorted((w for w in words if w[1] == "tu"), key=lambda w: w[3])
+        first_luz, second_luz, last_luz = sorted((w for w in words if w[1] == "luz,"), key=lambda w: w[3])
+        self.assertGreater(first[3], first_luz[3])
+        self.assertGreater(second[3], second_luz[3])
+        self.assertEqual(first[2], second[2])  # no retained space at the start of the new line
+        self.assertGreater(last_luz[3], self.word_box("Way")[3])
+        self.assertEqual(last[3], last_luz[3])
+        self.assertNotIn("-", [w[1] for w in words])
+        self.assertNotIn("Overfull \\hbox", output)
+
+    def test_starred_space_centers_one_hyphen_across_explicit_and_replayed_ink(self):
+        output = self.compile_checked(r"""
+\begin{ulSongs}{}\beginsong{Continuation spaces}[key={C}]
+\beginverse*\memorize
+\ulLaneAwareAnnotationSpacing{false}
+di|\[<C>]vi\[<*>]\ulSpace*na ExplicitBeat
+di|\[<C>]vi\[Fmaj7]\ulSpace*na ExplicitChord
+di|\[<C>]vi\[Fmaj7]\ulSpace*[1.5]na ExplicitWide
+di|\[Fmaj7]vi\[<*>]\ulSpace*na ExplicitSingle
+\[Fmaj7]luz,\ulSpace\[<E>]tu ExplicitGap
+vi\ulSpace*[0]na PlainText
+\endverse
+\beginverse*\replay
+di|^vi^\ulSpace*na ReplayBeat
+di|^vi^\ulSpace*na ReplayChord
+di|^vi^\ulSpace*[1.5]na ReplayWide
+di|^vi^\ulSpace*na ReplaySingle
+^luz,\ulSpace^tu ReplayGap
+\endverse
+\beginverse*
+\hsize=50pt\setlength\ulContentIndentWidth{0pt}
+\[<C>]vi\[Fmaj7]\ulSpace*nana
+\endverse\endsong\end{ulSongs}
+""")
+        words = words_and_geometry((self.book / "book.pdf").read_bytes())
+
+        def row(label):
+            _, _, _, y, *_ = self.word_box(label)
+            return [w for w in words if w[1] in {"vi-na", "vi", "-", "na", "luz,", "tu"}
+                    and abs(w[3] - y) < .1]
+
+        for label in ("ExplicitBeat", "ReplayBeat", "PlainText"):
+            self.assertIn("vi-na", [w[1] for w in row(label)])
+        geometry = {}
+        for mode in ("Explicit", "Replay"):
+            for case in ("Chord", "Wide", "Single"):
+                label = mode + case
+                left, dash, right = [w for w in row(label) if w[1] in {"vi", "-", "na"}]
+                self.assertEqual([w[1] for w in (left, dash, right)], ["vi", "-", "na"])
+                self.assertAlmostEqual((dash[2] + dash[4]) / 2, (left[4] + right[2]) / 2, delta=.04)
+                geometry[label] = right[2] - left[4]
+        for case in ("Chord", "Wide", "Single"):
+            self.assertAlmostEqual(geometry["Explicit" + case], geometry["Replay" + case], delta=.04)
+        self.assertGreater(geometry["ExplicitWide"], geometry["ExplicitChord"] + 1)
+
+        # The ordinary space also compacts across a replay boundary when enabled.
+        def word_gap(label):
+            left, right = (w for w in row(label) if w[1] in {"luz,", "tu"})
+            return right[2] - left[4]
+
+        self.assertLess(word_gap("ReplayGap"), word_gap("ExplicitGap") - 2)
+        _, _, _, wrapped_y, *_ = self.word_box("nana")
+        prior_lyric = max(w[3] for w in words if w[1] == "vi" and w[3] < wrapped_y)
+        self.assertTrue(any(w[1] == "-" and w[3] == prior_lyric for w in words))
+        self.assertNotIn("Overfull \\hbox", output)
+
     def test_physical_lines_comments_and_accented_lyrics(self):
         self.compile_checked(r"""
 \begin{ulSongs}{}

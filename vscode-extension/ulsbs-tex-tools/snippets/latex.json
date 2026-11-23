@@ -85,6 +85,24 @@
     "description": "Set the primary/secondary visual style mapping in the current TeX scope."
   },
 
+  "Lane-aware annotation spacing (ULSBS)": {
+    "prefix": "ulLaneAwareAnnotationSpacing",
+    "body": "\\ulLaneAwareAnnotationSpacing{${1|false,true|}}",
+    "description": "Opt out of lane-aware annotation spacing, which is on by default."
+  },
+
+  "Scaled lyric space (ULSBS)": {
+    "prefix": "ulSpace",
+    "body": "\\ulSpace[${1:1.5}]$0",
+    "description": "Insert a breakable lyric space with an optional multiplier (omit the brackets for one normal space)."
+  },
+
+  "Centered continuation hyphen (ULSBS)": {
+    "prefix": "ulSpace*",
+    "body": "\\ulSpace*$0",
+    "description": "Center one hyphen in a lyric continuation gap, including across an intervening annotation."
+  },
+
   "begin{ulSongs} ... end{ulSongs} (ULSBS)": {
     "prefix": [ "begin{ulSongs}", "\\begin{ulSongs}" ],
     "body": [

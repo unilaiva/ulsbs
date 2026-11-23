@@ -520,6 +520,20 @@ function registerCompletionProvider(vscode, context) {
               isAllowed: () => true
             },
             {
+              name: "ulLaneAwareAnnotationSpacing",
+              title: "Lane-aware annotation spacing (ULSBS)",
+              doc: "Annotations at different heights share horizontal space by default. Set `false` to opt out in the current TeX scope.",
+              snippet: "ulLaneAwareAnnotationSpacing{${1|false,true|}}",
+              isAllowed: () => true
+            },
+            {
+              name: "ulSpace",
+              title: "Explicit lyric space (ULSBS)",
+              doc: "Insert a breakable lyric space. Use `\\ulSpace*` to center a continuation hyphen within a word. An optional multiplier such as `[1.5]` scales the space.",
+              snippet: "ulSpace${1|,*|}$0",
+              isAllowed: (ctx) => ctx.inVerse || ctx.inTranslation
+            },
+            {
               name: "ulMelodyStyleMapping",
               title: "Melody style mapping (ULSBS)",
               doc: "Map primary and secondary melodies to their normal or swapped visual styles in the current TeX scope.",

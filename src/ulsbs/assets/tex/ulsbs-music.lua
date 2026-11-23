@@ -1,7 +1,7 @@
 -- SPDX-FileCopyrightText: 2026 Lari Natri <lari.natri@iki.fi>
 -- SPDX-License-Identifier: GPL-3.0-or-later
 --
--- Retained physical-line geometry for musical annotations, bars and repeats.
+-- Retained annotation spacing and physical-line geometry for music and bars.
 -- This file is part of the 'ulsbs' package.
 --
 -- Loaded with dofile by ulsbs-music.code.tex as ulsbs_music. TeX renders source
@@ -102,6 +102,340 @@ function M.setup(a)
     node.set_attribute(tex.box[id], a.config, M.capture_config())
   end
 
+  -- Mark independent horizontal parts before TeX overlays them. Most parts use
+  -- their retained box dimensions. Beats hide their real extents from TeX.
+  function M.tag_spacing_part(id, width, top, bottom)
+    local box = tex.box[id]
+    width = width or box.width
+    if width <= 0 then return end
+    node.set_attribute(box, a.spacing_part, width)
+    if top then
+      node.set_attribute(box, a.spacing_top, top)
+      node.set_attribute(box, a.spacing_bottom, bottom)
+    end
+  end
+
+  -- The enclosing voice box extends down to its baseline even when every note
+  -- is raised. The retained circle markers give the height of the actual lane.
+  local function visit_circles(list, raise, visit)
+    for n in node.traverse_id(hlist, list) do
+      local baseline = raise - n.shift
+      local center = node.has_attribute(n, a.note_center)
+      if center then
+        visit(n, baseline, center, assert(node.has_attribute(n, a.note_radius)))
+      elseif visible_box(n) then
+        visit_circles(n.list, baseline, visit)
+      end
+    end
+  end
+  function M.tag_spacing_voice(id)
+    local box = tex.box[id]
+    if box.width <= 0 then return end
+    local top, bottom
+    visit_circles(box.list, 0, function(_, baseline, center, radius)
+      local y = baseline + center
+      top = math.max(top or y, y + radius)
+      bottom = math.min(bottom or y, y - radius)
+    end)
+    M.tag_spacing_part(id, box.width, top or 0, bottom or 0)
+  end
+
+  local penalty, disc = node.id('penalty'), node.id('disc')
+  local function continuation(n)
+    return n and n.id == penalty and node.has_attribute(n, a.spacing)
+  end
+  local function marked_space(n)
+    return n and n.id == glue and node.has_attribute(n, a.spacing)
+      and n.shrink_order == 0 and n.shrink >= 0 and n.shrink <= n.width
+  end
+
+  local function check_space_range(scale, width)
+    if scale ~= math.huge and width <= 1073741823 then return true end
+    tex.error('ulsbs: scaled lyric space exceeds the TeX dimension range',
+      {'Use a smaller multiplier for \\ulSpace.'})
+  end
+
+  function M.scale_space(scale, mark)
+    local space = tex.nest.top.tail
+    if not space or space.id ~= glue then return end
+    if scale ~= 1 then
+      local w, stretch, shrink = space.width * scale, space.stretch * scale, space.shrink * scale
+      if not check_space_range(scale, math.max(math.abs(w), math.abs(stretch), math.abs(shrink))) then return end
+      node.setglue(space, math.floor(w + .5), math.floor(stretch + .5), math.floor(shrink + .5),
+        space.stretch_order, space.shrink_order)
+    end
+    if mark then node.set_attribute(space, a.spacing, 0) end
+  end
+
+  -- A starred gap owns its hyphen, including when a preceding annotation
+  -- (replayed or explicit) has already reserved width without emitting lyrics.
+  function M.continuation_space(dash_id, space, scale, break_cost)
+    space = space * scale
+    if not check_space_range(scale, space) then return end
+    space = math.floor(space + .5)
+    local dash, gap, guards = tex.box[dash_id], 0, {}
+    local n = tex.nest.top.tail
+    while n do
+      local advance = node.has_attribute(n, a.lyric_advance)
+      if not advance then break end
+      if n.id == vlist then
+        if advance == 0 then
+          gap = gap + n.width
+        else
+          -- The automatic (not authored) dash carries the natural annotation
+          -- width. Restore that width before taking the midpoint of the gap.
+          local top, row
+          for box in node.traverse_id(hlist, n.list) do
+            if top then row = box; break end
+            top = box
+          end
+          if row then
+            local old_dash = node.tail(row.list)
+            if old_dash and old_dash.id == glue then old_dash = old_dash.prev end
+            local ink = old_dash and node.has_attribute(old_dash, a.lyric_advance)
+            if ink then
+              row.list = node.remove(row.list, old_dash)
+              node.flush_node(old_dash)
+              local width = math.max(advance, ink)
+              n.width, row.width, top.width = width, width, width
+              row.glue_set = 0
+            end
+          end
+          node.unset_attribute(n, a.spacing)
+          gap = gap + n.width - advance
+          break
+        end
+      elseif n.id == penalty then
+        guards[#guards + 1] = n
+      elseif n.id ~= glue or n.width ~= 0 or n.stretch ~= 0 or n.shrink ~= 0 then
+        break
+      end
+      n = n.prev
+    end
+    for _, guard in ipairs(guards) do guard.penalty = 10000 end
+
+    local function with_dash(left, right)
+      local before, after = node.new('kern', 1), node.new('kern', 1)
+      before.kern, after.kern = left, right
+      local glyph = node.copy(dash)
+      node.insert_after(before, before, glyph)
+      node.insert_after(before, glyph, after)
+      return before
+    end
+    local width = math.max(gap + space, dash.width)
+    local left = math.floor((width - dash.width) / 2)
+    local wrap = node.new(disc)
+    wrap.penalty = break_cost
+    wrap.replace = with_dash(left - gap, width - left - dash.width)
+    -- At a break, use the already reserved end of the line if the glyph fits.
+    wrap.pre = with_dash(-math.min(dash.width, gap), 0)
+    node.write(wrap)
+  end
+
+  -- Read a candidate's two retained rows and actual bands relative to the
+  -- annotation baseline. The source scanner excludes offsets and adjacent runs,
+  -- so all parts of this anchor start at the same horizontal position.
+  local function spacing_anchor(stack, padding)
+    local top, row
+    for n in node.traverse_id(hlist, stack.list) do
+      if not top then top = n else row = n; break end
+    end
+    local lyric = row and row.list
+    if not lyric or lyric.id ~= hlist then return end
+    local dash, printed
+    for n in node.traverse(lyric.next) do
+      if n.id == hlist then dash, printed = n, true
+      elseif n.id == disc then dash = n.pre end
+    end
+    if not dash then return end
+    local bands, empty_slot = {}, false
+    local function parts(list, raise)
+      for n in node.traverse_id(hlist, list) do
+        local baseline = raise - n.shift
+        local width = node.has_attribute(n, a.spacing_part)
+        if width then
+          local low = baseline + (node.has_attribute(n, a.spacing_bottom) or -n.depth)
+          local high = baseline + (node.has_attribute(n, a.spacing_top) or n.height)
+          if low < high then
+            bands[#bands + 1] = {low = low, high = high, width = width}
+          else
+            -- A voice containing only authored empty slots has no band to test.
+            empty_slot = true
+          end
+        elseif visible_box(n) then
+          parts(n.list, baseline)
+        end
+      end
+    end
+    parts(top.list, 0)
+    if empty_slot or #bands == 0 then return end
+    return {stack = stack, row = row, lyric = lyric, dash = dash, printed = printed or false,
+      padding = math.max(padding, dash.width), bands = bands}
+  end
+
+  -- Change only the horizontal advances. The annotation row is already flush
+  -- left; the two original row baselines, ink, and wrappers are kept intact.
+  local function set_advance(anchor)
+    local row, lyric, width = anchor.row, anchor.lyric, anchor.advance
+    if width == anchor.stack.width and (anchor.hyphen or false) == anchor.printed then return end
+    local dash = anchor.hyphen and node.copy(anchor.dash)
+    local rest = lyric.next
+    lyric.next, rest.prev = nil, nil
+    node.flush_list(rest)
+    local gap = width - lyric.width
+    if dash then
+      local before = node.new('kern')
+      before.kern = math.floor((gap - dash.width) / 2)
+      node.insert_after(lyric, lyric, before)
+      node.insert_after(lyric, before, dash)
+      gap = gap - before.kern - dash.width
+    end
+    if gap ~= 0 then
+      local after = node.new('kern')
+      after.kern = gap
+      node.insert_after(lyric, node.tail(lyric), after)
+    end
+    row.width, anchor.stack.width = width, width
+  end
+
+  -- Replace a glue breakpoint only when annotation ink needs extra width at
+  -- the end of the broken line. On an unbroken line the glue retains its normal
+  -- stretch/shrink; at the disc break TeX discards both the guard and the glue.
+  local function protect_space(head, space, padding)
+    local wrap = node.new(disc)
+    wrap.penalty = 0
+    local reserve = node.new(hlist)
+    reserve.width = padding
+    wrap.pre = reserve
+    local guard = node.new(penalty)
+    guard.penalty = 10000
+    head = node.insert_before(head, space, wrap)
+    return (node.insert_before(head, space, guard))
+  end
+
+  -- Greedily place syllables against all earlier bands. Test marked spaces at
+  -- minimum width so justification cannot squeeze their annotations together.
+  local function space_run(head, run, available)
+    if #run < 2 then return head end
+    local previous, x, right, original, line_start, placed = nil, 0, 0, 0, 0, {}
+    for _, anchor in ipairs(run) do
+      original = original + anchor.stack.width
+      anchor.hyphen, anchor.breakable = nil, nil
+      if previous then
+        local link = previous.link
+        local space = link.id == glue and link
+        if space then
+          previous.wrap_padding = math.max(0, right - x)
+          if x + previous.wrap_padding - line_start > available then return end
+          local minimum = space.width - space.shrink
+          x, original = x + minimum, original + minimum
+        end
+        local clearance = 0
+        for _, band in ipairs(anchor.bands) do
+          for _, older in ipairs(placed) do
+            if band.low < older.high and older.low < band.high then
+              clearance = math.max(clearance, older.right - x)
+            end
+          end
+        end
+        if space then
+          previous.space_extra = clearance
+          x = x + clearance
+          line_start = x
+        else
+          if clearance > 0 then
+            if previous.dash.height > previous.row.height or previous.dash.depth > previous.row.depth then return end
+            local gap = clearance + previous.padding
+            previous.advance, previous.hyphen = previous.advance + gap, true
+            x = x + gap
+          end
+          -- A synthetic break is safe only when no earlier ink protrudes.
+          previous.breakable = previous.hyphen and right <= x
+        end
+      end
+      for _, band in ipairs(anchor.bands) do
+        local edge = x + band.width
+        right = math.max(right, edge)
+        placed[#placed + 1] = {low = band.low, high = band.high, right = edge}
+      end
+      anchor.advance = anchor.lyric.width
+      x = x + anchor.advance
+      previous = anchor
+    end
+    local terminal = run[#run]
+    terminal.advance = math.max(terminal.stack.width, right - (x - terminal.advance))
+    x = x + terminal.advance - terminal.lyric.width
+    if x > original or x - line_start > available then return end
+    for _, anchor in ipairs(run) do
+      set_advance(anchor)
+      local link = anchor.link
+      if link then
+        if link.id == glue then
+          if anchor.space_extra > 0 then link.width = link.width + anchor.space_extra end
+          if anchor.wrap_padding > 0 then head = protect_space(head, link, anchor.wrap_padding) end
+        else
+          link.penalty = anchor.breakable and continuation(link) or 10000
+        end
+      end
+    end
+    return head
+  end
+
+  -- Read a whole word before allowing it to join another across a marked space.
+  -- An unsupported word must not disable compaction of its valid neighbors.
+  local function read_word(current)
+    local word = {}
+    while current and current.id == vlist do
+      local padding = node.has_attribute(current, a.spacing)
+      if not padding then return end
+      local anchor = spacing_anchor(current, padding)
+      if not anchor then return end
+      word[#word + 1] = anchor
+      if not continuation(current.next) then return word end
+      anchor.link = current.next
+      current = current.next.next
+    end
+  end
+
+  luatexbase.add_to_callback('pre_linebreak_filter', function(head)
+    local available, current = nil, head
+    while current do
+      if current.id == vlist and not continuation(current.prev) then
+        local word = read_word(current)
+        if word then
+          if not available then
+            available = tex.hsize - math.max(tex.skip.leftskip.width, 0)
+              - math.max(tex.skip.rightskip.width, 0) - math.abs(tex.hangindent)
+            for _, line in ipairs(tex.parshape or {}) do available = math.min(available, line[2]) end
+          end
+          local last, words, run = word[#word], {word}, {}
+          for _, anchor in ipairs(word) do run[#run + 1] = anchor end
+          while marked_space(last.stack.next) do
+            local space = last.stack.next
+            local next_word = read_word(space.next)
+            if not next_word then break end
+            last.link = space
+            last = next_word[#next_word]
+            words[#words + 1] = next_word
+            for _, anchor in ipairs(next_word) do run[#run + 1] = anchor end
+          end
+          local fitted = space_run(head, run, available)
+          if fitted then
+            head = fitted
+          elseif #words > 1 then
+            for _, part in ipairs(words) do
+              part[#part].link = nil
+              head = space_run(head, part, available) or head
+            end
+          end
+          current = last.stack
+        end
+      end
+      current = current.next
+    end
+    return head
+  end, 'ulsbs-annotation-spacing')
+
   -- Per-anchor TeX stacking protects deep chord tails and tall lyric glyphs, but
   -- can leave neighboring anchors on different annotation baselines. Raise each
   -- retained row to the largest required clearance on its physical lyric line.
@@ -166,27 +500,19 @@ function M.setup(a)
     end
     -- Recover circle ink and nominal lane raises through visible hbox wrappers;
     -- anchor is the annotation baseline and baseline tracks nested box shifts.
-    local function circles(list, baseline, anchor)
-      for n in node.traverse_id(hlist, list) do
-        local raised = baseline - n.shift
-        local center = node.has_attribute(n, a.note_center)
-        if center then
-          local level = node.has_attribute(n, a.note_level) or 2
-          local radius = assert(node.has_attribute(n, a.note_radius))
-          local chord_base = anchor + raised - assert(node.has_attribute(n, a.note_raise))
-          local base = assert(node.has_attribute(n, a.chord_a))
-          chord_reference(chord_base, base, false)
-          info.level = math.max(info.level, level)
-          local circle = {level = level, bottom = anchor + raised + center - radius,
-            base = 2 * radius, anchor = chord_base, center = center,
-            normal = node.has_attribute(n, a.normal_raise), high = node.has_attribute(n, a.high_raise)}
-          notes[#notes + 1] = circle
-          if level >= 2 then reference(level, circle.bottom, circle.base) end
-        elseif visible_box(n) then
-          -- Only effective-original geometry is visited, never zero-sized PDF overlays.
-          circles(n.list, raised, anchor)
-        end
-      end
+    local function circles(list, anchor)
+      visit_circles(list, 0, function(n, raised, center, radius)
+        local level = node.has_attribute(n, a.note_level) or 2
+        local chord_base = anchor + raised - assert(node.has_attribute(n, a.note_raise))
+        local base = assert(node.has_attribute(n, a.chord_a))
+        chord_reference(chord_base, base, false)
+        info.level = math.max(info.level, level)
+        local circle = {level = level, bottom = anchor + raised + center - radius,
+          base = 2 * radius, anchor = chord_base, center = center,
+          normal = node.has_attribute(n, a.normal_raise), high = node.has_attribute(n, a.high_raise)}
+        notes[#notes + 1] = circle
+        if level >= 2 then reference(level, circle.bottom, circle.base) end
+      end)
     end
     -- Read an annotation's visible chord metric and any retained melody circles.
     local function raw_anchor(n, baseline)
@@ -197,7 +523,7 @@ function M.setup(a)
         info.level = math.max(info.level, 1)
         chord_reference(baseline, base, true)
       end
-      circles(n.list, 0, baseline)
+      circles(n.list, baseline)
     end
     -- Locate annotation anchors inside the effective-original chord row.
     local function run(list, baseline)

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Annotations on separate rows now share space within words by default. Opt
+  out with `\ulLaneAwareAnnotationSpacing{false}`. Both modes use a configurable
+  `\ulChordHyphenAllowance` (default `0.4em`, at least the hyphen width).
+- Add breakable `\ulSpace` to allow lane-aware spacing across selected word
+  boundaries, with an optional multiplier (`\ulSpace[1.5]`). Use `\ulSpace*`
+  for a centered continuation hyphen within a word.
 - Scale a MULTIKEY score's transposed systems uniformly on each page, so one
   system's tighter fit does not make it look smaller than its neighbors. The
   original score still determines where all keys split across pages.

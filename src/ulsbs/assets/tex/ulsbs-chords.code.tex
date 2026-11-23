@@ -51,14 +51,53 @@
 \bool_new:N \l__ulsbs_chord_excluded_bool
 \bool_new:N \l__ulsbs_chord_full_clearance_bool
 \bool_new:N \l__ulsbs_chord_empty_anchor_bool
+\bool_new:N \l__ulsbs_chord_spacing_excluded_bool
+\bool_new:N \l__ulsbs_chord_spacing_continues_bool
+\bool_new:N \l__ulsbs_chord_spacing_candidate_bool
 \int_new:N \l__ulsbs_chord_hyphens_int
 \int_new:N \g__ulsbs_chord_spacefactor_int
 \dim_new:N \l__ulsbs_chord_width_dim
+\dim_new:N \l__ulsbs_chord_hyphen_allowance_dim
+\box_new:N \l__ulsbs_chord_dash_box
 \newattribute\__ulsbs_chord_annotation_attribute
 \int_const:Nn \c__ulsbs_chord_annotation_attribute_int {\allocationnumber}
 \newattribute\__ulsbs_chord_row_attribute
 \int_const:Nn \c__ulsbs_chord_row_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_chord_spacing_attribute
+\int_const:Nn \c__ulsbs_chord_spacing_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_chord_lyric_advance_attribute
+\int_const:Nn \c__ulsbs_chord_lyric_advance_attribute_int {\allocationnumber}
+% Space available for the continuation hyphen, including the glyph itself.
+\providecommand{\ulChordHyphenAllowance}{0.4em}
+\tl_new:N \l__ulsbs_space_scale_tl
 \msg_new:nnn {ulsbs-chords}{state}{Invalid~chord~state:~#1.}
+\msg_new:nnn {ulsbs-chords}{space-scale}{Invalid~\token_to_str:N \ulSpace~multiplier.
+  ~Use~a~nonnegative~number,~e.g.~1.5.}
+
+% Measure the star's nominal space in the current text context without adding
+% interword glue to the paragraph: its only breakpoint is at the hyphen.
+\cs_new_protected:Npn \__ulsbs_continuation_space:
+  {\group_begin:
+   \int_set:Nn \l_tmpa_int {\spacefactor}
+   \hbox_set:Nn \l_tmpa_box {\spacefactor=\l_tmpa_int\relax\space}
+   \hbox_set:Nn \l__ulsbs_chord_dash_box {\__ulsbs_chord_dash:}
+   \directlua{ulsbs_music.continuation_space(\number\l__ulsbs_chord_dash_box,
+     \number\wd\l_tmpa_box, tonumber("\luaescapestring{\l__ulsbs_space_scale_tl}"),
+     \number\exhyphenpenalty)}
+   \group_end:}
+
+\NewDocumentCommand \ulSpace {s O{1}}
+  {\tl_set:Nx \l__ulsbs_space_scale_tl {#2}
+   \regex_match:nVTF {\A\s*\+?(\d+(\.\d*)?|\.\d+)\s*\Z} \l__ulsbs_space_scale_tl
+     {\mode_if_horizontal:T
+        {\IfBooleanTF{#1}
+           {\legacy_if:nF {ulNoLyrics}{\__ulsbs_continuation_space:}}
+           {% Emit actual interword glue to retain ordinary stretch and shrink.
+            \space
+            \directlua{ulsbs_music.scale_space(tonumber("\luaescapestring{\l__ulsbs_space_scale_tl}"),
+              \ifulLaneAwareAnnotationSpacing true\else false\fi)}}}}
+     {\msg_error:nn {ulsbs-chords}{space-scale}}
+   \ignorespaces}
 
 % #1 is diagnostic detail; malformed lifecycle/register use is fatal.
 \cs_new_protected:Npn \__ulsbs_chord_fail:n #1
@@ -140,8 +179,9 @@
   {\__ulsbs_song_require:
    \bool_if:NF \g__ulsbs_stanza_active_bool
      {\__ulsbs_chord_fail:n {annotation~outside~a~stanza}}
-   \box_clear:N \l__ulsbs_chord_run_box
-   \bool_set_false:N \l__ulsbs_chord_full_clearance_bool
+    \box_clear:N \l__ulsbs_chord_run_box
+    \bool_set_false:N \l__ulsbs_chord_full_clearance_bool
+    \bool_set_false:N \l__ulsbs_chord_spacing_excluded_bool
    \tl_clear:N \l__ulsbs_chord_lyric_tl
    \int_zero:N \l__ulsbs_chord_hyphens_int
    \bool_set_false:N \l__ulsbs_chord_adjacent_bool
@@ -151,7 +191,9 @@
 % one replayed annotation with the new tail when replaying. Store source tokens
 % before rendering; the music layer must not own memory or rescan lyric source.
 \cs_new_protected:Npn \__ulsbs_chord_add:n #1
-  {\tl_set:Nn \l__ulsbs_chord_raw_tl {#1}
+  {\bool_if:NT \l__ulsbs_chord_adjacent_bool
+     {\bool_set_true:N \l__ulsbs_chord_spacing_excluded_bool}
+   \tl_set:Nn \l__ulsbs_chord_raw_tl {#1}
     \bool_set_false:N \l__ulsbs_chord_excluded_bool
     \tl_if_head_eq_charcode:nNTF {#1}^
      {\bool_set_true:N \l__ulsbs_chord_excluded_bool
@@ -342,10 +384,19 @@
       {\bool_set_true:N \l__ulsbs_chord_word_end_bool}
     \token_if_eq_meaning:NNT \l_peek_token \par
       {\bool_set_true:N \l__ulsbs_chord_word_end_bool}
-    \token_if_eq_meaning:NNT \l_peek_token \__ulsbs_verse_line:
+     \token_if_eq_meaning:NNT \l_peek_token \__ulsbs_verse_line:
+       {\bool_set_true:N \l__ulsbs_chord_word_end_bool}
+     \token_if_eq_meaning:NNT \l_peek_token \ulSpace
+       {\bool_set_true:N \l__ulsbs_chord_word_end_bool}
+    \token_if_eq_catcode:NNT \l_peek_token .
       {\bool_set_true:N \l__ulsbs_chord_word_end_bool}
-   \token_if_eq_catcode:NNT \l_peek_token .
-     {\bool_set_true:N \l__ulsbs_chord_word_end_bool}
+    \bool_set_false:N \l__ulsbs_chord_spacing_continues_bool
+    % Keep the lookahead out of primitive conditional skipping: it can itself
+    % be an \else token, e.g. while replay expands within a chord-tail box.
+    \legacy_if:nT {ulLaneAwareAnnotationSpacing}
+      {\bool_set:Nn \l__ulsbs_chord_spacing_continues_bool
+        {\token_if_eq_meaning_p:NN \l_peek_token \[ ||
+         \token_if_eq_meaning_p:NN \l_peek_token \__ulsbs_chord_replay:}}
    \int_compare:nNnT {\l__ulsbs_chord_hyphens_int}={1}
      {\tl_set_eq:NN \l__ulsbs_chord_lyric_tl \l__ulsbs_chord_before_hyphen_tl}
     \hbox_set:Nn \l__ulsbs_chord_lyric_box
@@ -377,15 +428,25 @@
           {\__ulsbs_chord_stack:}}
        {\__ulsbs_chord_stack:}}
      {\__ulsbs_chord_stack:}
-   \bool_if:NF \l__ulsbs_chord_word_end_bool
-     {\int_compare:nNnTF {\l__ulsbs_chord_hyphens_int}>{0}
-       {\penalty\exhyphenpenalty}
-       {\bool_if:NTF \l__ulsbs_chord_broken_bool {\penalty\hyphenpenalty}{\nobreak}}
-       \spacefactor=\g__ulsbs_chord_spacefactor_int\relax}
+     \bool_if:NF \l__ulsbs_chord_word_end_bool
+       {\group_begin:
+        \tex_attribute:D \c__ulsbs_chord_lyric_advance_attribute_int=0\relax
+        \bool_if:NT \l__ulsbs_chord_spacing_continues_bool
+          {% Save the word link even if this anchor needs legacy spacing.
+           \tex_attribute:D \c__ulsbs_chord_spacing_attribute_int=\hyphenpenalty\relax
+          }
+        \__ulsbs_chord_penalty:
+        \group_end:
+        \spacefactor=\g__ulsbs_chord_spacefactor_int\relax}
     % Collapse two source spaces across hidden ink, but preserve a sole following
     % space (including after an empty group or an active measure bar).
-    \bool_if:NT \l__ulsbs_chord_empty_anchor_bool
-      {\int_compare:nNnT {\tex_lastnodetype:D}={11}{\ignorespaces}}}
+     \bool_if:NT \l__ulsbs_chord_empty_anchor_bool
+       {\int_compare:nNnT {\tex_lastnodetype:D}={11}{\ignorespaces}}}
+
+\cs_new_protected:Npn \__ulsbs_chord_penalty:
+  {\int_compare:nNnTF {\l__ulsbs_chord_hyphens_int}>{0}
+    {\penalty\exhyphenpenalty}
+    {\bool_if:NTF \l__ulsbs_chord_broken_bool {\penalty\hyphenpenalty}{\nobreak}}}
 
 % Consume run/lyric boxes into a two-line stack. A broken syllable reserves the
 % wider line plus extension space and uses the current font's hyphen character.
@@ -402,20 +463,54 @@
 % the nominal annotation-to-lyric baseline or a blank first hbox.
 \cs_new_protected:Npn \__ulsbs_chord_stack_visible:
    {\dim_compare:nNnT {\box_wd:N \l__ulsbs_chord_lyric_box}={0pt}
-     {\skip_set:Nn \l_tmpa_skip {\tex_lastskip:D}\unskip\penalty200\hskip\l_tmpa_skip}
-    \vbox~attr~\c__ulsbs_chord_annotation_attribute_int~1~
-     {\bool_if:NTF \l__ulsbs_chord_full_clearance_bool
+      {\skip_set:Nn \l_tmpa_skip {\tex_lastskip:D}\unskip
+       \group_begin:
+       % The star can pass through this separator, but never across real glue.
+       \tex_attribute:D \c__ulsbs_chord_lyric_advance_attribute_int=0\relax
+       \penalty200\hskip\l_tmpa_skip
+       \group_end:}
+     \bool_set_false:N \l__ulsbs_chord_spacing_candidate_bool
+     \ifulLaneAwareAnnotationSpacing\ifulNoLyrics\else
+       \bool_set:Nn \l__ulsbs_chord_spacing_candidate_bool
+         { !\l__ulsbs_chord_spacing_excluded_bool &&
+           (\l__ulsbs_chord_spacing_continues_bool || \l__ulsbs_chord_word_end_bool) &&
+           \int_compare_p:nNn {\l__ulsbs_chord_hyphens_int}={0} &&
+           \dim_compare_p:nNn {\box_wd:N \l__ulsbs_chord_lyric_box}>{0pt} }
+      \fi\fi
+      \bool_if:nT {\l__ulsbs_chord_spacing_candidate_bool || \l__ulsbs_chord_broken_bool}
+        {\dim_set:Nn \l__ulsbs_chord_hyphen_allowance_dim {\ulChordHyphenAllowance}}
+      \vbox~attr~\c__ulsbs_chord_annotation_attribute_int~1~
+       attr~\c__ulsbs_chord_lyric_advance_attribute_int~\number\wd\l__ulsbs_chord_lyric_box
+       \bool_if:NT \l__ulsbs_chord_spacing_candidate_bool
+         {attr~\c__ulsbs_chord_spacing_attribute_int~\number\l__ulsbs_chord_hyphen_allowance_dim}
+      {\bool_if:NTF \l__ulsbs_chord_full_clearance_bool
        {\ulsbs@annotationfullclearancetrue}{\ulsbs@annotationfullclearancefalse}
-     \ulChordLineParams
-     \bool_if:NTF \l__ulsbs_chord_broken_bool
-       {\dim_set:Nn \l__ulsbs_chord_width_dim
-          {\dim_max:nn {\box_wd:N \l__ulsbs_chord_run_box}{\box_wd:N \l__ulsbs_chord_lyric_box}+.5em}
-        \hbox_to_wd:nn {\l__ulsbs_chord_width_dim}{\hbox_unpack_drop:N \l__ulsbs_chord_run_box\hfil}
-        \hbox_to_wd:nn {\l__ulsbs_chord_width_dim}
-          {\hbox_unpack_drop:N \l__ulsbs_chord_lyric_box\hfil
-           \ifnum\hyphenchar\font>-1\char\hyphenchar\font\hfil\fi}}
-       {\box_use_drop:N \l__ulsbs_chord_run_box
-        \hbox{\hbox_unpack_drop:N \l__ulsbs_chord_lyric_box\hfil}}}}
+      \ulChordLineParams
+      \bool_if:NTF \l__ulsbs_chord_broken_bool
+        {\tex_setbox:D \l__ulsbs_chord_dash_box=\hbox
+           \int_compare:nNnT {\l__ulsbs_chord_hyphens_int}={0}
+             {attr~\c__ulsbs_chord_lyric_advance_attribute_int~\number\wd\l__ulsbs_chord_run_box}
+           {\__ulsbs_chord_dash:}
+         \dim_set:Nn \l__ulsbs_chord_width_dim
+           {\dim_max:nn {\box_wd:N \l__ulsbs_chord_run_box}
+             {\box_wd:N \l__ulsbs_chord_lyric_box +
+              \dim_max:nn {\l__ulsbs_chord_hyphen_allowance_dim}{\box_wd:N \l__ulsbs_chord_dash_box}}}
+         \hbox_to_wd:nn {\l__ulsbs_chord_width_dim}{\hbox_unpack_drop:N \l__ulsbs_chord_run_box\hfil}
+         \hbox_to_wd:nn {\l__ulsbs_chord_width_dim}
+           {\bool_if:NTF \l__ulsbs_chord_spacing_candidate_bool
+              {\box_use_drop:N \l__ulsbs_chord_lyric_box}
+              {\hbox_unpack_drop:N \l__ulsbs_chord_lyric_box}
+            \hfil\box_use_drop:N \l__ulsbs_chord_dash_box\hfil}}
+        {\box_use_drop:N \l__ulsbs_chord_run_box
+         \hbox{\bool_if:NTF \l__ulsbs_chord_spacing_candidate_bool
+            {\box_use_drop:N \l__ulsbs_chord_lyric_box\hfil
+             % Normally invisible; the pre-linebreak pass can reuse this glyph
+             % if a more distant annotation forces a gap at this boundary.
+             \discretionary{\hbox{\__ulsbs_chord_dash:}}{}{}}
+            {\hbox_unpack_drop:N \l__ulsbs_chord_lyric_box\hfil}}}}}
+
+\cs_new_protected:Npn \__ulsbs_chord_dash:
+  {\ifnum\hyphenchar\font>-1\char\hyphenchar\font\fi}
 
 % #1 is alternate-set number, #2 chord text. Inline stanza references participate
 % in PDF layers; standalone alternate sets use their independent source policy.

@@ -19,6 +19,8 @@ customization, use [Writing Songbooks](WRITING_SONGBOOKS.md).
 - [PDF Font Sharing](#pdf-font-sharing)
 - [Build Diagnostics](#build-diagnostics)
 - [Performance Optimizations](#performance-optimizations)
+  - [Implemented: parallel engraving of alternative score keys](#implemented-parallel-engraving-of-alternative-score-keys)
+  - [Not retained](#not-retained)
 - [Multikey Books](#multikey-books)
   - [Build jobs and publication](#build-jobs-and-publication)
   - [PDF passes and resources](#pdf-passes-and-resources)
@@ -865,6 +867,28 @@ paragraph callback resolves physical-line geometry; `finish_verse` applies
 stanza-wide minima and repairs interline glue. Interned configuration snapshots
 preserve the policy active at collection even after local TeX groups have ended.
 Zero-sized multikey overlays do not contribute geometry.
+
+The default-on `\ulLaneAwareAnnotationSpacing` policy marks candidate stacks,
+their source-adjacent word links, and independent chord, melody and beat bands.
+A pre-linebreak callback compacts complete runs only, retaining already-typeset
+lyric, annotation and hyphen nodes. It compares actual vertical bands relative
+to the shared annotation baseline, carries earlier reaches until the word ends,
+and reserves any remaining overhang there. Synthetic breaks are legal only where
+no ink would overhang the break. Authored spacing constructs, unrecognized word
+boundaries and runs too wide for the current paragraph keep their legacy widths.
+The later geometry passes still own vertical alignment and interline clearance.
+
+`\ulSpace` emits real interword glue, scales its width, stretch and shrink,
+and marks it when lane-aware spacing is enabled. A marked space can join two
+eligible words in the same pass; ordinary glue remains a boundary. Clearance is
+tested at the glue's minimum width. When ink would protrude at a wrap, a
+discretionary reserves the missing width only on the broken line, while the real
+glue retains its stretch and shrink on an unbroken line.
+
+`\ulSpace*` uses the retained lyric advance and intervening lyric-free
+annotation stacks to center an authored hyphen. It replaces only a synthetic
+hyphen at that boundary and makes the starred discretionary the breakpoint.
+Neither marking nor replay is repeated to compute the final width.
 
 Empty annotation runs emit lyrics directly. Beat-only runs use actual ink extents
 and the collision gap rather than a full annotation row. Chord/pitch runs keep

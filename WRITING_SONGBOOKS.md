@@ -1523,6 +1523,76 @@ and fully hidden annotations reserve no phantom width or height. Visible pitches
 and authored offsets still get their required clearance. Replay stays synchronized
 across local visibility changes. Recheck pagination after changing visible features.
 
+#### Lane-aware annotation spacing
+
+By default, a chord label can extend over later syllables of the same word
+when their annotations are at a different height:
+
+```tex
+\[<F>Fmaj7]lo\[<E>]ve\[<C>]ly
+```
+
+With the default note positions this can print `lovely` without adding a gap
+after `lo`. Each note stays with its syllable. Collisions still require space
+and a continuation hyphen: for example `E` must clear `Fmaj7` when the primary
+melody is `low`. A secondary voice uses its displayed height, not its style.
+
+Both spacing modes use `\ulChordHyphenAllowance` (default `0.4em`). Change
+it with, for example, `\renewcommand{\ulChordHyphenAllowance}{0.5em}`.
+This allowance includes the hyphen itself, not padding on each side. The
+renderer uses at least the hyphen's width, even if you set the allowance to
+`0pt`. With lane-aware spacing off, the allowance is a minimum total gap;
+with it on, the allowance is added to the collision clearance. Relative units
+use the current lyric font.
+
+Use `\ulLaneAwareAnnotationSpacing{false}` in the preamble to opt out for the
+whole book, or inside a TeX group to opt out locally. Lane-aware spacing only
+compacts consecutive visible annotations within a word or across a marked
+`\ulSpace`; ordinary spaces and measure boundaries keep their existing spacing.
+Words with explicit hyphens, melody offsets (`@`), zero-advance overlays (`!`),
+or runs of adjacent annotations on a single syllable keep their ordinary spacing.
+Recheck wrapping and readability: in a compact word, a wide chord may extend
+over more than one syllable.
+
+#### Lyric grouping and spacing
+
+Put `{...}` immediately after an annotation or `^` replay to attach it to a
+whole lyric fragment, even if the fragment contains spaces. For example,
+`\[Fmaj7]{luz todo}` treats `luz todo` as a single lyric unit. Put only lyrics
+inside the braces, not chord or melody annotations, `^` replays, or measure
+bars. If another annotation belongs inside the phrase, leave that boundary
+outside the braces: `\[Fmaj7]luz,\ulSpace\[<E>]tu`.
+
+`\ulSpace` and `\ulSpace[1]` insert one normal, breakable space in the current
+lyric font. The optional argument multiplies that space: `\ulSpace[1.5]`
+inserts one and a half spaces, and `\ulSpace[0]` is a zero-width break
+opportunity. Use a nonnegative number, not a TeX length.
+
+Use `\ulSpace` **in place of** the ordinary source space. With lane-aware
+spacing enabled, a chord may extend across this space if the following
+annotation is on another row. A collision can widen the space, but never adds
+a hyphen between the words. If the line breaks there, the preceding line
+still reserves enough room for the chord.
+
+```tex
+\[<C>]Tu |\[Fmaj7]luz,\ulSpace\[<E>]tu clari|\[C]dad,
+\[<*>]\ulSpace[1.5]|\[C]Start the next measure
+```
+
+The second example uses `\ulSpace` just for extra room between the beat mark
+and the bar; it also works with lane-aware spacing off.
+
+Use `\ulSpace*` for a gap **within** a word. It centers one continuation
+hyphen between the lyric fragments, including any width already reserved by
+an annotation with no lyrics of its own. For example, the second `^` in
+`di|^vi^\ulSpace*na` still replays its annotation before `na`. The explicit
+gap replaces any automatic hyphen at that boundary. The same syntax works
+after an explicit `\[...]` annotation, in either spacing mode.
+
+`\ulSpace*[1.5]` adds one and a half normal spaces to the gap before centering
+the hyphen. The gap is never narrower than the hyphen itself. If the line
+breaks there, the hyphen stays on the first line.
+
 #### Named colors
 
 After class loading, use xcolor's `\definecolor` or `\colorlet` to replace named
