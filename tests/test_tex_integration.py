@@ -103,6 +103,41 @@ class CompileFixtureTests(unittest.TestCase):
         self.assertEqual(artifacts[f"{name}.tex"], override)
 
 
+class ChapterCornerMarkIntegrationTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("lualatex"), "lualatex is not installed")
+    def test_elbows_and_symmetric_dashes_are_filled_once_and_reused(self) -> None:
+        output, pdf = compile_fixture("chapter-corner-marks", passes=2, multikey=False)
+        self.assertEqual(output.count("ULSBS-TEST-MARK-BUILD"), 5)
+
+        number = rb"-?\d+(?:\.\d+)?"
+        # Match the reflected canvas transform, chapter color and paint path.
+        marks = re.findall(
+            rb"(?m)^(-?1(?:\.0+)?)\s+0(?:\.0+)?\s+0(?:\.0+)?\s+(-?1(?:\.0+)?)\s+"
+            + number + rb"\s+" + number + rb"\s+cm\s+([01] 0 [01]) rg\s+(?:q\s+)+([^Q]+)Q",
+            pdf,
+        )
+        self.assertEqual(len(marks), 14)  # Two per page, except the disabled last page.
+        for page, (reach, rectangles) in enumerate([
+            (17, []), (17, []), (5, [(8, 3), (14, 3)]), (5, [(8, 3), (14, 3)]),
+            (2.6, [(3.2, 0.6), (4.4, 0.6)]), (3, [(4, 1)]), (2, []),
+        ]):
+            for corner in range(2):
+                with self.subTest(page=page + 1, corner=corner):
+                    sx, sy, color, path = marks[2 * page + corner]
+                    self.assertEqual(float(sx), -1 if page % 2 == 0 else 1)
+                    self.assertEqual(float(sy), -1 if corner == 0 else 1)
+                    self.assertEqual(color, b"1 0 0" if page == 0 else b"0 0 1")
+                    # The elbow is a single closed outline; each additional dash
+                    # is a rectangle, reflected across x=y for the other leg.
+                    operators = re.findall(rb"[a-zA-Z*]+", path)
+                    self.assertEqual(operators, [b"m", *[b"l"] * 5, b"h",
+                                                 *[b"re"] * (2 * len(rectangles)), b"f"])
+                    expected = [-2, -2, reach, -2, reach, 2, 2, 2, 2, reach, -2, reach]
+                    for start, length in rectangles:
+                        expected.extend([start, -2, length, 4, -2, start, 4, length])
+                    self.assertEqual([round(float(v), 3) for v in re.findall(number, path)], expected)
+
+
 class RepeatBarIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

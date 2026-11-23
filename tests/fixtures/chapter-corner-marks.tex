@@ -1,0 +1,30 @@
+\pdfvariable compresslevel=0
+\pdfvariable objcompresslevel=0
+\documentclass[paper={a5paper},maintitle={Chapter Mark Test}]{ulsbs-songbook}
+
+% Count geometry builds without depending on how the cache is implemented.
+\makeatletter
+\let\ulsbsTestBuildMark\ulsbs@ccm@build
+\renewcommand*\ulsbs@ccm@build{\typeout{ULSBS-TEST-MARK-BUILD}\ulsbsTestBuildMark}
+\makeatother
+
+\begin{document}
+\ulUseChapterColors{true}
+\ulChapterCornerMarkWidth=4bp
+\ulChapterCornerMarkLength=17bp
+\makeatletter\def\ulsbs@currentchaptercolor{red}\makeatother
+Solid right.\newpage
+\makeatletter\def\ulsbs@currentchaptercolor{blue}\makeatother
+Solid left.\newpage
+\ulChapterCornerMarkDashed{true}
+Dashed right.\newpage
+Dashed left.\newpage
+\ulChapterCornerMarkLength=5bp
+Short dashed right.\newpage
+\ulChapterCornerMarkDashCount=1
+Short dashed left.\newpage
+\ulChapterCornerMarkLength=1bp
+Only the elbow.\newpage
+\ulUseChapterColors{false}
+No marks.
+\end{document}

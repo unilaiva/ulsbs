@@ -1402,15 +1402,14 @@ argument-free imprint icon renderer.
 | `\ulCoverIconTopOffset` | Captured `-\topskip-\headsep-\headheight` |
 | `\ulChapterCornerMarkOffset`, `\ulChapterCornerMarkWidth` | `2.5mm`, `.954915mm` |
 | `\ulChapterCornerMarkLength` | Captured `\ulTopMargin+\ulHeadHeight-\ulChapterCornerMarkOffset` |
-| `\ulChapterCornerMarkDashOversize` | `.2pt`; currently allocated but not used by the renderer |
 
 These dimensions are captured eagerly during package loading. Later geometry,
 font or permanent-icon changes do not automatically update related dimensions.
-`\ulChapterCornerMarkDashCount` is a TeX count, initially `2`, but the dash
-segment length is also calculated at load time: a later count/mark-length change
-does not recompute it. There is no public recomputation setter. Do not modify
-private cached segment dimensions; use a custom public corner renderer for a
-different dashed design.
+
+`\ulChapterCornerMarkDashCount` is a TeX count, initially `3`, that gives the
+number of gaps per leg. Dashed marks keep a filled elbow and divide the space
+beyond it equally between dashes and gaps on both legs, using the current mark
+length, width and gap count. A count of `0` yields a solid mark.
 
 Renew `\ulChapterSymbol` to replace the no-image chapter symbol. Chapter color
 comes from `\ulMainChapter`'s color argument, not a fixed global palette. Main
