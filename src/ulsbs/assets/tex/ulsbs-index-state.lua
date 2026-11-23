@@ -248,12 +248,12 @@ end
 -- Freeze serialized fields for id and return a one-based handle for a late-Lua
 -- node. tex_spelling requests delimiter canonicalization at shipout. No record
 -- is collected yet: discarded or measurement-only node lists must leave no trace.
-function M.stage(id, title, label, target, chapter, tex_spelling)
+function M.stage(id, title, label, target, chapter, tex_spelling, sequential_label)
   declared_index(id)
   local item = {id = id, title = staged_field(title, "title"),
     label = staged_field(label, "reference label"), target = staged_field(target, "link target"),
     chapter = staged_field(chapter or "", "chapter context"),
-    tex_spelling = tex_spelling, shipped = {}}
+    tex_spelling = tex_spelling, sequential_label = sequential_label, shipped = {}}
   staged[#staged + 1] = item
   return #staged
 end
@@ -274,7 +274,12 @@ function M.ship(handle, label, pageLabel)
     end
     return item.tex_spelling and canonical_tex(value) or value
   end
-  M.collect(item.id, resolve(item.title), label or resolve(item.label), resolve(item.target), resolve(item.chapter))
+  local target = resolve(item.target)
+  if M.replay_target then
+    target = M.replay_target .. assert(target:match("(%.[12])$"), "Missing song outline level")
+    if item.sequential_label then label = M.replay_label end
+  end
+  M.collect(item.id, resolve(item.title), label or resolve(item.label), target, resolve(item.chapter))
   item.shipped[occurrence] = true
 end
 
@@ -282,12 +287,17 @@ end
 -- its retained node list without replaying metadata, lyrics or other source.
 -- number is a TeX box register; mutate its list with bracketing late-Lua markers
 -- so identical handles may commit once again under a fresh replay identifier.
-function M.replay_box(number)
+function M.replay_box(number, label, target)
   M.replays = (M.replays or 0) + 1
   local box = assert(tex.box[number], "Missing selected song box")
   local first, last = node.new("whatsit", "late_lua"), node.new("whatsit", "late_lua")
   first.data = "ulsbs_index_state.replay=" .. M.replays
   last.data = "ulsbs_index_state.replay=0"
+  if label then
+    first.data = first.data .. string.format(";ulsbs_index_state.replay_label=%q;ulsbs_index_state.replay_target=%q",
+      label, target)
+    last.data = last.data .. ";ulsbs_index_state.replay_label=nil;ulsbs_index_state.replay_target=nil"
+  end
   if box.list then
     local tail = node.tail(box.list)
     first.next, box.list.prev = box.list, first

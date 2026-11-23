@@ -356,6 +356,116 @@ class LilyPondScoreTests(unittest.TestCase):
         inventory.write_text("[]")
         self.assertEqual(scores.prepare_scores(self.root, "book"), {})
 
+    def selection_request(self, graphic, **changes):
+        return dict(file="book.tex", graphic=graphic, song_id="selection-song", title="Selection song",
+                    key=dict(letter=0, pitch=0, minor=0), target=dict(letter=1, pitch=2, minor=0)) | changes
+
+    def generate_selection(self, fragments, requests, engrave):
+        (self.root / "book.ulsbs-lilypond-systems.json").write_text(json.dumps(
+            [path.relative_to(self.root).as_posix() for path in fragments]))
+        (self.root / "book.ulsbs-selection-scores.json").write_text(json.dumps(
+            dict(schema_version=1, requests=requests)))
+        with patch.object(scores, "run_cmd", side_effect=engrave) as command, \
+                patch.object(scores.cache, "toolchain_fingerprint", return_value=None):
+            generation = scores.generate_selection_scores_staged(self.ui, self.job, "book", {}, [])
+            tasks = next(generation)
+            command.assert_not_called()
+            for task in tasks:
+                task()
+            with self.assertRaises(StopIteration):
+                next(generation)
+        report = json.loads((self.root / "book.ulsbs-selection-score-results.json").read_text())
+        dispatch = (self.root / "book.ulsbs-selection-score-variants.tex").read_text()
+        return report, dispatch, command
+
+    def test_selection_enharmonic_target_uses_one_chain_for_repeated_requests(self):
+        _, fragment = self.snippet()
+        original = fragment.read_bytes()
+        request = self.selection_request("ab/lily-one-1", key=dict(letter=0, pitch=1, minor=0),
+                                         target=dict(letter=1, pitch=1, minor=0))
+
+        def engrave(command, *, stdout_path, **kwargs):
+            stem = Path(command[command.index("-o") + 1])
+            source = stem.with_suffix(".ly").read_text()
+            self.assertIn(r"\transpose #(ly:make-pitch 0 0 1/2) #(ly:make-pitch 0 1 -1/2)", source)
+            self.assertNotIn("ulsbs-score-boundaries.ily", source)
+            self.pdf(stem.with_name(stem.name + "-1.pdf"))
+            stdout_path.write_text("Finished successfully\n")
+            return SimpleNamespace(returncode=0)
+
+        report, dispatch, command = self.generate_selection([fragment], [request, request], engrave)
+        self.assertEqual(command.call_count, 1)
+        self.assertEqual(fragment.read_bytes(), original)
+        outcome, = report["scores"][0]["offsets"]
+        self.assertEqual(outcome["offset"], 0)
+        self.assertEqual(outcome["status"], "transposed")
+        self.assertIn(r"ULSelectionScore:0-1-0-1-1:ab/lily-one-1\endcsname{" + outcome["graphic"] + "-1}",
+                      dispatch)
+        self.ui.warning_line.assert_not_called()
+
+    def test_selection_stale_graphic_is_not_in_inventory(self):
+        _, current = self.snippet("current")
+        _, stale = self.snippet("stale")
+        request = self.selection_request("stale-1", file=str(stale))
+        report, dispatch, command = self.generate_selection([current], [request], None)
+        command.assert_not_called()
+        self.assertNotIn("ULSelectionScore:", dispatch)
+        outcome, = report["scores"][0]["offsets"]
+        self.assertEqual(outcome["status"], "fallback")
+        self.assertIn("current LilyPond systems inventory", outcome["reason"])
+        warning = self.ui.warning_line.call_args.args[0]
+        self.assertIn("Selection song", warning)
+        self.assertIn("target=d", warning)
+
+    def test_selection_multisystem_captures_once_and_validates_original_and_alternative(self):
+        source, fragment = self.snippet(systems=2)
+        # A stale sidecar from a previous run must not stand in for capture.
+        sidecar = source.with_suffix(".ulsbs-boundaries")
+        sidecar.write_text("stale\n")
+        source_bytes = source.read_bytes()
+        requests = [self.selection_request("ab/lily-one-2"), self.selection_request("ab/lily-one-1")]
+        for case, expected_runs in (("match", 2), ("capture-count", 1), ("different-boundary", 4)):
+            with self.subTest(case=case):
+                self.ui.reset_mock()
+
+                def engrave(command, *, stdout_path, **kwargs):
+                    stem = Path(command[command.index("-o") + 1])
+                    text = stem.with_suffix(".ly").read_text()
+                    self.assertIn(r'\include "ulsbs-score-boundaries.ily"', text)
+                    count = 2
+                    boundaries = "0 0 1 0\n1 0 2 0\n"
+                    if stem.name == "original":
+                        self.assertNotIn(r"\transpose", text)
+                        if case == "capture-count":
+                            count = 1
+                    else:
+                        self.assertIn(r"\transpose", text)
+                        self.assertEqual(text.count("(make-music 'LineBreakEvent"), 1)
+                        if case == "different-boundary":
+                            boundaries = "0 0 1/2 0\n1/2 0 2 0\n"
+                    stem.with_suffix(".ulsbs-boundaries").write_text(boundaries)
+                    for index in range(1, count + 1):
+                        self.pdf(stem.with_name(f"{stem.name}-{index}.pdf"))
+                    stdout_path.write_text("Finished successfully\n")
+                    return SimpleNamespace(returncode=0)
+
+                report, dispatch, command = self.generate_selection([fragment], requests, engrave)
+                self.assertEqual(command.call_count, expected_runs)
+                self.assertEqual(source.read_bytes(), source_bytes)
+                self.assertEqual(sidecar.read_text(), "stale\n")
+                record, = report["scores"]
+                outcome, = record["offsets"]
+                if case == "match":
+                    self.assertEqual(outcome["status"], "transposed")
+                    for index in (1, 2):
+                        self.assertIn(rf"ULSelectionScore:0-0-0-1-2:ab/lily-one-{index}\endcsname{{"
+                                      + outcome["graphic"] + f"-{index}}}", dispatch)
+                else:
+                    self.assertEqual(outcome["status"], "fallback")
+                    self.assertIn("system count" if case == "capture-count" else "boundaries", outcome["reason"])
+                    self.assertNotIn("ULSelectionScore:", dispatch)
+                    self.ui.warning_line.assert_called_once()
+
     def test_intervals_have_independently_expected_spelling_and_octaves(self):
         cases = [
             ((0, 0), (1, 1), 1, ("c", "des")),

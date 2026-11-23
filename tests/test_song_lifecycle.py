@@ -17,6 +17,7 @@ import unittest
 import test_index_lifecycle as index_helpers
 from index_records import index_events
 from test_tex_integration import ROOT
+from ulsbs.diagnostics import parse_tool_warnings
 
 
 def document(body: str, preamble: str = "", *, variant: str = "default") -> str:
@@ -107,6 +108,143 @@ class SongLifecycleTests(unittest.TestCase):
 
     def assert_index_fragment(self, kind: str):
         self.assertTrue((self.book / f"idx_{kind}.sbx").read_text().strip())
+
+    def selection_warnings(self):
+        log = self.book / "book.log"
+        return [item for item in parse_tool_warnings(log.read_text(), "TeX", log)
+                if item.category == "song-selection"]
+
+    def test_id_selection_orders_songs_with_the_same_printed_number(self):
+        self.compile_source(document(r"""
+\begin{ulSongs}{titleidx}
+{\beginsong{First source}[id={first-song}]
+\beginverse*First selected body.\endverse\endsong}
+\setcounter{ulSongNumber}{1}
+\beginsong{Second source}[id={second-song}]
+\beginverse*Second selected body.\endverse\endsong
+\beginsong{Same ID again}[id={second-song}]
+\beginverse*Omitted same-block duplicate.\endverse\endsong
+\beginsong{Without ID}\endsong
+\end{ulSongs}
+\begin{ulSongs}{titleidx}
+\beginsong{Same ID in next block}[id={second-song}]
+\beginverse*Omitted cross-block duplicate.\endverse\endsong
+\end{ulSongs}
+""", r"\ulIncludeOnlySongIds{second-song,sclearpage,first-song,first-song}"))
+        rows = [line.split("|")[1:4] for line in (self.book / "book.ulsbs.psv").read_text().splitlines()
+                if line.startswith("ID-NR-PAGE-Y|")]
+        self.assertEqual([row[:2] for row in rows],
+                         [["second-song", "1"], ["first-song", "1"], ["first-song", "1"]])
+        self.assertLess(int(rows[0][2]), int(rows[1][2]))
+        self.assertNotIn("Omitted", self.pdf_text())
+        self.assertNotIn("Without ID", self.pdf_text())
+        for target in ("song1-1.1", "song-repeat-2.1"):
+            self.assertIn(f'"{target}"', self.destinations())
+        warning, = self.selection_warnings()
+        self.assertIn("selected ID 'second-song'", warning.message)
+        self.assertIn("Using the first source occurrence.", warning.message)
+        self.assertEqual((warning.occurrences, warning.severity), (1, "warning"))
+
+    def test_number_selection_keeps_first_match_across_blocks_until_replaced(self):
+        self.compile_source(document(r"""
+\begin{ulSongs}{}
+\beginsong{First source}[id={first-song}]\endsong
+\setcounter{ulSongNumber}{1}
+\beginsong{Same number}[id={same-block}]\endsong
+\end{ulSongs}
+\begin{ulSongs}{}
+\beginsong{Same number in next block}[id={other-block}]\endsong
+\end{ulSongs}
+\ulIncludeOnlySongs{1}
+\begin{ulSongs}{}
+\beginsong{New number selection}[id={new-number}]\endsong
+\end{ulSongs}
+\ulIncludeOnlySongIds{first-song}
+\begin{ulSongs}{}
+\beginsong{New ID selection}[id={first-song}]\endsong
+\end{ulSongs}
+""", r"\ulIncludeOnlySongs{1}"))
+        rows = [line.split("|")[1] for line in (self.book / "book.ulsbs.psv").read_text().splitlines()
+                if line.startswith("ID-NR-PAGE-Y|")]
+        self.assertEqual(rows, ["first-song", "new-number", "first-song-2"])
+        warning, = self.selection_warnings()
+        self.assertIn("selected number '1'", warning.message)
+        self.assertEqual(warning.occurrences, 1)
+
+    def test_sequential_selection_labels_track_output_order_and_repeats(self):
+        log = self.compile_source(document(r"""
+\tableofcontents
+\chapter{First selection}
+\begin{ulSongs}{titleidx,authidx}
+\ulIndexSongsAs{authidx}{Custom}
+\setcounter{ulSongNumber}{20}
+\beginsong{Alpha}[id={alpha},by={Author}]
+\beginverse*Alpha lyrics.\endverse\endsong
+\beginsong{Bravo}[id={bravo},by={Author}]
+\global\advance\Effects by 1
+\beginverse*Bravo lyrics.\endverse\endsong
+\end{ulSongs}
+\chapter{Second selection}
+\ulIncludeOnlySongIds{charlie}
+\begin{ulSongs}{titleidx}
+\setcounter{ulSongNumber}{80}
+\beginsong{Charlie}[id={charlie}]
+\beginverse*Charlie lyrics.\endverse\endsong
+\end{ulSongs}
+\typeout{EFFECTS:\the\Effects}
+""", r"""
+\newcount\Effects
+\renewcommand\ulPrintSongNumber[1]{\sffamily\bfseries N#1}
+\ulSelectionNumbering{sequential}
+\ulIncludeOnlySongs{21,20,21}
+"""), passes=2)
+        rows = [line.split("|")[1:3] for line in (self.book / "book.ulsbs.psv").read_text().splitlines()
+                if line.startswith("ID-NR-PAGE-Y|")]
+        self.assertEqual(rows, [["bravo", "1"], ["alpha", "2"], ["bravo", "3"], ["charlie", "4"]])
+        text, targets = self.pdf_text(), self.destinations()
+        toc = (self.book / "book.toc").read_text()
+        for number, title in enumerate(("Bravo", "Alpha", "Bravo", "Charlie"), start=1):
+            self.assertRegex(toc, rf"\\contentsline \{{subsection\}}[^\n]*\{{{number}\\hfil \}}[^\n]*{title}")
+            self.assertIn(f"N{number}", text)
+            self.assertIn(f'"song-selection-{number}.1"', targets)
+        self.assertEqual(index_records(self.book, "idx_title"), [
+            (title, str(number), f"song-selection-{number}.1")
+            for number, title in enumerate(("Bravo", "Alpha", "Bravo", "Charlie"), start=1)])
+        self.assertEqual([label for _, label, _ in index_records(self.book, "idx_auth")], ["Custom"] * 3)
+        self.assertEqual(re.findall(r"EFFECTS:(\d+)", log), ["1", "1"])
+
+    def test_id_selection_transposes_the_ordinary_edition(self):
+        self.compile_source(document(r"""
+\begin{ulSongs}{}
+\beginsong{Shifted song}[id={shifted},key={D}]
+\transpose{2}
+\beginverse
+\[C]Shifted lyrics.
+\endverse\endsong
+\beginsong{Unchanged song}[id={unchanged},key={A}]
+\beginverse
+\[A]Unchanged lyrics.
+\endverse\endsong
+\beginsong{Minor song}[id={minor},key={Am}]
+\beginverse
+\[Am]Minor lyrics.
+\endverse\endsong
+\beginsong{Sharp song}[id={sharp},key={F}]
+\beginverse
+\[F]Sharp lyrics.
+\endverse\endsong
+\end{ulSongs}
+""", r"""
+\ulShowKey{true}
+\ulIncludeOnlySongIds{shifted,unchanged,minor,sharp}
+\ulSelectionSongKey{shifted}{F}
+\ulSelectionSongKey{minor}{D}
+\ulSelectionSongKey{sharp}{F#}
+"""))
+        text = self.pdf_text()
+        for chord, lyric in (("F", "Shifted"), ("A", "Unchanged"), ("Dm", "Minor"),
+                             (r"F\s*[\u266F#]", "Sharp")):
+            self.assertRegex(text, rf"(?m)^\s*{chord}\s*\n\s*{lyric} lyrics\.")
 
     def test_initial_public_typography_preserves_font_resource_allocation(self):
         source = document(r"""

@@ -1,7 +1,7 @@
 -- SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 -- SPDX-License-Identifier: GPL-3.0-or-later
 --
--- Draft-pass score-variant requests for PDF transposition layers.
+-- Draft-pass engraving requests for PDF layers and rekeyed selections.
 -- This file is part of the 'ulsbs' package.
 --
 -- Write private draft-pass score-variant requests to <jobname>.ulsbs-scores.json:
@@ -17,6 +17,7 @@
 
 local M = {}
 local requests, seen = {}, {}
+local selection_requests, selection_seen = {}, {}
 
 -- Validate UTF-8 and encode a JSON string for the private request sidecar.
 -- Return a quoted JSON value; invalid type/encoding raises an assertion.
@@ -86,6 +87,26 @@ function M.finish()
   local file = assert(io.open(filename, "w"))
   assert(file:write('{"schema_version":1,"requests":['
     .. table.concat(requests, ',') .. ']}\n'))
+  assert(file:close())
+end
+
+-- Ordinary selection requests identify the original graphics without wrapping
+-- or re-engraving scores in books that have no effective key overrides.
+function M.request_selection(file, graphic, song_id, title, key, target)
+  local source, destination = tonic(key, true), tonic(target, true)
+  local identity = table.concat({file, graphic, source, destination}, "\0")
+  if selection_seen[identity] then return end
+  selection_seen[identity] = true
+  selection_requests[#selection_requests + 1] = '{"file":' .. json_string(file)
+    .. ',"graphic":' .. json_string(graphic) .. ',"song_id":' .. json_string(song_id)
+    .. ',"title":' .. json_string(title) .. ',"key":' .. source .. ',"target":' .. destination .. '}'
+end
+
+function M.finish_selection()
+  if #selection_requests == 0 then return end
+  local file = assert(io.open(tex.jobname .. ".ulsbs-selection-scores.json", "w"))
+  assert(file:write('{"schema_version":1,"requests":['
+    .. table.concat(selection_requests, ',') .. ']}\n'))
   assert(file:close())
 end
 

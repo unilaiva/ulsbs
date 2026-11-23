@@ -3,6 +3,13 @@
 ## Unreleased
 
 - Fix seams in chapter corner marks and keep dashes evenly spaced when resized.
+- Add `\ulIncludeOnlySongIds` for selections that stay valid across renumbering.
+  Both ID and number selectors keep the first source match for each entry and
+  report a compiler warning if there are duplicates. Use `\ulSelectionNumbering`
+  to opt into numbering in print order, and `\ulSelectionSongKey` to change the
+  printed key of an ID-selected song. Ordinary compiler builds also re-engrave
+  supported LilyPond scores for those songs, with a warning if the original
+  score has to be retained.
 - Keep song preludes with the first body content across automatic page/column
   breaks, including introductory notes and prose, without changing later breaks
   or blocking explicit forced breaks.

@@ -96,6 +96,30 @@
   },
 
 
+  "Select songs by ID (ULSBS)": {
+    "prefix": "ulIncludeOnlySongIds",
+    "body": "\\ulIncludeOnlySongIds{${1:morning-song,evening-song}}",
+    "description": "Preferred selection by stable song IDs. Use in the preamble or between ulSongs blocks."
+  },
+
+  "Select songs by printed number (ULSBS)": {
+    "prefix": "ulIncludeOnlySongs",
+    "body": "\\ulIncludeOnlySongs{${1:3,1,7}}",
+    "description": "Select by printed number. Prefer ulIncludeOnlySongIds when numbers may change or repeat."
+  },
+
+  "Selection numbering (ULSBS)": {
+    "prefix": "ulSelectionNumbering",
+    "body": "\\ulSelectionNumbering{${1|source,sequential|}}",
+    "description": "Keep source numbers (default) or number selected songs in print order from 1. Use in the preamble."
+  },
+
+  "Set a selected song's printed key (ULSBS)": {
+    "prefix": "ulSelectionSongKey",
+    "body": "\\ulSelectionSongKey{${1:morning-song}}{${2:D}}",
+    "description": "Transpose an ID-selected song to this tonic while preserving its major/minor mode."
+  },
+
   "Tag-definition file (ULSBS)": {
     "prefix": "ulTagFile",
     "body": "\\ulTagFile{${1:tags.txt}}",

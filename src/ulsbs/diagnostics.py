@@ -39,6 +39,8 @@ _FONT_RECAP = re.compile(
 def _category(message: str) -> str:
     if _UNDERFULL.match(message):
         return "spacing"
+    if message.startswith("Package ulsbs-selection Warning:"):
+        return "song-selection"
     if re.search(r"\bbarcheck\b", message, re.I):
         return "barcheck"
     if re.search(r"missing character:|missing[- ]glyph|no glyph|glyph .+ (?:missing|not found)", message, re.I):

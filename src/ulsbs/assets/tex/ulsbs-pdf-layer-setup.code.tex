@@ -82,13 +82,11 @@
 
 \cs_generate_variant:Nn \regex_extract_once:nnNTF {nV}
 
-% No arguments: read effective original \ulSongKey and globally cache tonic/mode.
-% Unsupported nonempty keys warn; the saved tuple is cleared before parsing.
-% The cache is independent of source transposition and the body's local group.
-\cs_new_protected:Npn \__ulsbs_pdf_key_save:
+% Parse existing key= notation from tl #1 without expanding active accidentals
+% or glyph commands. On success, set the common tonic letter/pitch/mode scratch.
+\prg_new_protected_conditional:Npnn \__ulsbs_pdf_key_parse:N #1 {TF}
  {
-  \tl_gclear:N \g__ulsbs_pdf_transpose_key_tl
-  \tl_set:Nx \l__ulsbs_pdf_key_tl {\tl_to_str:V \ulSongKey}
+  \tl_set:Nx \l__ulsbs_pdf_key_tl {\tl_to_str:V #1}
   \regex_replace_all:nnN {\{\}} {} \l__ulsbs_pdf_key_tl
   \regex_replace_all:nnN {\s+} {} \l__ulsbs_pdf_key_tl
   \tl_trim_spaces:N \l__ulsbs_pdf_key_tl
@@ -109,14 +107,28 @@
         \l__ulsbs_pdf_accidental_int}{12}}
     \int_set:Nn \l__ulsbs_pdf_key_minor_int
       {\str_if_eq:eeTF {\seq_item:Nn \l__ulsbs_pdf_key_seq {4}}{m}{1}{0}}
-    \tl_gset:Nx \g__ulsbs_pdf_transpose_key_tl
-      {{\int_use:N \l__ulsbs_pdf_key_letter_int}
-       {\int_use:N \l__ulsbs_pdf_key_pitch_int}
-       {\int_use:N \l__ulsbs_pdf_key_minor_int}}
-   }
-   {\tl_if_empty:NF \l__ulsbs_pdf_key_tl
-     {\PackageWarning{ulsbs}{Song~\tl_to_str:V\ulSongTitle :~unsupported~key=\tl_to_str:V\ulSongKey;
-       ~using~current~sharp/flat~preference~for~transposition}}}
+     \prg_return_true:
+    }
+    {\prg_return_false:}
+ }
+
+% Cache the parsed effective key independently of source transpose and box groups.
+\cs_new_protected:Npn \__ulsbs_pdf_key_cache:
+ {
+  \tl_gset:Nx \g__ulsbs_pdf_transpose_key_tl
+    {{\int_use:N \l__ulsbs_pdf_key_letter_int}
+     {\int_use:N \l__ulsbs_pdf_key_pitch_int}
+     {\int_use:N \l__ulsbs_pdf_key_minor_int}}
+ }
+
+\cs_new_protected:Npn \__ulsbs_pdf_key_save:
+ {
+  \tl_gclear:N \g__ulsbs_pdf_transpose_key_tl
+  \__ulsbs_pdf_key_parse:NTF \ulSongKey
+    {\__ulsbs_pdf_key_cache:}
+    {\tl_if_empty:NF \l__ulsbs_pdf_key_tl
+      {\PackageWarning{ulsbs}{Song~\tl_to_str:V\ulSongTitle :~unsupported~key=\tl_to_str:V\ulSongKey;
+        ~using~current~sharp/flat~preference~for~transposition}}}
  }
 
 % #1/#2/#3: restore tonic letter index, pitch class and minor flag locally.

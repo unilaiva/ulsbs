@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Experimental, original-footprint LilyPond alternatives for multikey PDFs.
+"""Original-footprint LilyPond alternatives for multikey and selection PDFs.
 
 The first TeX pass supplies semantic song keys; generated lilypond-book
 fragments supply score identities. Musical boundaries captured during original
@@ -18,7 +18,7 @@ import math
 import re
 import shlex
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fractions import Fraction
 from functools import partial
 from itertools import groupby
@@ -45,6 +45,7 @@ _INCLUDE = re.compile(r'\\include\s+"([^"\n]+)"')
 _GRAPHIC = re.compile(r"\\includegraphics\{([^{}]+)\}")
 _WRAPPED = re.compile(r"\\ulScoreSystem\{[a-f0-9]+\}\{\d+\}\{([^{}]+)\}")
 _BAD_CONTENT = re.compile(r"No (?:open )?string for pitch|cannot find[^\n]*string|programming error|fatal error", re.I)
+_BOUNDARY_INCLUDE = '\n\\include "ulsbs-score-boundaries.ily"\n'
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,7 @@ class Score:
     tail_position: int | None
     unsupported: str | None
     boundaries: tuple[tuple[Fraction, Fraction, Fraction, Fraction], ...] = ()
+    capture_boundaries: bool = False
 
 
 def _minimum_scale_tex() -> str:
@@ -282,7 +284,7 @@ def generate_scores(ui, job, basename: str, scores: dict[str, Score],
 
 
 def _engrave_chain(score, key, target, offset, dimensions, directory, env, include_args,
-                   fingerprint, result) -> None:
+                    fingerprint, result) -> None:
     """Run sequential octave retries, mutating only this chain's private result."""
     signed = offset if offset <= 6 else offset - 12
     # Keep preferred choices first; the third, higher register covers instrument
@@ -480,13 +482,236 @@ def generate_scores_staged(ui, job, basename: str, scores: dict[str, Score],
                       f"{successes} successful offsets, {fallbacks} fallbacks")
 
 
+def _selection_inventory(directory, basename):
+    """Index only current generated graphics without rewriting their fragments."""
+    names = json.loads(read_text(directory / (basename + ".ulsbs-lilypond-systems.json")))
+    if not isinstance(names, list) or any(not isinstance(name, str) for name in names):
+        raise ValueError("invalid LilyPond systems inventory")
+    by_graphic = {}
+    for name in dict.fromkeys(names):
+        path = Path(name)
+        if path.is_absolute() or ".." in path.parts or not name.endswith("-systems.tex"):
+            raise ValueError("invalid fragment path in LilyPond systems inventory")
+        fragment = directory / path
+        if not fragment.is_file():
+            continue
+        text = _WRAPPED.sub(lambda match: r"\includegraphics{" + match[1] + "}", read_text(fragment))
+        graphics = tuple(dict.fromkeys(_GRAPHIC.findall(text)))
+        identity = hashlib.sha256(path.as_posix().encode()).hexdigest()[:20]
+        source = fragment.with_name(fragment.name.removesuffix("-systems.tex") + ".ly")
+        score = Score(identity, source, graphics, None, None)
+        for graphic in graphics:
+            by_graphic.setdefault(graphic, {})[path] = score
+    return by_graphic
+
+
+def _selection_match(inventory, graphic, file):
+    """Use the raw stem first, and the current TeX file to disambiguate it."""
+    if not isinstance(graphic, str) or not re.fullmatch(r"[A-Za-z0-9._/-]+", graphic):
+        raise ValueError("invalid generated score graphic stem")
+    matches = inventory.get(graphic, {})
+    if len(matches) == 1:
+        return next(iter(matches.values()))
+    if not matches:
+        raise ValueError("graphic is not in the current LilyPond systems inventory")
+    if isinstance(file, str) and file:
+        path = Path(file)
+        for candidates in ((score for name, score in matches.items()
+                            if path == name or path.parts[-len(name.parts):] == name.parts),
+                           (score for name, score in matches.items() if path.name == name.name)):
+            found = list(candidates)
+            if found:
+                if len(found) == 1:
+                    return found[0]
+                break
+    raise ValueError("graphic matches multiple current LilyPond fragments")
+
+
+def _run_engraving(stem, directory, env, include_args):
+    """Run the same EPS/PDF backend for diagnostic originals and candidates."""
+    with measure("scores.engrave"):
+        return run_cmd([
+            "lilypond", *include_args, "-dno-point-and-click", "-dbackend=eps",
+            "-dseparate-page-formats=pdf", "-dinclude-eps-fonts", "-dgs-load-fonts",
+            "-o", str(stem), str(stem.with_suffix(".ly")),
+        ], cwd=directory, env={**env, "LC_ALL": "C", "LANGUAGE": "C"},
+            stdout_path=stem.with_suffix(".log"), check=False)
+
+
+def _capture_selection_boundaries(score, stem, directory, env, include_args):
+    """Re-engrave an untransposed copy with boundary capture enabled."""
+    stem.parent.mkdir(parents=True, exist_ok=True)
+    for stale in stem.parent.glob(f"{stem.name}-*.pdf"):
+        stale.unlink()
+    boundary_file = stem.with_suffix(".ulsbs-boundaries")
+    boundary_file.unlink(missing_ok=True)
+    source = read_text(score.source)
+    pos = score.tail_position
+    write_text(stem.with_suffix(".ly"), source[:pos] + _BOUNDARY_INCLUDE + source[pos:])
+    if _run_engraving(stem, directory, env, include_args).returncode:
+        raise ValueError("original boundary capture engraving failed")
+    if ({path.name for path in stem.parent.glob(f"{stem.name}-*.pdf")}
+            != {f"{stem.name}-{i}.pdf" for i in range(1, len(score.graphics) + 1)}):
+        raise ValueError("original boundary capture system count does not match original")
+    try:
+        boundaries = _boundaries(boundary_file)
+    except OSError as error:
+        raise ValueError("original musical boundaries are unavailable") from error
+    if len(boundaries) != len(score.graphics):
+        raise ValueError("original musical boundary count does not match original system count")
+    if any(start_grace > 0 or end_grace > 0 for _, start_grace, _, end_grace in boundaries):
+        raise ValueError("positive grace-time system boundaries are unsupported")
+    if boundaries[-1][3]:
+        raise ValueError("final system boundary within grace music is unsupported")
+    return boundaries
+
+
+def _selection_chains(score, chains, directory, env, include_args, toolchain):
+    """Capture once per snippet, then run its independent target chains."""
+    capture = len(score.graphics) > 1
+    capture_log = None
+    try:
+        reason, position = _support(score.source)
+        if reason:
+            raise ValueError(reason)
+        score = replace(score, tail_position=position)
+        dimensions = tuple(_dimensions(directory / (graphic + ".pdf")) for graphic in score.graphics)
+        fingerprint_source = score.source
+        if capture:
+            stem = directory / "ulsbs-score-variants" / ("selection-" + score.identity) / "original"
+            capture_log = stem.with_suffix(".log").relative_to(directory).as_posix()
+            score = replace(score, capture_boundaries=True, boundaries=_capture_selection_boundaries(
+                score, stem, directory, env, include_args))
+            # Include the recorder itself in the dependencies for cache eligibility.
+            fingerprint_source = stem.with_suffix(".ly")
+        fingerprint = cache.source_fingerprint(
+            fingerprint_source, include_args, cwd=directory, env=env, toolchain=toolchain)
+    except (OSError, ValueError, pikepdf.PdfError) as error:
+        for _, _, _, result in chains.values():
+            result.update(reason=str(error), capture_log=capture_log)
+        return
+    for key, target, offset, result in chains.values():
+        result.update(capture_log=capture_log, cache_eligible=fingerprint is not None,
+                      boundaries=[[str(value) for value in row] for row in score.boundaries])
+        _engrave_chain(score, key, target, offset, dimensions, directory, env, include_args,
+                       fingerprint, result)
+
+
+def generate_selection_scores_staged(ui, job, basename, env, include_args):
+    """Yield one batch of selection engraving tasks, then write direct bindings and results."""
+    directory = job.compile_dir
+    result_file = directory / (basename + ".ulsbs-selection-score-results.json")
+    requests, results, groups, work, dispatch = [], [], {}, {}, {}
+    try:
+        envelope = json.loads(read_text(directory / (basename + ".ulsbs-selection-scores.json")))
+        if (not isinstance(envelope, dict) or envelope.get("schema_version") != 1
+                or not isinstance(envelope.get("requests"), list)):
+            raise ValueError("unsupported request schema")
+        requests = envelope["requests"]
+    except (OSError, ValueError) as error:
+        ui.warning_line(f"{ui.fmt_doc(job)} Selection LilyPond: invalid requests ({error}); using originals",
+                        source="Scores", category="requests", log_path=result_file)
+
+    inventory, inventory_error = {}, None
+    if requests:
+        try:
+            inventory = _selection_inventory(directory, basename)
+        except (OSError, ValueError) as error:
+            inventory_error = f"current LilyPond systems inventory is unavailable ({error})"
+    owners = {}
+    for request in requests:
+        request = request if isinstance(request, dict) else {}
+        key, target = request.get("key"), request.get("target")
+        title, song_id = request.get("title"), request.get("song_id")
+        file, graphic = request.get("file"), request.get("graphic")
+        score = signature = offset = reason = None
+        target_label = repr(target)
+        try:
+            if _valid_key(target, mode=True):
+                target_label = interval(target, target, 0)[0] + ("m" if target["minor"] else "")
+            if not _valid_key(key, mode=True) or not _valid_key(target, mode=True):
+                raise ValueError("invalid source or target key metadata")
+            if key["minor"] != target["minor"]:
+                raise ValueError("changing between major and minor is unsupported")
+            offset = (target["pitch"] - key["pitch"]) % 12
+            interval(key, target, offset)
+            signature = (key["letter"], key["pitch"], key["minor"], target["letter"], target["pitch"])
+            if inventory_error:
+                raise ValueError(inventory_error)
+            score = _selection_match(inventory, graphic, file)
+        except ValueError as error:
+            reason = str(error)
+        group_key = (score, signature, repr(song_id), repr(title), reason, target_label)
+        if group_key not in groups:
+            groups[group_key] = ({"song_id": song_id, "title": title, "file": file, "key": key,
+                                  "systems": [], "offsets": []}, offset, target)
+        requested = groups[group_key][0]["systems"]
+        if graphic not in requested:
+            requested.append(graphic)
+        if signature is not None and isinstance(graphic, str):
+            owners.setdefault((signature, graphic), set()).add(score)
+
+    prepared = []
+    for (score, signature, _, _, reason, target_label), (record, offset, target) in groups.items():
+        chain = None
+        if not reason:
+            if any(len(owners[signature, graphic]) != 1 for graphic in record["systems"]):
+                reason = "binding would select graphics from multiple LilyPond fragments"
+            else:
+                record.update(snippet_id=score.identity, source=score.source.relative_to(directory).as_posix())
+                chains = work.setdefault(score, {})
+                if signature not in chains:
+                    # The target mode is validated above, but transposition uses only its tonic.
+                    key = {name: record["key"][name] for name in ("letter", "pitch", "minor")}
+                    tonic = {name: target[name] for name in ("letter", "pitch")}
+                    chains[signature] = (key, tonic, offset, {
+                        "rendered": [], "statistics": {"engravings": 0, "cache_hits": 0},
+                    })
+                chain = chains[signature][3]
+        prepared.append((score, signature, record, offset, target, target_label, reason, chain))
+
+    toolchain = cache.toolchain_fingerprint(env=env, cwd=directory) if work else None
+    yield [partial(_selection_chains, score, chains, directory, env, include_args, toolchain)
+           for score, chains in work.items()]
+
+    for score, signature, record, offset, target, target_label, reason, chain in prepared:
+        outcome = {"offset": offset, "target": target, "attempts": [], "status": "fallback", "reason": reason}
+        if chain is not None:
+            record.update({name: chain[name] for name in ("capture_log", "cache_eligible", "boundaries")
+                           if name in chain})
+            outcome["reason"] = chain.get("reason")
+            for candidate, alternative, failure, log in chain["rendered"]:
+                outcome["attempts"].append({"interval": candidate, "log": log, "reason": failure})
+                outcome["reason"] = failure
+                if alternative:
+                    outcome.update(status="transposed", graphic=alternative)
+                    prefix = "-".join(map(str, signature))
+                    for graphic in record["systems"]:
+                        index = score.graphics.index(graphic) + 1
+                        dispatch[f"ULSelectionScore:{prefix}:{graphic}"] = f"{alternative}-{index}"
+        if outcome["status"] == "fallback":
+            ui.warning_line(
+                f"{ui.fmt_doc(job)} Selection LilyPond song={record['title'] or record['song_id']!r} "
+                f"target={target_label}: {outcome['reason']}; using original notation",
+                source="Scores", category="fallback", log_path=result_file)
+        record["offsets"].append(outcome)
+        results.append(record)
+
+    write_text(directory / (basename + ".ulsbs-selection-score-variants.tex"), _minimum_scale_tex() + "".join(
+        rf"\expandafter\def\csname {name}\endcsname{{{graphic}}}" + "\n" for name, graphic in dispatch.items()))
+    write_text(result_file, json.dumps({"schema_version": 1, "scores": results}, ensure_ascii=True, indent=2) + "\n")
+
+
 @measure("scores.candidate")
 def _engrave(score: Score, key: dict, target: dict, signed: int, offset: int,
              original: tuple[tuple[float, float], ...], directory: Path, env: dict[str, str],
              include_args: list[str], *, fingerprint: str | None = None,
              statistics: dict | None = None) -> tuple[str | None, str | None, str]:
     """Return a restored/engraved graphic stem, failure reason, and log path."""
-    identity = hashlib.sha256(f"{score.identity}:{key}:{target}:{signed}".encode()).hexdigest()[:20]
+    name = f"{score.identity}:{key}:{target}:{signed}"
+    if score.capture_boundaries:
+        name += ":capture"
+    identity = hashlib.sha256(name.encode()).hexdigest()[:20]
     destination = directory / "ulsbs-score-variants" / identity
     destination.mkdir(parents=True, exist_ok=True)
     stem = destination / f"t{offset:02d}"
@@ -509,6 +734,8 @@ def _engrave(score: Score, key: dict, target: dict, signed: int, offset: int,
         ) + "\n"
         # Single-system originals must not acquire automatic breaks either.
         additions += _replay(score.boundaries)
+        if score.capture_boundaries:
+            additions += _BOUNDARY_INCLUDE
         source = source[:score.tail_position] + additions + source[score.tail_position:]
         write_text(stem.with_suffix(".ly"), source)
         cache_key = cache.candidate_key(
@@ -533,12 +760,7 @@ def _engrave(score: Score, key: dict, target: dict, signed: int, offset: int,
             statistics["engravings"] += 1
         # Omitted-tab warnings are a validity check, including with exit zero.
         # Keep their language stable even on a localized host.
-        with measure("scores.engrave"):
-            result = run_cmd([
-                "lilypond", *include_args, "-dno-point-and-click", "-dbackend=eps",
-                "-dseparate-page-formats=pdf", "-dinclude-eps-fonts", "-dgs-load-fonts",
-                "-o", str(stem), str(stem.with_suffix(".ly")),
-            ], cwd=directory, env={**env, "LC_ALL": "C", "LANGUAGE": "C"}, stdout_path=log, check=False)
+        result = _run_engraving(stem, directory, env, include_args)
         if result.returncode:
             return None, "LilyPond engraving failed", relative_log
         failure = _validate_variant(stem, score, original)

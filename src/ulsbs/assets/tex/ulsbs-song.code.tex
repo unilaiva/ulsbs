@@ -19,6 +19,10 @@
 \msg_new:nnn {ulsbs-song}{state}{Invalid~song~lifecycle:~#1.}
 \msg_new:nnn {ulsbs-song}{index}{Unknown~song~index~'#1'.}
 \msg_new:nnn {ulsbs-song}{key}{Unknown~metadata~key~'#1'.}
+\msg_new:nnn {ulsbs-selection}{duplicate}
+  {Multiple~songs~match~selected~#1~'#2'.~Using~the~first~source~occurrence.}
+\msg_new:nnn {ulsbs-selection}{numbering}
+  {Unknown~selection~numbering~'#1'.~Use~source~or~sequential.}
 \msg_new:nnn {ulsbs-song}{badge-width}
   {Song~badges~leave~no~room~for~the~title.~Use~shorter~badges,~a~wider~heading,~or~allow~title/badge~overlap.}
 \msg_new:nnn {ulsbs-song}{heading-width}
@@ -28,6 +32,10 @@
 \bool_new:N \g__ulsbs_song_heading_pending_bool
 \bool_new:N \l__ulsbs_song_selected_bool
 \bool_new:N \g__ulsbs_song_selection_bool
+\bool_new:N \g__ulsbs_song_selection_by_id_bool
+\bool_new:N \g__ulsbs_song_sequential_bool
+\bool_new:N \l__ulsbs_song_renumber_bool
+\int_new:N \g__ulsbs_song_output_number_int
 \prop_new:N \l__ulsbs_song_metadata_prop
 \seq_new:N \g__ulsbs_song_key_resets_seq
 \seq_new:N \l__ulsbs_song_titles_seq
@@ -35,12 +43,23 @@
 \clist_new:N \g__ulsbs_song_selection_clist
 \clist_new:N \l__ulsbs_song_indices_clist
 \prop_new:N \g__ulsbs_song_selection_boxes_prop
+\prop_new:N \g__ulsbs_song_selection_matches_prop
+\prop_new:N \g__ulsbs_song_selection_keys_prop
+\prop_new:N \g__ulsbs_song_selection_output_ids_prop
+\prop_new:N \g__ulsbs_song_block_labels_prop
 \prop_new:N \g__ulsbs_song_occurrences_prop
 \prop_new:N \l__ulsbs_song_index_labels_prop
 \int_new:N \g__ulsbs_songs_serial_int
 \int_new:N \g__ulsbs_song_serial_int
 \int_new:N \l__ulsbs_song_title_int
 \tl_new:N \l__ulsbs_song_label_tl
+\tl_new:N \l__ulsbs_song_selection_key_tl
+\tl_new:N \l__ulsbs_song_selection_target_key_tl
+\tl_new:N \g__ulsbs_song_selection_metadata_tl
+\tl_new:N \g__ulsbs_song_selection_panel_tl
+\box_new:N \l__ulsbs_song_selection_metadata_box
+\box_new:N \l__ulsbs_song_selection_panel_box
+\box_new:N \g__ulsbs_song_selection_output_box
 \tl_new:N \l__ulsbs_song_target_tl
 \tl_new:N \l__ulsbs_song_id_tl
 \tl_new:N \l__ulsbs_song_box_tl
@@ -145,11 +164,73 @@
   {\int_while_do:nn {\l__ulsbs_song_title_int <= \seq_count:N \l__ulsbs_song_titles_seq}
     {#1\ulNextTitle}}
 
-% {printed labels/directives}: enable global selection, even for an empty list.
-% Source still executes once; commitsongs later submits retained boxes in order.
+% {by-ID boolean}{selectors/directives}: start a selection, even for an empty list.
+% Matches persist across output blocks until the next declaration.
+\cs_new_protected:Npn \__ulsbs_song_selection_set:nn #1#2
+  {\bool_if:NT \g__ulsbs_songs_active_bool
+     {\__ulsbs_song_fail:n {selection~declaration~inside~ulSongs}}
+   \bool_gset_true:N \g__ulsbs_song_selection_bool
+   \bool_gset:Nn \g__ulsbs_song_selection_by_id_bool {#1}
+   \prop_gclear:N \g__ulsbs_song_selection_matches_prop
+   \clist_gset:Nn \g__ulsbs_song_selection_clist {#2}}
+
 \DeclareDocumentCommand \ulIncludeOnlySongs {m}
-  {\bool_gset_true:N \g__ulsbs_song_selection_bool
-   \clist_gset:Nn \g__ulsbs_song_selection_clist {#1}}
+  {\__ulsbs_song_selection_set:nn {\c_false_bool}{#1}}
+
+\DeclareDocumentCommand \ulIncludeOnlySongIds {m}
+  {\__ulsbs_song_selection_set:nn {\c_true_bool}{#1}}
+
+% {source|sequential}: only change output labels, never source matching.
+\DeclareDocumentCommand \ulSelectionNumbering {m}
+  {\str_case:nnF {#1}
+     {{source}{\bool_gset_false:N \g__ulsbs_song_sequential_bool}
+      {sequential}{\bool_gset_true:N \g__ulsbs_song_sequential_bool}}
+     {\msg_error:nnn {ulsbs-selection}{numbering}{#1}}}
+\@onlypreamble\ulSelectionNumbering
+
+% {song ID}{effective target key}: apply only to songs selected by ID.
+\DeclareDocumentCommand \ulSelectionSongKey {m m}
+  {\group_begin:
+   \tl_set:Nn \l_tmpa_tl {#2}
+   % Outside song metadata scanning, raw # is a parameter token.
+   \regex_replace_all:nnN {\cP\#} {\c{shrp}} \l_tmpa_tl
+   \prop_gput:NnV \g__ulsbs_song_selection_keys_prop {#1}\l_tmpa_tl
+   \group_end:}
+
+% Freeze the selection key before hooks and claim only its first source match.
+% Keep it separate from the printed label and the occurrence-suffixed ID anchor.
+\cs_new_protected:Npn \__ulsbs_song_select:
+  {
+    \bool_set_true:N \l__ulsbs_song_selected_bool
+    \bool_if:NT \g__ulsbs_song_selection_bool
+      {
+        \bool_set_false:N \l__ulsbs_song_selected_bool
+        \bool_if:NTF \g__ulsbs_song_selection_by_id_bool
+          {\tl_set:Nx \l__ulsbs_song_selection_key_tl {\ulSongId}}
+          {\tl_set_eq:NN \l__ulsbs_song_selection_key_tl \l__ulsbs_song_label_tl}
+        \exp_args:NNV \clist_if_in:NnT \g__ulsbs_song_selection_clist \l__ulsbs_song_selection_key_tl
+          {
+            \prop_if_in:NVF \c__ulsbs_layout_selection_directives_prop \l__ulsbs_song_selection_key_tl
+              {
+                \prop_get:NVNTF \g__ulsbs_song_selection_matches_prop
+                  \l__ulsbs_song_selection_key_tl \l_tmpa_tl
+                  {
+                    \int_compare:nNnT {\l_tmpa_tl} = {0}
+                      {
+                        \msg_warning:nnxx {ulsbs-selection}{duplicate}
+                          {\bool_if:NTF \g__ulsbs_song_selection_by_id_bool {ID}{number}}
+                          {\l__ulsbs_song_selection_key_tl}
+                        \prop_gput:NVn \g__ulsbs_song_selection_matches_prop
+                          \l__ulsbs_song_selection_key_tl {1}
+                      }
+                  }
+                  {\bool_set_true:N \l__ulsbs_song_selected_bool
+                   \prop_gput:NVn \g__ulsbs_song_selection_matches_prop
+                     \l__ulsbs_song_selection_key_tl {0}}
+              }
+          }
+      }
+  }
 
 % {index IDs}: validate collection destinations, reset numbering/selection boxes
 % and enter layout ownership. Exit commits selection and drains owned pages.
@@ -160,6 +241,7 @@
     \bool_gset_false:N \g__ulsbs_song_heading_pending_bool
     \int_gincr:N \g__ulsbs_songs_serial_int
     \setcounter{ulSongNumber}{1}
+    \prop_gclear:N \g__ulsbs_song_block_labels_prop
     \clist_set:Nn \l__ulsbs_song_indices_clist {#1}
     \clist_map_inline:Nn \l__ulsbs_song_indices_clist
       {\prop_if_in:NnF \g__ulsbs_index_kinds_prop {##1}
@@ -225,14 +307,21 @@
     \char_set_active_eq:nN {35}\shrp
     \char_set_active_eq:nN {38}\flt
     \tl_set:Nx \l__ulsbs_song_label_tl {\theulSongNumber}
-    \tl_set:Nx \l__ulsbs_song_target_tl
-      {song\int_use:N \g__ulsbs_songs_serial_int-\theulSongNumber}
-    \bool_set_true:N \l__ulsbs_song_selected_bool
-    \bool_if:NT \g__ulsbs_song_selection_bool
-      {\exp_args:NNV \clist_if_in:NnF \g__ulsbs_song_selection_clist \l__ulsbs_song_label_tl
-        {\bool_set_false:N \l__ulsbs_song_selected_bool}}
-    \protected@edef\@currentlabel{\p@ulSongNumber\theulSongNumber}
     \int_gincr:N \g__ulsbs_song_serial_int
+    % ID selection can retain different songs with the same printed label.
+    \prop_if_in:NVTF \g__ulsbs_song_block_labels_prop \l__ulsbs_song_label_tl
+      {\tl_set:Nx \l__ulsbs_song_target_tl {song-repeat-\int_use:N \g__ulsbs_song_serial_int}}
+      {\prop_gput:NVn \g__ulsbs_song_block_labels_prop \l__ulsbs_song_label_tl {}
+       \tl_set:Nx \l__ulsbs_song_target_tl
+         {song\int_use:N \g__ulsbs_songs_serial_int-\l__ulsbs_song_label_tl}}
+    \__ulsbs_song_select:
+    \bool_set:Nn \l__ulsbs_song_renumber_bool
+      {\g__ulsbs_song_sequential_bool && \g__ulsbs_song_selection_bool && \l__ulsbs_song_selected_bool}
+    \tl_clear:N \l__ulsbs_song_selection_target_key_tl
+    \bool_if:nT {\g__ulsbs_song_selection_by_id_bool && \l__ulsbs_song_selected_bool}
+      {\prop_get:NVNT \g__ulsbs_song_selection_keys_prop \l__ulsbs_song_selection_key_tl \l_tmpa_tl
+        {\tl_set_eq:NN \l__ulsbs_song_selection_target_key_tl \l_tmpa_tl}}
+    \protected@edef\@currentlabel{\p@ulSongNumber\theulSongNumber}
     \tl_set:Nx \l__ulsbs_song_box_tl {g__ulsbs_song_\int_use:N \g__ulsbs_song_serial_int _box}
     \group_begin:
     \vbox_set:Nw \l__ulsbs_song_box
@@ -242,7 +331,9 @@
        \__ulsbs_song_multikey:
        \__ulsbs_song_anchor:
        \vbox_set:Nw \l__ulsbs_song_prefix_box
-       \ulSongTarget{\int_if_zero:nTF {\value{section}}{1}{2}}{\l__ulsbs_song_target_tl}
+        \bool_if:NTF \l__ulsbs_song_renumber_bool
+          {\vbox~attr~\c__ulsbs_layout_selection_attribute_int~1~{}}
+          {\ulSongTarget{\int_if_zero:nTF {\value{section}}{1}{2}}{\l__ulsbs_song_target_tl}}
       \seq_map_inline:Nn \l__ulsbs_song_extra_indices_seq {##1}
       \seq_map_inline:Nn \l__ulsbs_song_titles_seq
         {\__ulsbs_song_record:nnn {title}{}{##1}}
@@ -250,16 +341,19 @@
          {\__ulsbs_song_record:nnn {tag}{}{\ulTagList}}
        \__ulsbs_song_record:nnn {author}{}{\ulSongAuthors}
        \vbox_set_end:
+       \bool_if:NT \l__ulsbs_song_renumber_bool
+         {\__ulsbs_song_selection_capture_metadata:}
        % Match legacy font first-use order without replaying body source.
        \vbox_set:Nw \l__ulsbs_song_body_box
         \nointerlineskip\ulLyricFontStyle\relax\__ulsbs_verse_baseline:
       \hypersetup{bookmarksdepth=0}\phantomsection
        % Choose now: neither shipout nor next-pass TOC reading may query later
        % local visibility. addcontentsline still retains the write in this box.
-       \legacy_if:nTF {ulShowPhaseInToc}
+        \bool_if:NF \l__ulsbs_song_renumber_bool
+        {\legacy_if:nTF {ulShowPhaseInToc}
          {\addcontentsline{toc}{subsection}{\numberline{\theulSongNumber}\ulSongTitle\relax
            \hspace{0.15em}\scriptsize\textsuperscript{\rmfamily\tiny\ulPhaseList}}}
-         {\addcontentsline{toc}{subsection}{\numberline{\theulSongNumber}\ulSongTitle\relax}}
+          {\addcontentsline{toc}{subsection}{\numberline{\theulSongNumber}\ulSongTitle\relax}}}
       \hypersetup{bookmarksdepth=2}
   }
 
@@ -268,7 +362,8 @@
 % discard unselected nodes, close the song group and advance printed numbering.
 \DeclareDocumentCommand \endsong {}
   {
-    \__ulsbs_song_require:
+     \__ulsbs_song_require:
+     \tl_gclear:N \g__ulsbs_song_selection_panel_tl
        \UseHook{ulsbs/song/finish}
        \__ulsbs_layout_song_end:
        \vbox_set_end:
@@ -289,8 +384,13 @@
           {
             \box_new:c {\l__ulsbs_song_box_tl}
             \box_gset_eq:cN {\l__ulsbs_song_box_tl}\l__ulsbs_song_box
-            \prop_gput:NVx \g__ulsbs_song_selection_boxes_prop \l__ulsbs_song_label_tl
-              {\exp_not:N \__ulsbs_layout_submit_copy:c {\l__ulsbs_song_box_tl}}
+             \bool_if:NTF \l__ulsbs_song_renumber_bool
+               {\prop_gput:NVx \g__ulsbs_song_selection_boxes_prop \l__ulsbs_song_selection_key_tl
+                 {\exp_not:N \__ulsbs_song_selection_submit:nnn {\l__ulsbs_song_box_tl}
+                   {\exp_not:V \g__ulsbs_song_selection_metadata_tl}
+                   {\exp_not:V \g__ulsbs_song_selection_panel_tl}}}
+               {\prop_gput:NVx \g__ulsbs_song_selection_boxes_prop \l__ulsbs_song_selection_key_tl
+                 {\exp_not:N \__ulsbs_layout_submit_copy:c {\l__ulsbs_song_box_tl}}}
           }
           {\__ulsbs_layout_submit:N \l__ulsbs_song_box}
       }
@@ -315,11 +415,65 @@
       }
     % Only the retained nodes need a subgroup; hook assignments stay song-local.
     \vbox_set:Nn \l__ulsbs_song_anchor_box
-      {\tl_if_empty:NF \l__ulsbs_song_id_tl
-        {\savepos\hypertarget{songid:\l__ulsbs_song_id_tl}{}
-         \protected@write\ulsbs@idtopagefile{}
-           {ID-NR-PAGE-Y|\l__ulsbs_song_id_tl|\theulSongNumber|\thepage|\noexpand\the\noexpand\lastypos}}}
+       {\bool_if:NF \l__ulsbs_song_renumber_bool
+         {\tl_if_empty:NF \l__ulsbs_song_id_tl
+           {\savepos\hypertarget{songid:\l__ulsbs_song_id_tl}{}
+            \protected@write\ulsbs@idtopagefile{}
+              {ID-NR-PAGE-Y|\l__ulsbs_song_id_tl|\theulSongNumber|\thepage|\noexpand\the\noexpand\lastypos}}}}
     \UseHook{ulsbs/song/anchor}
+  }
+
+% Freeze source metadata, leaving the number and navigation target for output.
+\cs_new_protected:Npn \__ulsbs_song_selection_capture_metadata:
+  {
+    \group_begin:
+    \protected@edef\l_tmpa_tl{\ulSongTitle}
+    \protected@edef\l_tmpb_tl
+      {\legacy_if:nT {ulShowPhaseInToc}
+        {\protect\hspace{0.15em}\protect\scriptsize
+          \protect\textsuperscript{\protect\rmfamily\protect\tiny\ulPhaseList}}}
+    \tl_set:Nx \l_tmpa_tl
+      {\exp_not:N \__ulsbs_song_selection_metadata:nnnn {\l__ulsbs_song_id_tl}
+       {\int_if_zero:nTF {\value{section}}{1}{2}}{\exp_not:V \l_tmpa_tl}{\exp_not:V \l_tmpb_tl}}
+    \tl_gset_eq:NN \g__ulsbs_song_selection_metadata_tl \l_tmpa_tl
+    \group_end:
+  }
+
+% {ID}{outline level}{title}{TOC suffix}; run inside the replacement vbox.
+\cs_new_protected:Npn \__ulsbs_song_selection_metadata:nnnn #1#2#3#4
+  {
+    \tl_if_empty:nF {#1}
+      {\savepos
+        \prop_if_in:NnF \g__ulsbs_song_selection_output_ids_prop {#1}
+          {\prop_gput:Nnn \g__ulsbs_song_selection_output_ids_prop {#1}{}\hypertarget{songid:#1}{}}
+        \protected@write\ulsbs@idtopagefile{}
+        {ID-NR-PAGE-Y|#1|\theulSongNumber|\thepage|\noexpand\the\noexpand\lastypos}}
+    \cs_set:Npn \ulSongTitle {#3}
+    \ulSongTarget{#2}{\l__ulsbs_song_target_tl}
+    % The package key changes bookmark depth globally; this suppression is local.
+    \def\Hy@bookmarksdepth{0}
+    \edef\@currentHref{\l__ulsbs_song_target_tl.#2}
+    \addcontentsline{toc}{subsection}{\numberline{\theulSongNumber}#3\relax#4}
+  }
+
+% {retained box name}{metadata builder}{number panel builder}. Number each
+% submitted copy and replace only the number-dependent nodes, never the source.
+\cs_new_protected:Npn \__ulsbs_song_selection_submit:nnn #1#2#3
+  {
+    \int_gincr:N \g__ulsbs_song_output_number_int
+    \group_begin:
+    \cs_set:Npx \theulSongNumber {\int_use:N \g__ulsbs_song_output_number_int}
+    \tl_set:Nx \l__ulsbs_song_target_tl {song-selection-\theulSongNumber}
+    \vbox_set:Nn \l__ulsbs_song_selection_metadata_box {#2}
+    \hbox_set:Nn \l__ulsbs_song_selection_panel_box {#3}
+    \box_set_eq:Nc \l__ulsbs_song_box {#1}
+    \directlua{ulsbs_layout.fill_selection_slots(\number\l__ulsbs_song_box,
+      \number\l__ulsbs_song_selection_metadata_box,\number\l__ulsbs_song_selection_panel_box)
+      ulsbs_index_state.replay_box(\number\l__ulsbs_song_box,
+        '\theulSongNumber','\l__ulsbs_song_target_tl')}
+    \box_gset_eq:NN \g__ulsbs_song_selection_output_box \l__ulsbs_song_box
+    \group_end:
+    \__ulsbs_layout_submit:N \g__ulsbs_song_selection_output_box
   }
 
 % {outline level}{target}: emit a bookmark using current song number/title.
@@ -354,13 +508,14 @@
                 \str_if_eq:VnT \l_tmpb_tl {#1}
                   {
                     \UseHook{ulsbs/index/record}
-                    \prop_get:NnNTF \l__ulsbs_song_index_labels_prop {##1}\l_tmpb_tl
-                      {}
-                      {\tl_set_eq:NN \l_tmpb_tl \l__ulsbs_song_label_tl}
-                    \if@filesw\ifulSongIndexes
-                      \ulsbs_index_record:nnnnn {##1}{#3}{\l_tmpb_tl}
-                        {\l__ulsbs_song_target_tl.\int_if_zero:nTF {\value{section}}{1}{2}}
-                        {\thechapter}
+                     \if@filesw\ifulSongIndexes
+                       \prop_get:NnNTF \l__ulsbs_song_index_labels_prop {##1}\l_tmpb_tl
+                         {\bool_set_false:N \l_tmpa_bool}
+                         {\tl_set_eq:NN \l_tmpb_tl \l__ulsbs_song_label_tl
+                          \bool_set_eq:NN \l_tmpa_bool \l__ulsbs_song_renumber_bool}
+                       \ulsbs_index_record:nnnnnn {##1}{#3}{\l_tmpb_tl}
+                         {\l__ulsbs_song_target_tl.\int_if_zero:nTF {\value{section}}{1}{2}}
+                         {\thechapter}{\bool_if:NTF \l_tmpa_bool {true}{false}}
                     \fi\fi
                   }
               }
@@ -507,11 +662,26 @@
       {\hbox{\colorbox{\ulSongNumberBackgroundColor}
         {\vbox to\box_ht:N \l__ulsbs_song_prelude_box
           % Allow number ink to use the padding without enlarging short headings.
-          {\hbox to\ulSongNumberWidth{\ulPrintSongNumber{\theulSongNumber}\hfil}\vss}}
+           {\bool_if:NTF \l__ulsbs_song_renumber_bool
+             {\__ulsbs_song_selection_panel:}
+             {\hbox to\ulSongNumberWidth{\ulPrintSongNumber{\theulSongNumber}\hfil}}\vss}}
         \kern3pt\box_use_drop:N \l__ulsbs_song_prelude_box}}
       {\box_use_drop:N \l__ulsbs_song_prelude_box}
     \fi
     \ulResetTitles
+  }
+
+% The fixed-width panel keeps its background and geometry in the retained box.
+% Save the active formatter and font for rendering its digits at commit.
+\cs_new_protected:Npn \__ulsbs_song_selection_panel:
+  {
+    \cs_gset_eq:cN {\l__ulsbs_song_box_tl _number:} \ulPrintSongNumber
+    \tl_gset:Nx \g__ulsbs_song_selection_panel_tl
+      {\exp_not:N \hbox~to~\dim_eval:n {\ulSongNumberWidth}
+       {\exp_not:N \usefont{\f@encoding}{\f@family}{\f@series}{\f@shape}
+       \exp_not:N \fontsize{\f@size}{\f@baselineskip}\exp_not:N \selectfont
+       \exp_not:c {\l__ulsbs_song_box_tl _number:}{\exp_not:N \theulSongNumber}\exp_not:N \hfil}}
+    \hbox~attr~\c__ulsbs_layout_selection_attribute_int~2~to~\ulSongNumberWidth{\hfil}
   }
 
 % Retain each formatted row once and measure only its horizontal lane.

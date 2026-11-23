@@ -669,12 +669,19 @@ or nested lifecycles have owned diagnostics. Titles split only on top-level
 catcodes change after title scanning, allowing raw `#`/`&` in musical key fields.
 
 Selection activation is distinct from its list: absent selects all; explicitly
-empty selects none. Retained boxes submit in requested printed-number order
-without renumbering. Index, PSV and TOC writes stay in those boxes; discarded
-boxes do not leak records. Intentional repeated selections get shipout replay
+empty selects none. A selection declaration matches source IDs (before anchor
+suffixing) or printed labels; the first source match claims each key across blocks
+and later matches warn once per key. Each block submits its retained boxes in list
+order. Source numbering is the default; sequential numbering fills the visible
+number panel and navigation metadata slots in each output copy before layout,
+and index replay carries the new label and target (keeping explicit index label
+overrides). Neither mode reruns source. Index, PSV and TOC writes stay in song
+boxes; discarded boxes do not leak records. Intentional repeats get shipout replay
 markers without evaluating source or hooks again. ID anchors are
 `songid:<id>[-n]`; index targets separately use
-`song<block>-<printed-number>.<outline-level>`. ID and number freeze at collection;
+`song<block>-<printed-number>.<outline-level>` on the first occurrence of a label
+in the block, and `song-repeat-<source-serial>.<outline-level>` on later ones.
+ID and number freeze at collection;
 physical page and Y resolve at shipout. Only occurrences with transposable ink
 enter the multikey manifest.
 
@@ -1338,6 +1345,13 @@ preferred/octave retries sequential. Chains have private results, diagnostics
 and timing collectors; only the resumed parent assembles bindings and reports
 actionable warnings/debug information, in original request/offset order. Child
 work emits no compiler progress, start, completion or success output.
+
+An ordinary build uses the same handoff only if its draft pass requests a score
+for a selected song with a changed key. The initial `lilypond-book` pass is
+unchanged. The compiler resolves requests against that run's systems inventory,
+captures original breaks on demand for multi-system scores, and binds accepted
+replacement graphics directly without layers or changes to the generated
+fragments. It clears selection requests and bindings before each build.
 
 Admission is bounded to active capacity, not an eagerly submitted whole-book
 backlog. Ready parent resumptions and packaging have FIFO priority, followed by

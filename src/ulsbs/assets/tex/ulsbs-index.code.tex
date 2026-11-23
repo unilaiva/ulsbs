@@ -92,12 +92,13 @@
     \exp_args:NNNV \group_end: \tl_set:Nn #2\l__ulsbs_index_template_tl
   }
 
-% #1: index ID; #2: title; #3: reference label; #4: target; #5: chapter.
+% #1: index ID; #2: title; #3: reference label; #4: target; #5: chapter;
+% #6: whether a sequential selection may replace the reference label.
 % Serialize/stage now and emit a late-Lua node carrying the numeric handle.
 % Only shipped nodes resolve page templates and commit; copied fit probes never
 % execute them, discarded boxes contribute nothing, and replay markers distinguish
 % intentionally repeated selected output without evaluating metadata again.
-\cs_new_protected:Npn \ulsbs_index_record:nnnnn #1#2#3#4#5
+\cs_new_protected:Npn \ulsbs_index_record:nnnnnn #1#2#3#4#5#6
   {
     \__ulsbs_index_serialize:nN {#2}\l__ulsbs_index_title_tl
     \__ulsbs_index_serialize:nN {#3}\l__ulsbs_index_label_tl
@@ -105,7 +106,7 @@
     \__ulsbs_index_serialize:nN {#5}\l__ulsbs_index_chapter_tl
     \directlua{token.set_macro("l__ulsbs_index_handle_tl",tostring(ulsbs_index_state.stage(
       "\luaescapestring{#1}",\l__ulsbs_index_title_tl,\l__ulsbs_index_label_tl,
-      \l__ulsbs_index_target_tl,\l__ulsbs_index_chapter_tl,true)))}
+       \l__ulsbs_index_target_tl,\l__ulsbs_index_chapter_tl,true,#6)))}
     \exp_args:Nx \latelua {ulsbs_index_state.ship(\l__ulsbs_index_handle_tl,nil,
       "\exp_not:n {\luaescapestring{\thepage}}")}
   }

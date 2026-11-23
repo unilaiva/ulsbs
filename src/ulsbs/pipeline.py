@@ -682,6 +682,7 @@ def make_variant_tex(job: Job, cfg: Config) -> Path:
         + (r"\providecommand{\ulScoreSystem}[3]{\includegraphics{#3}}" + "\n"
            if layers and cfg.multikey_lilypond_scores else "")
         + (MULTIKEY_DISABLED_FALLBACK_TEX if layers else "")
+        + (r"\def\ulsbsCompilerSelectionScores{1}" + "\n" if not job.multikey else "")
         + (f"\\def\\ulBuildVariant{{{job.variant}}}\n" if job.variant != "default" else "")
         + source
     )
@@ -1764,6 +1765,10 @@ def _compile_job_stages(
             from .lilypond_scores import prepare_scores
 
             score_sources = prepare_scores(cwd, basename)
+        if not job.multikey:
+            for suffix in (".ulsbs-selection-scores.json", ".ulsbs-selection-score-variants.tex",
+                           ".ulsbs-selection-score-results.json"):
+                (cwd / (basename + suffix)).unlink(missing_ok=True)
 
         # 2) lualatex pass 1 (draftmode)
         try:
@@ -1773,11 +1778,20 @@ def _compile_job_stages(
         except CompileError as ce:
             die_log(ui, cfg, job, cwd=cwd, message=str(ce), log_path=ce.log_path)
 
+        score_results_suffix = None
         if score_sources is not None:
             from .lilypond_scores import generate_scores_staged
 
             generation = generate_scores_staged(
                 ui, job, basename, score_sources, env, lp_include_args, verbose=cfg.verbose)
+            score_results_suffix = ".ulsbs-score-results.json"
+        elif not job.multikey and (cwd / (basename + ".ulsbs-selection-scores.json")).is_file():
+            from .lilypond_scores import generate_selection_scores_staged
+
+            generation = generate_selection_scores_staged(ui, job, basename, env, lp_include_args)
+            score_results_suffix = ".ulsbs-selection-score-results.json"
+
+        if score_results_suffix is not None:
             try:
                 with measure("scores.generate"):
                     chains = next(generation)
@@ -1792,7 +1806,7 @@ def _compile_job_stages(
             finally:
                 generation.close()
             if isinstance(ui, _JobUI):
-                results_path = cwd / (basename + ".ulsbs-score-results.json")
+                results_path = cwd / (basename + score_results_suffix)
                 try:
                     score_results = json.loads(read_text(results_path))
                     for score in score_results["scores"]:

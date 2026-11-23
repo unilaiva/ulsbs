@@ -67,6 +67,103 @@ def score_layer_drawings(pdf, *, generic=False):
 
 
 class LilyPondScoreIntegrationTests(unittest.TestCase):
+    def test_ordinary_selection_replaces_only_visible_rekeyed_scores(self):
+        for tool in ('lilypond-book', 'lilypond', 'lualatex', 'convert-ly'):
+            if shutil.which(tool) is None:
+                self.skipTest(f'{tool} is not installed')
+        with tempfile.TemporaryDirectory(prefix='ulsbs-selection-score-') as temporary:
+            root = Path(temporary)
+            for child in ('content', 'include', 'result', 'texmf-cache', 'job'):
+                (root / child).mkdir()
+            doc = root / 'book.tex'
+            (root / 'include/selection.tex').write_text(r'''
+\ulIncludeOnlySongIds{shifted,custom,unchanged}
+\ulSelectionSongKey{shifted}{D}
+\ulSelectionSongKey{custom}{D}
+\ulSelectionSongKey{skipped}{D}
+''', encoding='utf-8')
+            supported = r'''
+\include "ulsbs-include-head.ly"
+theMelody = \relative c' { \key c \major c4 d e g | \break e4 d c e | }
+theChords = \chordmode { c1 c1 }
+\include "ulsbs-include-tail-notab-nolyrics.ly"
+'''
+            custom = r"\score { \new Staff { c'4 d' e' c' } \layout {} }"
+
+            def song(song_id, score):
+                return (rf'\beginsong{{{song_id}}}[id={{{song_id}}},key={{C}}]' + '\n'
+                        r'\beginverse\[C]Sample lyrics.\endverse' + '\n'
+                        r'\begin{lilywrap}\begin{lilypond}[]' + '\n' + score + '\n'
+                        r'\end{lilypond}\end{lilywrap}\endsong' + '\n')
+
+            def source(selection):
+                return (r'\documentclass{ulsbs-songbook}' + '\n' + selection + '\n'
+                        r'\begin{document}\begin{ulSongs}{}' + '\n'
+                        + song('shifted', supported) + song('custom', custom)
+                        + song('unchanged', supported) + song('skipped', supported)
+                        + r'\end{ulSongs}\end{document}' + '\n')
+
+            paths = SimpleNamespace(project_root=root, host_project_root=root, result_dir=root / 'result',
+                                    content_dir=root / 'content', include_dir=root / 'include')
+            cfg = replace(Config(), runtime=SimpleNamespace(project_paths=paths, in_container=False),
+                          create_printouts=False, coverimage=False, audiofiles=False, midifiles=False,
+                          json=False, clean_temp=False)
+            ui = Mock()
+            ui.fmt_doc.return_value = '[selection scores]'
+            ui.colorize.side_effect = lambda text, color: text
+            job = Job(doc, doc.stem, 'default', root / 'job')
+            base = job.compile_dir / build_job_basename(job)
+            prepare = pipeline.prepare_compile_dir
+            lilypond_version = subprocess.check_output(['lilypond', '--version'], text=True)
+
+            def prepare_fixture(*args, **kwargs):
+                prepare(*args, **kwargs)
+                if '2.24.' not in lilypond_version:
+                    tail = job.compile_dir / 'ulsbs-assets/ly/ulsbs-internal-common-tail.ly'
+                    subprocess.run(['convert-ly', '-e', '-f', '2.24.4', str(tail)], check=True,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+            def build():
+                try:
+                    pipeline.compile_one_job(ui, EngineAssets(), cfg, job)
+                except (pipeline.CompileError, SystemExit) as error:
+                    logs = '\n'.join(str(p) + '\n' + p.read_text(errors='replace')[-3000:]
+                                     for p in sorted(job.compile_dir.glob('*.log')))
+                    self.fail(f'{error}\n{logs}')
+
+            resultlist.initialize(root / 'result', 'selection-score-integration')
+            with patch.dict(os.environ, {'TEXMFVAR': str(root / 'texmf-cache'),
+                                         'TEXMFCACHE': str(root / 'texmf-cache'),
+                                         'ULSBS_SCORE_CACHE_DIR': str(root / 'score-cache')}), \
+                    patch.object(pipeline, 'prepare_compile_dir', side_effect=prepare_fixture):
+                doc.write_text(source(r'\input{include/selection.tex}'), encoding='utf-8')
+                build()
+                request_path = base.with_suffix('.ulsbs-selection-scores.json')
+                self.assertTrue(request_path.is_file(), '\n'.join(
+                    p.name + '\n' + p.read_text(errors='replace')[-4000:]
+                    for p in (base.with_suffix('.tex'), base.with_suffix('.ulsbs-lilypond-systems.json'),
+                              *sorted(job.compile_dir.glob('*_lualatex-pass1.log')))))
+                requests = json.loads(request_path.read_text())['requests']
+                self.assertEqual({request['song_id'] for request in requests}, {'shifted', 'custom'})
+                self.assertEqual({request['target']['pitch'] for request in requests}, {2})
+                variants_path = base.with_suffix('.ulsbs-selection-score-variants.tex')
+                variants = variants_path.read_text()
+                self.assertEqual(variants.count('ULSelectionScore:'), 2)
+                for graphic in re.findall(r'\\endcsname\{([^{}]+)\}', variants):
+                    self.assertIn(f'{graphic}.pdf', base.with_suffix('.log').read_text())
+                report = root / 'result/diagnostics' / (base.name + '_DIAGNOSTICS.json')
+                warnings = json.loads(report.read_text())['warnings']
+                self.assertTrue(any(item['source'] == 'Scores' and item['category'] == 'fallback'
+                                    and 'custom' in item['message'].lower()
+                                    for item in warnings), warnings)
+
+                # Warm build of the same book without a selection must not reuse dispatch.
+                doc.write_text(source(r'\ulSelectionSongKey{shifted}{D}'), encoding='utf-8')
+                build()
+                self.assertFalse(request_path.exists())
+                self.assertFalse(variants_path.exists())
+                self.assertNotIn('ulsbs-score-variants/', base.with_suffix('.log').read_text())
+
     def test_score_width_limit_preserves_natural_and_alternative_fitting(self):
         for tool in ('lualatex', 'pdftoppm'):
             if shutil.which(tool) is None:

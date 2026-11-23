@@ -31,6 +31,7 @@
 % one braced argument; shared effects must stay outside per-offset rendering.
 \int_new:N \l__ulsbs_music_transpose_int
 \int_new:N \l__ulsbs_music_layer_int
+\tl_new:N \l__ulsbs_music_override_source_key_tl
 \bool_new:N \l__ulsbs_music_sharps_bool
 \bool_set_false:N \l__ulsbs_music_sharps_bool
 \bool_new:N \l__ulsbs_music_lowercase_bool
@@ -91,6 +92,7 @@
 \cs_new_protected:Npn \__ulsbs_music_reset:
   {\int_zero:N \l__ulsbs_music_transpose_int
    \int_zero:N \l__ulsbs_music_layer_int
+   \tl_clear:N \l__ulsbs_music_override_source_key_tl
    \global\ulsbs@rep@level=0\relax\global\ulsbs@prevparlines=0\relax
    \ulBoolReset{g__ulsbs_repeat_cont_prop}\meter{4}{4}}
 \AddToHook{ulsbs/song/begin}{\__ulsbs_music_reset:}
@@ -135,8 +137,8 @@
       {\fontsize{\l_tmpa_tl}{\f@baselineskip}\selectfont}
     {\kern-0.05em\ulSymbolFont\char"266D}\group_end:}}
 
-% key= describes the effective destination. Reverse only the source offset;
-% interactive layers start from effective notation and add their own offset.
+% The cached key describes the effective destination. Reverse the full
+% noninteractive offset; layers start from effective notation instead.
 % Prepare local source/target tonic and scale tables only when key-aware spelling
 % is enabled and a parsed key exists. Missing keys retain accidental preference.
 \cs_new_protected:Npn \__ulsbs_music_prepare:
@@ -155,14 +157,22 @@
       \int_if_zero:nTF {\l__ulsbs_music_layer_int}
        {\int_set:Nn \l__ulsbs_music_source_pitch_int
          {\int_mod:nn {1200+\l__ulsbs_pdf_key_pitch_int-\l__ulsbs_music_transpose_int}{12}}
-        \__ulsbs_music_tonic:nN {\l__ulsbs_music_source_pitch_int}
-          \l__ulsbs_music_source_letter_int
-        \__ulsbs_music_tonic:nN {\l__ulsbs_music_target_pitch_int}\l_tmpa_int}
+         \__ulsbs_music_tonic:nN {\l__ulsbs_music_source_pitch_int}
+           \l__ulsbs_music_source_letter_int
+         \tl_if_empty:NF \l__ulsbs_music_override_source_key_tl
+           {\exp_after:wN \__ulsbs_music_source_spelling:nnn \l__ulsbs_music_override_source_key_tl}
+         \__ulsbs_music_tonic:nN {\l__ulsbs_music_target_pitch_int}\l_tmpa_int}
        {\int_set:Nn \l__ulsbs_music_target_pitch_int
          {\int_mod:nn {\l__ulsbs_pdf_key_pitch_int+\l__ulsbs_music_layer_int}{12}}
         \__ulsbs_music_tonic:nN {\l__ulsbs_music_target_pitch_int}
           \l__ulsbs_music_target_letter_int}}
    \fi}
+
+% Prefer the known authored spelling when the inferred raw tonic still has its
+% pitch class. In particular, enharmonic-only overrides must start from it.
+\cs_new_protected:Npn \__ulsbs_music_source_spelling:nnn #1#2#3
+  {\int_compare:nNnT {\l__ulsbs_music_source_pitch_int}={#2}
+    {\int_set:Nn \l__ulsbs_music_source_letter_int {#1}}}
 
 % #1 is pitch class 0..11; write canonical tonic letter index to integer #2 and
 % choose the major/minor conventional accidental preference as a side effect.
@@ -258,9 +268,8 @@
       {\int_compare:nNnTF {#1}={1}{\exp_not:N \shrp}{\exp_not:N \flt}}}
     {\int_set:Nn \l__ulsbs_music_accidental_int {#1}\__ulsbs_music_commit:}}
 
-% Convert a pending letter/accidental to pitch, spell only for nonzero offsets,
-% append protected glyph tokens, then clear the pending letter. Zero-offset
-% notation is not enharmonically respelled merely because layers are enabled.
+% Convert a pending letter/accidental to pitch, then append protected glyphs.
+% Zero offsets keep source spelling unless an override changes tonic spelling.
 \cs_new_protected:Npn \__ulsbs_music_commit:
   {\tl_if_empty:NF \l__ulsbs_music_pending_tl
     {\int_set:Nn \l__ulsbs_music_letter_int
@@ -269,7 +278,11 @@
       {\int_mod:nn {1200+\clist_item:Nn \c__ulsbs_pdf_natural_clist
         {\l__ulsbs_music_letter_int+1}+\l__ulsbs_music_accidental_int
         +\l__ulsbs_music_transpose_int}{12}}
-     \int_if_zero:nF {\l__ulsbs_music_transpose_int}
+     \int_if_zero:nTF {\l__ulsbs_music_transpose_int}
+      {\bool_if:NT \l__ulsbs_music_key_bool
+        {\tl_if_empty:NF \l__ulsbs_music_override_source_key_tl
+          {\int_compare:nNnF {\l__ulsbs_music_source_letter_int}={\l__ulsbs_music_target_letter_int}
+            {\__ulsbs_music_spell_key:}}}}
       {\bool_if:NTF \l__ulsbs_music_key_bool
         {\__ulsbs_music_spell_key:}{\__ulsbs_music_spell_pitch:}}
      \tl_put_right:Nx \l__ulsbs_music_result_tl
@@ -335,6 +348,7 @@
 \DeclareDocumentCommand \notrans {m}
   {\group_begin:\int_zero:N \l__ulsbs_music_transpose_int
     \int_zero:N \l__ulsbs_music_layer_int
+    \tl_clear:N \l__ulsbs_music_override_source_key_tl
     \transposehere{#1}
     \group_end:}
 

@@ -21,6 +21,8 @@
 \ExplSyntaxOn
 \box_new:N \l__ulsbs_score_graphic_box
 \tl_new:N \l__ulsbs_score_graphic_args_tl
+\tl_new:N \l__ulsbs_score_graphic_file_tl
+\tl_new:N \l__ulsbs_score_systems_file_tl
 \bool_new:N \l__ulsbs_score_graphics_active_bool
 \bool_new:N \l__ulsbs_score_graphics_raw_bool
 % Shrink retained score boxes uniformly only when wider than the current line.
@@ -37,13 +39,56 @@
    \__ulsbs_score_emit:N \l__ulsbs_score_graphic_box
    \group_end:}
 \cs_new_eq:NN \ulsbs@scoregraphic \__ulsbs_score_graphic:n
+
+% Only the compiler's ordinary build can request or consume score replacements.
+\cs_if_exist:NT \ulsbsCompilerSelectionScores
+  {
+    \InputIfFileExists{\jobname.ulsbs-selection-score-variants.tex}{}{}
+    \AddToHook{enddocument/afterlastpage}
+      {\directlua{if~ulsbs_selection_scores~then~ulsbs_selection_scores.finish_selection()~end}}
+  }
+
+% {source letter}{source pitch}{mode}{target letter}{target pitch}.
+% Called only for generated system graphics of a selected, rekeyed song.
+\cs_new_protected:Npn \__ulsbs_score_selection:nnnnn #1#2#3#4#5
+  {
+    \ifnum\draftmode>0\relax
+      \directlua{
+        ulsbs_selection_scores=ulsbs_selection_scores~or~
+          dofile(assert(kpse.find_file('ulsbs-score-layers.lua','tex')))
+        ulsbs_selection_scores.request_selection(
+          "\luaescapestring{\l__ulsbs_score_systems_file_tl}",
+          "\luaescapestring{\l__ulsbs_score_graphic_file_tl}",
+          "\luaescapestring{\ulSongId}","\luaescapestring{\tl_to_str:V\ulSongTitle}",
+          {letter=#1,pitch=#2,minor=#3},{letter=#4,pitch=#5,minor=#3})}
+    \else
+      \cs_if_exist:cT {ULSelectionScore:#1-#2-#3-#4-#5:\l__ulsbs_score_graphic_file_tl}
+        {\tl_set:Nx \l__ulsbs_score_graphic_file_tl
+          {\use:c {ULSelectionScore:#1-#2-#3-#4-#5:\l__ulsbs_score_graphic_file_tl}}}
+    \fi
+  }
+
+\cs_new:Npn \__ulsbs_score_tonic:nnn #1#2#3 {{#1}{#2}}
+\cs_new_protected:Npn \__ulsbs_score_selection:N #1
+  {\cs_if_exist:NT \ulsbsCompilerSelectionScores
+    {\bool_if:nT {\g__ulsbs_song_active_bool && \l__ulsbs_song_selected_bool}
+      {\legacy_if:nT {ulShowLilypond}
+        {\tl_if_empty:NF \l__ulsbs_music_override_source_key_tl
+          {\tl_set:Nx \l__ulsbs_score_graphic_file_tl {#1}
+           \exp_last_unbraced:Ne \__ulsbs_score_selection:nnnnn
+             {\l__ulsbs_music_override_source_key_tl
+              \exp_after:wN \__ulsbs_score_tonic:nnn \g__ulsbs_pdf_transpose_key_tl}}}}}}
+
 \NewDocumentCommand \__ulsbs_score_includegraphics {s o o m}
   {\group_begin:
    \tl_clear:N \l__ulsbs_score_graphic_args_tl
    \IfBooleanT{#1}{\tl_put_right:Nn \l__ulsbs_score_graphic_args_tl {*}}
    \IfValueT{#2}{\tl_put_right:Nn \l__ulsbs_score_graphic_args_tl {[#2]}}
    \IfValueT{#3}{\tl_put_right:Nn \l__ulsbs_score_graphic_args_tl {[#3]}}
-   \tl_put_right:Nn \l__ulsbs_score_graphic_args_tl {{#4}}
+    \tl_set:Nn \l__ulsbs_score_graphic_file_tl {#4}
+    \bool_if:NF \l__ulsbs_score_graphics_raw_bool
+      {\__ulsbs_score_selection:N \l__ulsbs_score_graphic_file_tl}
+    \tl_put_right:Nx \l__ulsbs_score_graphic_args_tl {{\exp_not:V \l__ulsbs_score_graphic_file_tl}}
    \bool_if:NTF \l__ulsbs_score_graphics_raw_bool
      {\exp_after:wN \__ulsbs_score_raw_graphics: \l__ulsbs_score_graphic_args_tl}
      {\hbox_set:Nn \l__ulsbs_score_graphic_box
@@ -51,7 +96,9 @@
       \__ulsbs_score_emit:N \l__ulsbs_score_graphic_box}
    \group_end:}
 \cs_new_protected:Npn \__ulsbs_score_graphics_begin:
-  {\group_begin:
+   {\group_begin:
+    \cs_if_exist:NT \ulsbsCompilerSelectionScores
+      {\tl_set:Nx \l__ulsbs_score_systems_file_tl {\CurrentFileUsed}}
    \bool_if:NF \l__ulsbs_score_graphics_active_bool
      {\bool_set_true:N \l__ulsbs_score_graphics_active_bool
       \cs_set_eq:NN \__ulsbs_score_raw_graphics: \includegraphics

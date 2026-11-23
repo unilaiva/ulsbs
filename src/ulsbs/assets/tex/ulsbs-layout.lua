@@ -16,6 +16,38 @@
 local M = {}
 M.boundary_attribute = luatexbase.new_attribute("ulsbs-layout-boundary")
 M.pending_attribute = luatexbase.new_attribute("ulsbs-layout-pending")
+M.selection_attribute = luatexbase.new_attribute("ulsbs-layout-selection-slot")
+
+-- Fill marked metadata and number-panel boxes in a selected output copy only.
+-- The outer prelude and panel width stay fixed; the replacement nodes are
+-- ready before layout probes and have the final dimensions and destinations.
+function M.fill_selection_slots(number, metadata, panel)
+  local box = assert(tex.box[number], "Missing selected song box")
+  local replacements = {tex.box[metadata], tex.box[panel]}
+  local remaining = {true, replacements[2] and replacements[2].list ~= nil}
+  local function fill(list)
+    for item in node.traverse(list) do
+      local kind = node.type(item.id)
+      if kind == "hlist" or kind == "vlist" then
+        local slot = node.has_attribute(item, M.selection_attribute)
+        if slot then
+          local source = replacements[slot]
+          node.flush_list(item.list)
+          item.list = node.copy_list(source.list)
+          item.height, item.depth = source.height, source.depth
+          item.glue_set, item.glue_sign, item.glue_order =
+            source.glue_set, source.glue_sign, source.glue_order
+          remaining[slot] = false
+        elseif item.list then
+          fill(item.list)
+        end
+        if not remaining[1] and not remaining[2] then return end
+      end
+    end
+  end
+  fill(box.list)
+  assert(not remaining[1] and not remaining[2], "Missing selected song output slot")
+end
 
 -- Protect a retained body box through its first content box or visible rule.
 -- Metadata whatsits followed by even zero paragraph glue can reopen a breakpoint

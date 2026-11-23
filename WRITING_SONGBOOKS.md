@@ -683,18 +683,38 @@ For a reusable selection, create another main document with the same class,
 needed preamble settings, and song inputs, and add this in its preamble:
 
 ```tex
-\ulIncludeOnlySongs{3,1,7}
+\ulIncludeOnlySongIds{morning-song,river-song,evening-song}
 ```
 
-This selects **song numbers**, not `id=` values, and uses the selection order
-within a `ulSongs` environment. The numbers refer to the original numbering from
-the included collection; selecting songs does not automatically renumber them
-from 1. Keep the input collection and numbering setup consistent with the source
-book. The command is allowed in the preamble or between `ulSongs` environments,
-not inside one.
-Omitting `\ulIncludeOnlySongs` includes all songs; `\ulIncludeOnlySongs{}` explicitly
-selects none. Unselected song boxes do not contribute shipped index/TOC records,
-although source processing and hooks may already have run.
+Prefer selecting by the song's `id=`: IDs stay stable when songs are renumbered.
+`\ulIncludeOnlySongs{3,1,7}` instead selects by printed number. If multiple source
+songs match a requested ID or number, only the first is selected, even across
+`ulSongs` blocks, and the compiler reports a warning.
+
+Both commands preserve the source numbering by default (`\ulSelectionNumbering{source}`).
+Set `\ulSelectionNumbering{sequential}` in the preamble to number selected songs
+from 1 in print order, continuing across blocks. Number-based selection matches
+source numbers. Entries are ordered within each `ulSongs` block; repeating an entry
+prints the same song again and uses the next sequential number.
+
+Set a selection in the preamble or replace it before the next `ulSongs` block.
+For a chaptered selection, put each chapter heading outside its `ulSongs` block
+and declare the list for that block before it starts. Each declaration replaces
+the previous list and starts a fresh duplicate check. Without a selection, all
+songs are included; an empty list selects none. Unselected songs do not appear in
+the indices or table of contents, although their source and hooks still run.
+
+To change the printed key of an ID-selected song, add a key override before its
+block, for example `\ulSelectionSongKey{morning-song}{D}`. This transposes the
+printed chords and melody hints in the ordinary edition and sets the starting
+key in MULTIKEY editions. The song must declare a supported `key=`. The override
+preserves major/minor mode (for example, a minor song moved to `D` prints in
+`Dm`). Use `#` for sharp and `&` for flat. This does not regenerate chord
+fingerings. In ordinary ULSBS compiler builds, visible LilyPond scores using
+supported ULSBS templates are re-engraved in the requested key. If a score
+cannot be transposed, the compiler warns and keeps its original notation.
+Standalone LuaLaTeX does not re-engrave scores. In MULTIKEY, a song with a key
+override still shows the original score without interactive score alternatives.
 
 For a small independent collection, explicitly inputting just the desired song
 files is often simpler than a numbered selection. The Unilaiva repository's
@@ -748,15 +768,16 @@ For a simple page break in ordinary text outside the song sections, use LaTeX's
 
 #### Breaks in selection songbooks
 
-With `\ulIncludeOnlySongs`, breaks inside songs stay with those songs, but breaks
-between songs in the original source are ignored. Put those breaks in the
-selection list instead, using any command above without its backslash:
+With either selection command, breaks inside songs stay with those songs, but
+breaks between songs in the original source are ignored. Put those breaks in the
+selection list instead, using the command name without its backslash. These names
+are reserved in selection lists:
 
 ```tex
-\ulIncludeOnlySongs{3,sclearoddpage,8}
+\ulIncludeOnlySongIds{morning-song,sclearoddpage,evening-song}
 ```
 
-This prints song 3, then starts song 8 on an odd page.
+This prints `morning-song`, then starts `evening-song` on an odd page.
 
 Normally use unstarred commands. `\nextcol` and the three page-clear commands also
 accept `*`, such as `\sclearpage*`: this acts while the source is read, even during

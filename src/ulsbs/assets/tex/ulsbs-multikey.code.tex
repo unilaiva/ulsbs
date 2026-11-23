@@ -33,6 +33,8 @@
 \box_new:N \l__ulsbs_multikey_badge_box
 \dim_new:N \l__ulsbs_multikey_badge_key_width_dim
 \dim_new:N \l__ulsbs_multikey_badge_arrow_width_dim
+\msg_new:nnn {ulsbs}{selection-target-key}
+  {Cannot~apply~target~key~'#2'~to~song~'#1':~#3.}
 
 % Load parsed key state only for an active song with a saved supported
 % key. Clearing availability first prevents a previous call's key from leaking.
@@ -58,7 +60,45 @@
          {\clist_item:nn {0,0,1,1,2,3,3,4,4,5,6,6}{#1+1}}}
   }
 
-% key= is already the effective original, independently of source \transpose.
+% The target is relative to the effective source key=, not to raw notation.
+% Seed the normal offset after its song reset so later \transpose adds to it.
+% A bare target supplies just the tonic; an explicit minor suffix must agree.
+\cs_new_protected:Npn \__ulsbs_multikey_apply_target:
+  {
+    \tl_if_empty:NTF \g__ulsbs_pdf_transpose_key_tl
+      {\__ulsbs_multikey_target_error:n {a~supported~source~key=~is~required}}
+      {\exp_after:wN \__ulsbs_multikey_apply_target:nnn \g__ulsbs_pdf_transpose_key_tl}
+  }
+
+% #1/#2/#3 are the authored effective tonic letter, pitch class, and mode.
+\cs_new_protected:Npn \__ulsbs_multikey_apply_target:nnn #1#2#3
+  {
+    \__ulsbs_pdf_key_parse:NTF \l__ulsbs_song_selection_target_key_tl
+      {
+        \int_compare:nNnTF {\l__ulsbs_pdf_key_minor_int}>{#3}
+          {\__ulsbs_multikey_target_error:n {the~target~cannot~change~major/minor~mode}}
+          {
+            \bool_lazy_or:nnT
+              {\int_compare_p:n {\l__ulsbs_pdf_key_letter_int != #1}}
+              {\int_compare_p:n {\l__ulsbs_pdf_key_pitch_int != #2}}
+              {\tl_set_eq:NN \l__ulsbs_music_override_source_key_tl \g__ulsbs_pdf_transpose_key_tl}
+            \int_add:Nn \l__ulsbs_music_transpose_int {\l__ulsbs_pdf_key_pitch_int-#2}
+            \int_set:Nn \l__ulsbs_pdf_key_minor_int {#3}
+            \tl_set:Nx \ulSongKey
+              {\clist_item:Nn \c__ulsbs_pdf_letters_clist {\l__ulsbs_pdf_key_letter_int+1}
+               \int_case:nn {\l__ulsbs_pdf_accidental_int}
+                 {{-1}{\exp_not:N \flt}{1}{\exp_not:N \shrp}}
+               \int_if_zero:nF {\l__ulsbs_pdf_key_minor_int}{m}}
+            \__ulsbs_pdf_key_cache:
+          }
+      }
+      {\__ulsbs_multikey_target_error:n {unsupported~target~notation}}
+  }
+
+\cs_new_protected:Npn \__ulsbs_multikey_target_error:n #1
+  {\msg_error:nneee {ulsbs}{selection-target-key}
+    {\tl_to_str:V \ulSongId}{\tl_to_str:V \l__ulsbs_song_selection_target_key_tl}{#1}}
+
 % Called by song setup, not each visual: save key metadata even without layers,
 % then validate the normalized stable ID before allocating the song's OCG family.
 % Invalid IDs error or warn/skip according to the common strictness setting.
@@ -67,6 +107,7 @@
     \ulsbs@pdfsongfalse
     \global\let\ulsbs@pdfpreludesongid\@empty
     \__ulsbs_pdf_key_save:
+    \tl_if_empty:NF \l__ulsbs_song_selection_target_key_tl {\__ulsbs_multikey_apply_target:}
     \ifulsbs@pdflayers
       \tl_set:Nx \l__ulsbs_pdf_source_id_tl {\ulSongId}
       \tl_set:Nx \l__ulsbs_pdf_source_id_tl {\tl_to_str:V \l__ulsbs_pdf_source_id_tl}
@@ -178,10 +219,12 @@
     \group_begin:
     \ifulsbs@pdfchord\else\ulsbs@pdfsongfalse\fi
     \__ulsbs_music_transpose:nN {#1}\l__ulsbs_multikey_text_tl
-    \int_if_zero:nTF {\l__ulsbs_music_transpose_int}
+    \bool_lazy_and:nnTF {\int_compare_p:n {\l__ulsbs_music_transpose_int=0}}
+      {\tl_if_empty_p:N \l__ulsbs_music_override_source_key_tl}
       {\exp_args:NV \__ulsbs_multikey_chord_text:n \l__ulsbs_multikey_text_tl}
       {\group_begin:
          \int_zero:N \l__ulsbs_music_transpose_int
+         \tl_clear:N \l__ulsbs_music_override_source_key_tl
          \__ulsbs_music_transpose:nN {#1}\l__ulsbs_multikey_original_tl
          \exp_args:NNNV \group_end: \tl_set:Nn
            \l__ulsbs_multikey_original_tl \l__ulsbs_multikey_original_tl
@@ -248,12 +291,13 @@
   }
 
 % Install the optional score API: arguments are snippet identity, system suffix,
-% and original image path. Delegate only in an active layered song; all
-% other contexts include the original image once without layered score handling.
+% and original image path. Delegate only in an active layered song whose t00
+% retains the authored key; LilyPond's pre-engraved base is not rekeyed here.
 \cs_new_protected:Npn \__ulsbs_multikey_score_adapter:
   {\cs_set_protected:Npn \ulScoreSystem ##1##2##3
     {\legacy_if:nTF {ulsbs@pdfsong}
-      {\bool_if:NTF \g__ulsbs_song_active_bool
+       {\bool_lazy_and:nnTF {\g__ulsbs_song_active_bool}
+         {\tl_if_empty_p:N \l__ulsbs_music_override_source_key_tl}
         {\__ulsbs_score_system:nnn {##1}{##2}{##3}}
         {\__ulsbs_score_graphic:n {##3}}}
       {\__ulsbs_score_graphic:n {##3}}}}

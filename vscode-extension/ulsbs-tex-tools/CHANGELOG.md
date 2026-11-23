@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add snippets for selecting songs by stable ID (preferred) or printed number,
+  choosing selection numbering, and setting a selected song's printed key.
+
 ## v0.3.0 - 2026-11-18
 
 - Updated editing support and the new-book template for the current ULSBS API,

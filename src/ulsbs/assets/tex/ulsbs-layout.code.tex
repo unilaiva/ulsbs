@@ -32,6 +32,8 @@
 \box_new:N \l__ulsbs_layout_split_box
 \box_new:N \l__ulsbs_layout_context_box
 \directlua{ulsbs_layout=dofile(kpse.find_file('ulsbs-layout.lua'))}
+\int_const:Nn \c__ulsbs_layout_selection_attribute_int
+  {\directlua{tex.sprint(ulsbs_layout.selection_attribute)}}
 \bool_new:N \g__ulsbs_layout_fits_bool
 \int_new:N \l__ulsbs_layout_page_columns_int
 \box_new:N \l__ulsbs_layout_note_box
@@ -270,7 +272,15 @@
          \null\__ulsbs_layout_clear_song_page:}
    \fi}
 
-% No arguments. Apply output columns and traverse requested labels/directives;
+\prop_const_from_keyval:Nn \c__ulsbs_layout_selection_directives_prop
+  {brk={\__ulsbs_layout_break:n {\ulBreakPenalty}},
+   hardbrk={\__ulsbs_layout_break:n {\ulHardBreakPenalty}},
+   forcebrk={\__ulsbs_layout_break:}, nextcol={\__ulsbs_layout_break:},
+   sclearpage={\__ulsbs_layout_clear_songs:},
+   scleardpage={\__ulsbs_layout_clear_parity:n {0}},
+   sclearoddpage={\__ulsbs_layout_clear_parity:n {1}}}
+
+% No arguments. Apply output columns and traverse requested selectors/directives;
 % submit copies of retained boxes (duplicates allowed), then clear the lookup.
 % Metadata, hooks and lyric source are not rerun; deferred nodes await shipout.
 \DeclareDocumentCommand \ulCommitSongs {}
@@ -281,13 +291,8 @@
        \fi
        \__ulsbs_layout_columns:}
     \clist_map_inline:Nn \g__ulsbs_song_selection_clist
-    {\str_case:nnF {##1}
-       {{brk}{\__ulsbs_layout_break:n {\ulBreakPenalty}}
-          {hardbrk}{\__ulsbs_layout_break:n {\ulHardBreakPenalty}}
-          {forcebrk}{\__ulsbs_layout_break:}{nextcol}{\__ulsbs_layout_break:}
-         {sclearpage}{\__ulsbs_layout_clear_songs:}
-         {scleardpage}{\__ulsbs_layout_clear_parity:n {0}}
-         {sclearoddpage}{\__ulsbs_layout_clear_parity:n {1}}}
+     {\prop_get:NnNTF \c__ulsbs_layout_selection_directives_prop {##1}\l_tmpa_tl
+       {\tl_use:N \l_tmpa_tl}
       {\prop_get:NnNT \g__ulsbs_song_selection_boxes_prop {##1}\l_tmpa_tl
         {\tl_use:N \l_tmpa_tl}}}
    \prop_gclear:N \g__ulsbs_song_selection_boxes_prop}
