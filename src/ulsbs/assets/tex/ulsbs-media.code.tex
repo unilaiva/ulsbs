@@ -26,12 +26,12 @@
 \bool_new:N \l__ulsbs_score_graphics_active_bool
 \bool_new:N \l__ulsbs_score_graphics_raw_bool
 % Shrink retained score boxes uniformly only when wider than the current line.
-% Layered callers fit alternatives first, keeping their scale policy unchanged.
-\cs_new_protected:Npn \__ulsbs_score_emit:N #1
+\cs_new_protected:Npn \__ulsbs_score_fit_line:N #1
   {\dim_compare:nNnT {\dim_min:nn {\linewidth}{\hsize}}>{0pt}
     {\dim_compare:nNnT {\box_wd:N #1}>{\dim_min:nn {\linewidth}{\hsize}}
-      {\box_resize_to_wd:Nn #1 {\dim_min:nn {\linewidth}{\hsize}}}}
-   \leavevmode\box_use_drop:N #1}
+      {\box_resize_to_wd:Nn #1 {\dim_min:nn {\linewidth}{\hsize}}}}}
+\cs_new_protected:Npn \__ulsbs_score_emit:N #1
+  {\__ulsbs_score_fit_line:N #1\leavevmode\box_use_drop:N #1}
 \cs_new_protected:Npn \__ulsbs_score_graphic:n #1
   {\group_begin:
    \bool_set_true:N \l__ulsbs_score_graphics_raw_bool
@@ -96,8 +96,9 @@
       \__ulsbs_score_emit:N \l__ulsbs_score_graphic_box}
    \group_end:}
 \cs_new_protected:Npn \__ulsbs_score_graphics_begin:
-   {\group_begin:
-    \cs_if_exist:NT \ulsbsCompilerSelectionScores
+  {\group_begin:
+   \cs_if_exist:NT \__ulsbs_score_begin_fragment: {\__ulsbs_score_begin_fragment:}
+   \cs_if_exist:NT \ulsbsCompilerSelectionScores
       {\tl_set:Nx \l__ulsbs_score_systems_file_tl {\CurrentFileUsed}}
    \bool_if:NF \l__ulsbs_score_graphics_active_bool
      {\bool_set_true:N \l__ulsbs_score_graphics_active_bool

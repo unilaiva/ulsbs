@@ -1,7 +1,8 @@
 % SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 % SPDX-License-Identifier: GPL-3.0-or-later
 %
-% Request score variants and overlay their PDF layers within original system boxes.
+% Request score variants and overlay them within original system boxes, with
+% alternate drawing scales resolved per score and key at physical page shipout.
 % This file is part of the 'ulsbs' package.
 %
 % Loaded only for explicitly opted-in multikey jobs, after the layer helpers.
@@ -9,6 +10,9 @@
 \directlua{ulsbs_score_layers=dofile(assert(kpse.find_file("ulsbs-score-layers.lua","tex"),
   "ULSBS score layers Lua module not found"))}
 \AddToHook{enddocument/afterlastpage}{\directlua{ulsbs_score_layers.finish()}}
+\ifulsbs@pdfdraftpass\else
+  \AddToHook{shipout/before}{\directlua{ulsbs_score_layers.fit_page(tex.box["ShipoutBox"])}}
+\fi
 % Generated definitions use csname so colons are safe under normal catcodes.
 \InputIfFileExists{\jobname.ulsbs-score-variants.tex}{}{}
 % Python writes the sole fitting policy with both draft and final bindings.
@@ -17,7 +21,9 @@
 \providecommand{\ulScoreMinimumScale}{1}
 \ExplSyntaxOn
 \box_new:N \l__ulsbs_score_base_box
+\box_new:N \l__ulsbs_score_display_box
 \box_new:N \l__ulsbs_score_alt_box
+\box_new:N \l__ulsbs_score_transform_box
 \box_new:N \l__ulsbs_score_result_box
 \fp_const:Nn \c__ulsbs_score_minimum_scale_fp {\ulScoreMinimumScale}
 \fp_new:N \l__ulsbs_score_scale_fp
@@ -25,6 +31,13 @@
 \tl_new:N \l__ulsbs_score_targets_lua_tl
 \tl_new:N \l__ulsbs_score_signature_tl
 \tl_new:N \l__ulsbs_score_filename_tl
+\int_new:N \g__ulsbs_score_fragment_int
+\int_new:N \l__ulsbs_score_fragment_int
+% lilypond-book may reuse the same snippet for independent score placements.
+% The media hook scopes this serial to one input of a systems fragment.
+\cs_new_protected:Npn \__ulsbs_score_begin_fragment:
+  {\int_gincr:N \g__ulsbs_score_fragment_int
+   \int_set_eq:NN \l__ulsbs_score_fragment_int \g__ulsbs_score_fragment_int}
 % Request a snippet's source key and twelve target tonics, or unknown-key nulls.
 \cs_new_protected:Npn \__ulsbs_score_request:n #1
   {
@@ -60,10 +73,10 @@
       "\luaescapestring{\ulSongId}","\luaescapestring{\tl_to_str:V\ulSongTitle}",
       \l__ulsbs_score_key_lua_tl,\l__ulsbs_score_targets_lua_tl)}
   }
-% Overlay one snippet/system/offset variant, fitting it or using original notation.
+% Overlay one snippet/system/offset variant in the displayed original's slot.
 \cs_new_protected:Npn \__ulsbs_score_alternative:nnn #1#2#3
   {
-    \box_set_eq:NN \l__ulsbs_score_alt_box \l__ulsbs_score_base_box
+    \box_clear:N \l__ulsbs_score_alt_box
     \bool_if:NT \l__ulsbs_pdf_key_available_bool
       {
         \cs_if_exist:cT
@@ -90,14 +103,14 @@
                 \dim_to_fp:n {\box_wd:N\l__ulsbs_score_alt_box},
               \dim_to_fp:n {\box_ht:N\l__ulsbs_score_base_box+\box_dp:N\l__ulsbs_score_base_box}/
                 \dim_to_fp:n {\box_ht:N\l__ulsbs_score_alt_box+\box_dp:N\l__ulsbs_score_alt_box})}}
-          {\box_set_eq:NN \l__ulsbs_score_alt_box \l__ulsbs_score_base_box}
+          {\box_clear:N \l__ulsbs_score_alt_box}
       }
-      {\box_set_eq:NN \l__ulsbs_score_alt_box \l__ulsbs_score_base_box}
+      {\box_clear:N \l__ulsbs_score_alt_box}
     % PDF dimensions round to sp on conversion. At the exact policy boundary,
     % rounding both boxes can leave a deficit of up to one sp in either axis.
-    % Compare those physical deficits, not a fixed number of ratio decimals;
-    % the applied fit above remains unrounded and cannot enlarge the footprint.
-    \fp_compare:nNnTF
+    % Test this policy against the natural original, as in engraving validation.
+    % The display limit is separate and may shrink an accepted alternative further.
+    \fp_compare:nNnT
       {max(
         \c__ulsbs_score_minimum_scale_fp*\dim_to_fp:n {\box_wd:N\l__ulsbs_score_alt_box}
           -\dim_to_fp:n {\box_wd:N\l__ulsbs_score_base_box},
@@ -107,31 +120,48 @@
       >{\dim_to_fp:n {1sp}}
       {\PackageWarning{ulsbs}{Score~#1~system~#2~offset~#3~is~too~small;
          ~original~notation~substituted}
-       \box_set_eq:NN \l__ulsbs_score_alt_box \l__ulsbs_score_base_box}
-      {\hbox_set:Nn \l__ulsbs_score_alt_box
-        {\scalebox{\fp_to_decimal:N\l__ulsbs_score_scale_fp}{\box_use:N\l__ulsbs_score_alt_box}}}
-    \hbox_set:Nn \l__ulsbs_score_result_box
-      {\smash{\rlap{\__ulsbs_pdf_mark:nn {#3}
-        {\raisebox{\dim_eval:n {\box_ht:N\l__ulsbs_score_base_box-\box_ht:N\l__ulsbs_score_alt_box}}
-          {\box_use:N\l__ulsbs_score_alt_box}}}}\box_use:N\l__ulsbs_score_result_box}
+       \box_clear:N \l__ulsbs_score_alt_box}
+    \box_if_empty:NTF \l__ulsbs_score_alt_box
+      {\smash{\rlap{\__ulsbs_pdf_mark:nn {#3}{\box_use:N \l__ulsbs_score_display_box}}}}
+      {
+        % Place the matrix origin at the original's top left. Changing the
+        % matrix at shipout then preserves this anchor and all TeX dimensions.
+        \hbox_set:Nn \l__ulsbs_score_transform_box
+          {\pdfextension save\relax
+           \pdfextension setmatrix{1~0~0~1}
+           \rlap{\raisebox{-\box_ht:N\l__ulsbs_score_alt_box}{\box_use:N \l__ulsbs_score_alt_box}}
+           \pdfextension restore\relax}
+        \directlua{ulsbs_score_layers.tag_alternative(
+          \number\l__ulsbs_score_transform_box,
+          "\luaescapestring{\ulsbs@pdfnameprefix/#1/\int_use:N\l__ulsbs_score_fragment_int/#3}",
+          \fp_to_decimal:n {min(\l__ulsbs_score_scale_fp,
+            \dim_to_fp:n {\box_wd:N\l__ulsbs_score_display_box}/
+              \dim_to_fp:n {\box_wd:N\l__ulsbs_score_alt_box},
+            \dim_to_fp:n {\box_ht:N\l__ulsbs_score_display_box+\box_dp:N\l__ulsbs_score_display_box}/
+              \dim_to_fp:n {\box_ht:N\l__ulsbs_score_alt_box+\box_dp:N\l__ulsbs_score_alt_box})})}
+        \smash{\rlap{\__ulsbs_pdf_mark:nn {#3}
+          {\raisebox{\box_ht:N\l__ulsbs_score_display_box}{\box_use_drop:N \l__ulsbs_score_transform_box}}}}
+      }
   }
 % Request and layer a snippet/system/file while retaining the original box size.
 \cs_new_protected:Npn \__ulsbs_score_system:nnn #1#2#3
   {
     \group_begin:
-    % Alternatives must fit the natural original before the shared display limit.
     \bool_set_true:N \l__ulsbs_score_graphics_raw_bool
     \__ulsbs_score_request:n {#1}
     \hbox_set:Nn \l__ulsbs_score_base_box {\includegraphics{#3}}
+    \box_set_eq:NN \l__ulsbs_score_display_box \l__ulsbs_score_base_box
+    \__ulsbs_score_fit_line:N \l__ulsbs_score_display_box
+    \__ulsbs_pdf_ensure_layers:
     \hbox_set:Nn \l__ulsbs_score_result_box
-      {\__ulsbs_pdf_mark:nn {0}{\box_use:N\l__ulsbs_score_base_box}}
-    % Requests and the original-sized box remain live in engine draft mode;
-    % only full passes need the eleven alternate graphic/fitting operations.
-    \ifulsbs@pdfdraftpass\else
-    % Dispatch values are snippet prefixes, followed by the system's -N suffix.
-    \int_step_inline:nn {11}{\__ulsbs_score_alternative:nnn {#1}{#2}{##1}}
-    \fi
-    \__ulsbs_score_emit:N \l__ulsbs_score_result_box
+      {
+        % Draft passes only need the request and the original's box.
+        \ifulsbs@pdfdraftpass\else
+          \int_step_inline:nnnn {11}{-1}{1}{\__ulsbs_score_alternative:nnn {#1}{#2}{##1}}
+        \fi
+        \__ulsbs_pdf_mark:nn {0}{\box_use_drop:N \l__ulsbs_score_display_box}
+      }
+    \leavevmode\box_use_drop:N \l__ulsbs_score_result_box
     \group_end:
   }
 % Layer systems only inside PDF songs; otherwise include the original graphic.

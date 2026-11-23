@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Scale a MULTIKEY score's transposed systems uniformly on each page, so one
+  system's tighter fit does not make it look smaller than its neighbors. The
+  original score still determines where all keys split across pages.
 - Fix seams in chapter corner marks and keep dashes evenly spaced when resized.
 - Add `\ulIncludeOnlySongIds` for selections that stay valid across renumbering.
   Both ID and number selectors keep the first source match for each entry and

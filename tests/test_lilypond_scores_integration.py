@@ -31,15 +31,22 @@ from ulsbs.engine_assets import EngineAssets
 from ulsbs.jobs import Job, build_job_basename
 
 
-def score_layer_drawings(pdf, *, generic=False):
+def score_layer_drawings(pdf, *, generic=False, geometry=False):
     drawings = {}
-    for page in pdf.pages:
+    for page_index, page in enumerate(pdf.pages):
         stack = []
+        ctm, saved = pikepdf.Matrix(), []
         properties = page.Resources.get('/Properties', {})
         xobjects = page.Resources.get('/XObject', {})
         for operands, operator in pikepdf.parse_content_stream(page):
             op = str(operator)
-            if op in ('BDC', 'BMC'):
+            if geometry and op == 'q':
+                saved.append(ctm)
+            elif geometry and op == 'Q':
+                ctm = saved.pop()
+            elif geometry and op == 'cm':
+                ctm = pikepdf.Matrix(*map(float, operands)) @ ctm
+            elif op in ('BDC', 'BMC'):
                 names = []
                 if op == 'BDC' and str(operands[0]) == '/OC':
                     prop = properties[str(operands[1])]
@@ -57,10 +64,16 @@ def score_layer_drawings(pdf, *, generic=False):
                 fonts = graphic.get('/Resources', {}).get('/Font', {})
                 if generic or any('emmentaler' in str(font.get('/BaseFont', '')).lower()
                                   for _, font in fonts.items()):
-                    digest = hashlib.sha256(graphic.read_bytes()).hexdigest()
+                    if geometry:
+                        matrix = pikepdf.Matrix(*map(float, graphic.get('/Matrix', (1, 0, 0, 1, 0, 0)))) @ ctm
+                        left, bottom, right, top = map(float, graphic['/BBox'])
+                        drawing = (page_index, *matrix.transform((left, bottom)),
+                                   *matrix.transform((right, top)), matrix.a, matrix.d)
+                    else:
+                        drawing = hashlib.sha256(graphic.read_bytes()).hexdigest()
                     for name in (name for level in stack for name in level):
                         if name.startswith('ulsbs:transpose:v1:'):
-                            drawings.setdefault(name, set()).add(digest)
+                            drawings.setdefault(name, set()).add(drawing)
         if stack:
             raise AssertionError('unclosed optional content')
     return drawings
@@ -442,6 +455,81 @@ Unrelated text.
                 self.assertIn('is too small', output)
                 for offset in range(7, 12):
                     self.assertEqual(drawings[f'{prefix}:t{offset:02d}'], original)
+
+    def test_alternative_score_scale_is_shared_per_placement_key_and_page(self):
+        if shutil.which('lualatex') is None:
+            self.skipTest('lualatex is not installed')
+        prefix = 'ulsbs:transpose:v1:id:uniform-scale'
+        # The keys need different scales on the first page. On the
+        # second, the original's ordinary line limit sets the t01 scale via
+        # height, and t02 fits at unity. Missing t01-5 falls back to the base.
+        dimensions = {'original': [(60, 30)] * 3 + [(80, 30), (60, 30)],
+                      'alt-one': [(100, 30), (60, 30), (60, 36), (60, 30)],
+                      'alt-two': [(75, 30), (60, 30), (60, 30), (60, 22), (60, 30)]}
+        # Use the same snippet ID a second time to mimic LilyPond deduplication.
+        # That separate placement on page 1 must not inherit the first scale.
+        files = {
+            'source-effects.tex': br'''
+\def\ulPdfTranspositionLayers{true}
+\def\ulMultikeyLilypondScores{true}
+\documentclass[oneside,openany]{ulsbs-songbook}
+\ulSongColumns{1}\ulSongPosition{0}
+\begin{document}\begin{ulSongs}{}
+\beginsong{Score scales}[id={uniform-scale},key={C}]
+\begin{lilywrap}\input{repeat-systems.tex}\input{long-systems.tex}\end{lilywrap}
+\endsong\end{ulSongs}\end{document}
+''',
+            'repeat-systems.tex': br'\noindent\ulScoreSystem{aaaaaa}{2}{original-2}\par',
+            'long-systems.tex': br'''
+\noindent\ulScoreSystem{aaaaaa}{1}{original-1}\par
+\noindent\ulScoreSystem{aaaaaa}{2}{original-2}\par\forcebrk
+\noindent\ulScoreSystem{aaaaaa}{3}{original-3}\par
+{\linewidth=60bp \noindent\ulScoreSystem{aaaaaa}{4}{original-4}\par}
+\noindent\ulScoreSystem{aaaaaa}{5}{original-5}\par
+''',
+            'source-effects.ulsbs-score-variants.tex': (lilypond_scores._minimum_scale_tex() + ''.join(
+                rf'\expandafter\def\csname ULScoreVariant:{prefix}:aaaaaa:0-0-0:t{offset:02d}\endcsname'
+                + '{' + name + '}\n' for offset, name in enumerate(('alt-one', 'alt-two'), 1)
+            )).encode(),
+        }
+        for name, systems in dimensions.items():
+            for index, (width, height) in enumerate(systems, 1):
+                with pikepdf.Pdf.new() as graphic:
+                    page = graphic.add_blank_page(page_size=(width, height))
+                    page.Contents = pikepdf.Stream(graphic, f'0 0 {width} {height} re f\n'.encode())
+                    buffer = io.BytesIO()
+                    graphic.save(buffer)
+                files[f'{name}-{index}.pdf'] = buffer.getvalue()
+
+        output, contents = compile_fixture('source-effects', files=files, passes=3)
+        self.assertIn('original notation substituted', ' '.join(output.split()))
+        self.assertNotIn('is too small', output)
+        self.assertNotIn('Misplaced', output)
+        with pikepdf.open(io.BytesIO(contents)) as pdf:
+            drawings = score_layer_drawings(pdf, generic=True, geometry=True)
+
+        def by_page_and_top(offset):
+            return sorted(drawings[f'{prefix}:t{offset:02d}'], key=lambda row: (row[0], -row[4]))
+
+        original = by_page_and_top(0)
+        self.assertEqual([row[0] for row in original], [0, 0, 0, 1, 1, 1])
+        for offset, scales in ((1, [1, .60, .60, .75, .75, 1]), (2, [1, .80, .80, 1, 1, 1])):
+            alternative = by_page_and_top(offset)
+            self.assertEqual(len(alternative), len(original))
+            for scale, base, alt in zip(scales, original, alternative, strict=True):
+                page, left, bottom, right, top, sx, sy = alt
+                self.assertEqual(page, base[0])
+                self.assertAlmostEqual(left, base[1], delta=.01)
+                self.assertAlmostEqual(top, base[4], delta=.01)
+                self.assertLessEqual(right, base[3] + .01)
+                self.assertGreaterEqual(bottom, base[2] - .01)
+                self.assertAlmostEqual(sx, scale, delta=.001, msg=(offset, base, alt))
+                self.assertAlmostEqual(sy, scale, delta=.001, msg=(offset, base, alt))
+        for fallback, base in ((by_page_and_top(1)[-1:], original[-1:]),
+                               (by_page_and_top(3), original)):
+            for fallback_row, base_row in zip(fallback, base, strict=True):
+                for actual, expected in zip(fallback_row, base_row, strict=True):
+                    self.assertAlmostEqual(actual, expected, places=6)
 
     def test_nested_imports_warm_edits_dependencies_removals_and_original_failure(self):
         for tool in ('lilypond-book', 'lilypond', 'lualatex', 'pdftoppm'):

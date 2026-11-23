@@ -1775,21 +1775,22 @@ or unfolded. Positive grace-time boundaries and nonzero final grace moments
 remain explicit fallbacks. Incompatible repeats/custom timing also fall back if
 replay does not reproduce the authoritative full main/grace boundary sequence.
 
-Full passes overlay each system in its existing occurrence-specific OCGs using
-the original box dimensions and baseline; alternatives never enlarge or reserve
-additional layout space. Score overlays reuse the public OCG names and metadata
-contract described below, including their shipped page dependencies.
+Full passes overlay each system in its existing occurrence-specific OCGs, keeping
+the original box and anchoring the alternate ink at its displayed top left.
+After pagination, Lua takes the smallest width/height fit limit of the systems
+of each score placement and key on the physical page, then applies that scale
+to their drawing matrices. Limits include the original's ordinary line-width
+cap. This changes no TeX dimensions, even when a score spans pages or columns.
+Score overlays reuse the public OCG names and metadata contract described below.
 The original LilyPond justification settings are retained, including per-snippet
 overrides; both standard heads explicitly set `ragged-right = ##f` and
-`ragged-last = ##f`. This does not guarantee equal rendered staff lengths after
-overlay fitting. If the alternative is taller, the uniform fit can be limited by
-the original height and shrink its horizontal extent too. Stretching only the
-horizontal PDF axis would distort notation; fitting width alone could overlap
-adjacent content. Equal visual widths would require a separate spacing
-refit with per-system validation, not another justification flag.
+`ragged-last = ##f`. A shared scale preserves the relative lengths of the engraved
+systems, rather than stretching shorter systems to match longer ones. Height
+also constrains the scale so the overlays cannot overlap adjacent content.
 If a validated graphic later disappears or no longer fits, the TeX renderer's
-last-resort per-system guard substitutes that original system; Python validation
-normally rejects the entire offset before dispatch. LilyPond spelling
+last-resort per-system guard substitutes that original system at its displayed
+size; it does not constrain the scale of the remaining alternatives. Python
+validation normally rejects the entire offset before dispatch. LilyPond spelling
 can retain double accidentals that the TeX labels simplify.
 `ulsbs-score-variants/` remains disposable job-local output, not evidence of a
 cache hit. `lilypond_score_cache.py` maintains a separate content-addressed cache

@@ -1,7 +1,7 @@
 -- SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 -- SPDX-License-Identifier: GPL-3.0-or-later
 --
--- Draft-pass engraving requests for PDF layers and rekeyed selections.
+-- Engraving requests and page-local fitting for layered score alternatives.
 -- This file is part of the 'ulsbs' package.
 --
 -- Write private draft-pass score-variant requests to <jobname>.ulsbs-scores.json:
@@ -9,8 +9,8 @@
 -- Loaded by ulsbs-score-layers.tex as ulsbs_score_layers. Its TeX helpers call
 -- request with already resolved key tuples; an enddocument/afterlastpage hook
 -- calls finish. Python consumes the draft requests between draft/full passes,
--- engraves alternatives and supplies variant dispatch bindings. Lua neither
--- parses song-key strings nor engraves, caches or places score graphics.
+-- engraves alternatives and supplies variant dispatch bindings. Full passes
+-- adjust alternate drawing matrices on the physical page, after layout.
 -- requests preserves first-seen order and seen deduplicates each snippet within
 -- a layer-prefix occurrence. State lasts for this module load/LuaLaTeX pass;
 -- finish writes it but does not clear it or prevent subsequent requests.
@@ -18,6 +18,51 @@
 local M = {}
 local requests, seen = {}, {}
 local selection_requests, selection_seen = {}, {}
+local alternatives, alternative_attribute = {}, nil
+
+-- Tag a zero-advance matrix wrapper with its score-placement/key group and
+-- largest scale that fits the system's displayed original. Attributes survive
+-- copies and splits of the retained song boxes.
+function M.tag_alternative(box_number, group, scale)
+  if not alternative_attribute then
+    alternative_attribute = luatexbase.new_attribute("ulsbs.score.alternative")
+  end
+  local id = #alternatives + 1
+  alternatives[id] = {group = group, scale = scale}
+  node.set_attribute(tex.box[box_number], alternative_attribute, id)
+end
+
+-- Fit each score/key independently on this physical page. Every candidate
+-- keeps its original slot, so the tightest slot bounds the shared scale. Only
+-- alternate matrices are changed; originals and TeX dimensions are untouched.
+function M.fit_page(page)
+  if not alternative_attribute then return end
+  local scales, pending = {}, {}
+  local whatsit_id, matrix_subtype = node.id("whatsit"), node.subtype("pdf_setmatrix")
+  local function visit(list)
+    for box in node.traverse_list(list) do
+      local id = node.has_attribute(box, alternative_attribute)
+      if id then
+        local alternative = alternatives[id]
+        local group, scale = alternative.group, alternative.scale
+        scales[group] = math.min(scales[group] or 1, scale)
+        for n in node.traverse_id(whatsit_id, box.head) do
+          if n.subtype == matrix_subtype then
+            pending[#pending + 1] = {matrix = n, group = group}
+            break
+          end
+        end
+      else
+        visit(box.head)
+      end
+    end
+  end
+  visit(page.head)
+  for _, item in ipairs(pending) do
+    local scale = scales[item.group]
+    item.matrix.data = string.format("%.10f 0 0 %.10f", scale, scale)
+  end
+end
 
 -- Validate UTF-8 and encode a JSON string for the private request sidecar.
 -- Return a quoted JSON value; invalid type/encoding raises an assertion.

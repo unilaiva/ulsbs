@@ -483,6 +483,8 @@ as `lyd.`, `dor.`, or `mix.` leave scores original-only, without guessing a key.
 Unsupported scores or alternatives that cannot be engraved safely retain the
 original notation with a warning. Score transposition supports standard ULSBS
 snippets and selected named-variable score layouts, not arbitrary LilyPond code.
+For each alternate key, a score's systems on the same page shrink together to
+fit their original space. Switching keys does not move system or page breaks.
 Recommended singing keys (`gk=`), standalone `\altchords`, prose, and chord
 diagrams do not switch. See the [writing guide](WRITING_SONGBOOKS.md#keys-and-accidentals)
 for key metadata and source transposition.
