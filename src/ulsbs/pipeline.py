@@ -27,6 +27,7 @@ import shlex
 import shutil
 import signal
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -73,6 +74,7 @@ from .diagnostics import Diagnostic, parse_tool_warnings, strip_tex_warnings
 from .jobs import Job, build_job_basename
 from .lock import JobLock
 from .songdb import build_song_database, SongbookData
+from .synctex import MAP_NAME, publish_sidecar
 import ulsbs.resultlist as resultlist
 from .ui import UI
 from .timing import Timings, collect, measure, format_seconds
@@ -708,6 +710,8 @@ def step_lilypond_book(
     env: dict[str, str],
     lp_include_args: list[str],
     step: int,
+    *,
+    synctex: bool = False,
 ) -> tuple[Path, Path, int]:
     """
     Process original sources, never a previous build's generated TeX imports.
@@ -737,6 +741,9 @@ def step_lilypond_book(
     source_aliases = job.compile_dir / "_lp-source"
     safe_rm_tree(source_aliases)
     ensure_dir(source_aliases)
+    source_env.pop("ULSBS_SYNCTEX_SOURCE_MAP", None)
+    if synctex:
+        source_env["ULSBS_SYNCTEX_SOURCE_MAP"] = str(source_aliases / MAP_NAME)
     source_input = source_aliases / input_tex.name
     shutil.copy2(input_tex, source_input)
     for name in ("ulsbs", _JOB_ULSBS_ASSETS_DIRNAME):
@@ -871,6 +878,9 @@ def step_lualatex_pass(
     ]
     if draftmode:
         args.append("-draftmode")
+    elif cfg.synctex and not job.multikey:
+        (cwd / f"{basename}.synctex.gz").unlink(missing_ok=True)
+        args.append("-synctex=1")
     args.append(f"{basename}.tex")
 
     started = time.perf_counter()
@@ -1765,6 +1775,7 @@ def _compile_job_stages(
                 env=env,
                 lp_include_args=lp_include_args,
                 step=step,
+                synctex=cfg.synctex and not job.multikey,
             )
         except CompileError as ce:
             die_log(ui, cfg, job, cwd=job.compile_dir, message=str(ce), log_path=ce.log_path)
@@ -1870,7 +1881,34 @@ def _compile_job_stages(
 
         if not job.multikey:
             dst_pdf = pdf_dir / produced_pdf.name
-            shutil.copy2(produced_pdf, dst_pdf)
+            sidecar = dst_pdf.with_suffix(".synctex.gz")
+            # Publish the complete PDF in one rename, with the new sidecar in
+            # place before the viewer sees the replacement PDF.
+            fd, temporary = tempfile.mkstemp(dir=pdf_dir)
+            os.close(fd)
+            try:
+                shutil.copy2(produced_pdf, temporary)
+                sidecar.unlink(missing_ok=True)
+                dst_pdf.with_suffix(".synctex").unlink(missing_ok=True)
+                if cfg.synctex:
+                    try:
+                        publish_sidecar(
+                            produced_pdf.with_suffix(".synctex.gz"), sidecar,
+                            compile_dir=cwd, staged_main=cwd / "_lp-source" / input_tex.name,
+                            original_main=job.doc_tex_abs,
+                            project_root=cfg.runtime.project_paths.project_root,
+                            host_root=cfg.runtime.project_paths.host_project_root,
+                        )
+                    except (OSError, ValueError, EOFError) as error:
+                        ui.warning_line(f"{txt_doc} SyncTeX unavailable: {error}",
+                                        category="synctex")
+                try:
+                    os.replace(temporary, dst_pdf)
+                except OSError:
+                    sidecar.unlink(missing_ok=True)
+                    raise
+            finally:
+                Path(temporary).unlink(missing_ok=True)
             resultlist.append_line(RESULT_TYPE_MAIN_PDF, produced_pdf.name)
 
         # 6) Optional printouts

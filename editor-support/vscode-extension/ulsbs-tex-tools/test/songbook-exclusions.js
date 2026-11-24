@@ -49,6 +49,7 @@ assert.equal(isExcluded("content/songbook.tex"), false);
 assert.equal(isExcluded(".kilo/generated-songbook.tex"), true);
 assert.equal(isExcluded("project/.venv-release/songbook.tex"), true);
 assert.equal(isExcluded("vendor/ulsbs/tests/songbook.tex"), true);
+assert.equal(isExcluded("ulsbs/editor-support/vscode-extension/ulsbs-tex-tools/assets/songbook-template_A5.tex"), true);
 assert.equal(isExcluded("vendor/tests/fixtures/songbook.tex"), true);
 assert.equal(isExcluded("drafts/songbook.tex"), true);
 assert.equal(isExcluded("temp/songbook.tex"), true);

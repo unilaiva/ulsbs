@@ -1,7 +1,7 @@
 # ULSBS TeX Tools for VS Code
 
-Editing and build shortcuts for songbooks written with
-[ULSBS](https://github.com/unilaiva/ulsbs). The extension helps you navigate large
+VS Code with this extension is the recommended editor for songbooks written with
+[ULSBS](https://github.com/unilaiva/ulsbs). It helps you navigate large
 song collections, insert ULSBS markup, and compile the books that use the file
 you are editing.
 
@@ -27,13 +27,13 @@ to use an already-built VSIX.
 1. From a songbook project containing the `ulsbs/` submodule, open a terminal and run:
 
 ```sh
-cd ulsbs/vscode-extension/ulsbs-tex-tools
+cd ulsbs/editor-support/vscode-extension/ulsbs-tex-tools
 npm ci
 npm run package
 ```
 
 If you opened the ULSBS engine checkout itself, the directory is instead
-`vscode-extension/ulsbs-tex-tools`. The package command builds the web bundle
+`editor-support/vscode-extension/ulsbs-tex-tools`. The package command builds the web bundle
 and creates `ulsbs-tex-tools-<version>.vsix` in that directory.
 
 2. Install the generated file using **Extensions > ... > Install from VSIX...**,

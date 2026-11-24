@@ -13,8 +13,8 @@ same sources.
 - Optionally create multikey editions with independently selectable keys for each
   song in compatible PDF viewers or websites.
 - Export song metadata as JSON and generate MIDI and MP3 files from LilyPond scores.
-- Edit plain-text sources with your preferred editor; a bundled VS Code extension
-  provides ULSBS-aware snippets and navigation.
+- Edit plain-text sources in any editor. VS Code with ULSBS TeX Tools is
+  recommended; TeXstudio support is experimental.
 
 ULSBS is a text-based toolchain, not a visual score editor. Basic LaTeX familiarity
 is useful; LilyPond knowledge is only needed when writing full scores. Docker or
@@ -108,7 +108,7 @@ git submodule update --init --recursive
 2. Copy the self-contained example book:
 
 ```sh
-cp ulsbs/vscode-extension/ulsbs-tex-tools/assets/songbook-template_A5.tex my-songbook_A5.tex
+cp ulsbs/editor-support/vscode-extension/ulsbs-tex-tools/assets/songbook-template_A5.tex my-songbook_A5.tex
 ```
 
 3. Create `ulsbs-config.toml` in the project root:
@@ -802,9 +802,15 @@ could be part of a legitimate tag name.
 
 ## Editor support
 
-The [ULSBS TeX Tools extension](vscode-extension/ulsbs-tex-tools/README.md) for
-VS Code adds snippets, folding, navigation, structural outlines, and syntax help.
-Its README includes installation instructions. Other text editors also work.
+**VS Code with the [ULSBS TeX Tools extension](editor-support/vscode-extension/ulsbs-tex-tools/README.md)
+is the recommended editor.** It adds snippets, folding, navigation, structural
+outlines, syntax help, and build commands.
+
+The [experimental TeXstudio integration](editor-support/texstudio/README.md)
+provides completion and Build & View with the embedded PDF viewer in a dedicated
+profile. SyncTeX works with compatible editors and viewers, independently of
+TeXstudio: the compiler's `--synctex` option writes a matching `.synctex.gz`
+next to each ordinary PDF in `result/`, not for printouts or split multikey PDFs.
 
 ## Troubleshooting
 

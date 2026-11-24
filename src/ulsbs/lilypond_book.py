@@ -15,6 +15,7 @@ import os
 import runpy
 import shutil
 import sys
+from pathlib import Path
 
 
 def main() -> None:
@@ -28,6 +29,9 @@ def main() -> None:
     state = entrypoint.__globals__
     original = state["do_file"]
     processed = set()
+    map_path = os.environ.get("ULSBS_SYNCTEX_SOURCE_MAP")
+    inputs: dict[str, str] = {}
+    active: list[str] = []
 
     def do_file(filename, included=False):
         """Process an input only on its first encounter for a given output path."""
@@ -41,9 +45,20 @@ def main() -> None:
         if output in processed:
             return []
         processed.add(output)
-        return original(filename, included=included)
+        active.append(output)
+        try:
+            return original(filename, included=included)
+        finally:
+            active.pop()
 
     state["do_file"] = do_file
+    if map_path:
+        if __package__:
+            from .synctex import track_lilypond_sources
+        else:
+            from synctex import track_lilypond_sources
+
+        track_lilypond_sources(state, active, inputs, Path(map_path))
     entrypoint()
 
 

@@ -1859,6 +1859,10 @@ See [song engine ownership](ARCHITECTURE.md#song-engine) for boundaries.
 
 ### Manual LuaLaTeX builds
 
+For editor-driven builds, use [VS Code with ULSBS TeX Tools](editor-support/vscode-extension/ulsbs-tex-tools/README.md),
+the recommended setup. [TeXstudio support](editor-support/texstudio/README.md)
+is experimental.
+
 **Advanced diagnostics, not normal use.** Prefer the
 [`ulsbs-compile` script](README.md#compiling-songbooks) for everyday authoring and
 final builds. It manages the required tools, passes and output processing. If you

@@ -88,6 +88,7 @@ class Config:
 
     # Quick mode (CLI-only; derivations are applied to other fields)
     quick: bool = False
+    synctex: bool = False  # CLI-only; ordinary PDFs only
 
     # Deploy modes
     deploy: bool = True
@@ -916,6 +917,8 @@ def build_config(
             cli_over["multikey_require_song_ids"] = True
         if getattr(args_ns, "quick", False):
             cli_over["quick"] = True
+        if getattr(args_ns, "synctex", False):
+            cli_over["synctex"] = True
         if getattr(args_ns, "fast_audio_encode", False):
             cli_over["fast_audio_encode"] = True
         if getattr(args_ns, "verbose", False):

@@ -62,6 +62,8 @@ def build_arg_parser(ui: UI) -> argparse.ArgumentParser:
     )
 
     p.add_argument("-q", "--quick", action="store_true", help="Quick dev build: default variant only, no extras, no deploy, keep temp")
+    p.add_argument("--synctex", action="store_true",
+                   help="Publish editor synchronization sidecars for ordinary PDFs")
     p.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
     p.add_argument("--plain-output", action="store_true",
                    help="Disable colors and the status spinner")

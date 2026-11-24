@@ -12,6 +12,7 @@ import datetime as _dt
 import os
 import secrets
 import subprocess
+import sys
 from pathlib import Path
 from typing import List
 
@@ -144,6 +145,26 @@ def ensure_container_image(ui: UI, assets: EngineAssets, engine: str, force_rebu
             ui.container_line("Building image complete.")
 
 
+def _run_named_container(command: list[str], name: str, *, cwd: Path | None = None) -> int:
+    """Run an auto-removed container and stop it if its attached client is interrupted."""
+    try:
+        return subprocess.run(command, cwd=cwd, check=False).returncode
+    except KeyboardInterrupt:
+        # The attached client can exit before the daemon stops the container.
+        # Address only this run, not other tests or compilers using the image.
+        for args in (["stop", "--time", "2"], ["rm", "--force"]):
+            try:
+                result = subprocess.run(
+                    [command[0], *args, name], check=False, timeout=5,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                if result.returncode == 0:
+                    break
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        raise
+
+
 def run_self_in_container(
     ui: UI,
     assets: EngineAssets,
@@ -237,8 +258,8 @@ def run_self_in_container(
         ]
         if no_color_env is not None:
             env_args.extend(["-e", f"NO_COLOR={no_color_env}"])
-        # The container's pseudo-TTY hides host redirection and terminal limits.
-        # Forward spinner suppression independently of the color policy.
+        # A pseudo-TTY can hide host redirection and terminal limits. Forward
+        # spinner suppression independently of the color policy.
         if not ui.use_spinner or not _detect_spinner_supported():
             env_args.extend(["-e", "ULSBS_NOSPINNER=1"])
 
@@ -266,7 +287,8 @@ def run_self_in_container(
             "run",
             "--name",
             container_name,
-            "-it",
+            # Editor build processes and CI have no terminal to attach.
+            *(["-it"] if shell_only or (sys.stdin.isatty() and sys.stdout.isatty()) else []),
             "--rm",
             "--read-only",
             *env_args,
@@ -334,5 +356,4 @@ def run_self_in_container(
 
         container_args.extend(["bash", "-lc", inner])
         ui.container_line(f"Start compiler container using {engine}")
-        cp = subprocess.run(container_args)
-    return int(cp.returncode)
+        return _run_named_container(container_args, container_name)

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import secrets
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +18,7 @@ from .container import (
     _CONTAINER_IMAGE_NAME,
     _HOMECACHE_VOLUME_NAME,
     _pick_container_engine,
+    _run_named_container,
     ensure_container_image,
 )
 from .engine_assets import EngineAssets
@@ -117,17 +120,38 @@ def _runner_arguments(args: argparse.Namespace, executable: str = "python3") -> 
 
 
 def _run_on_host(root: Path, args: argparse.Namespace) -> int:
+    """Run the host suite and stop its workers as a group on interruption."""
     env = os.environ.copy()
     source_dir = str(root / "src")
     env["PYTHONPATH"] = os.pathsep.join(
         value for value in (source_dir, env.get("PYTHONPATH", "")) if value
     )
-    return subprocess.run(
-        _runner_arguments(args, sys.executable), cwd=root, env=env, check=False
-    ).returncode
+    command = _runner_arguments(args, sys.executable)
+    if os.name != "posix":
+        return subprocess.run(command, cwd=root, env=env, check=False).returncode
+
+    # The parallel runner can otherwise keep waiting for workers, and some
+    # tests launch their own TeX subprocesses. Stop the whole group together.
+    with subprocess.Popen(command, cwd=root, env=env, start_new_session=True) as process:
+        try:
+            return process.wait()
+        except KeyboardInterrupt:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+                process.wait(timeout=1)
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                pass
+            finally:
+                # A worker may survive even after the group leader has exited.
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            raise
 
 
 def _run_in_container(root: Path, args: argparse.Namespace) -> int:
+    """Run the suite in a named compiler container owned by this invocation."""
     ui = UI()
     cfg = SimpleNamespace(container_engine=args.container_engine)
     engine = _pick_container_engine(cfg)
@@ -142,9 +166,15 @@ def _run_in_container(root: Path, args: argparse.Namespace) -> int:
     if engine == "podman":
         source_mount += ",Z"
 
+    name = f"ulsbs-test-{secrets.token_hex(4)}"
     command = [
         engine,
         "run",
+        "--name",
+        name,
+        # Handle Ctrl-C on the host rather than interrupting Python workers
+        # independently inside the container.
+        "--sig-proxy=false",
         "--rm",
         "--read-only",
         "--user",
@@ -175,10 +205,11 @@ def _run_in_container(root: Path, args: argparse.Namespace) -> int:
     command.extend(_runner_arguments(args))
 
     ui.container_line(f"Run tests using {engine}")
-    return subprocess.run(command, cwd=root, check=False).returncode
+    return _run_named_container(command, name, cwd=root)
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the selected suite and return a shell exit status."""
     args = _parser().parse_args(argv)
     if args.jobs < 1:
         print("ulsbs-test: --jobs must be at least 1", file=sys.stderr)
@@ -189,11 +220,19 @@ def main(argv: list[str] | None = None) -> int:
     try:
         root = _find_repository_root(args.root)
         if args.no_container or os.environ.get("ULSBS_INTERNAL_RUNNING_IN_CONTAINER"):
-            return _run_on_host(root, args)
-        return _run_in_container(root, args)
+            status = _run_on_host(root, args)
+        else:
+            status = _run_in_container(root, args)
+        if status != -signal.SIGINT:
+            return status
+    except KeyboardInterrupt:
+        pass
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
         print(f"ulsbs-test: {error}", file=sys.stderr)
         return 1
+
+    print("ulsbs-test: interrupted", file=sys.stderr)
+    return 130
 
 
 if __name__ == "__main__":

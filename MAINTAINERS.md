@@ -129,7 +129,7 @@ Run these commands from the ULSBS repository root on `main`.
 
    ```sh
    "$EDITOR" pyproject.toml
-   npm --prefix vscode-extension/ulsbs-tex-tools version "$VERSION" \
+   npm --prefix editor-support/vscode-extension/ulsbs-tex-tools version "$VERSION" \
      --no-git-tag-version --allow-same-version
    ```
 
@@ -141,7 +141,7 @@ Run these commands from the ULSBS repository root on `main`.
 
    ```sh
    "$EDITOR" CHANGELOG.md
-   "$EDITOR" vscode-extension/ulsbs-tex-tools/CHANGELOG.md
+   "$EDITOR" editor-support/vscode-extension/ulsbs-tex-tools/CHANGELOG.md
    ```
 
    Keep Unreleased notes concise and consumer-oriented: summarize changes since
@@ -154,14 +154,14 @@ Run these commands from the ULSBS repository root on `main`.
 
    ```sh
    python3 -c 'import sys,tomllib; assert tomllib.load(open("pyproject.toml", "rb"))["project"]["version"] == sys.argv[1]' "$VERSION"
-   node -e 'const p=require("./vscode-extension/ulsbs-tex-tools/package.json"); const l=require("./vscode-extension/ulsbs-tex-tools/package-lock.json"); if (p.version !== process.argv[1] || l.version !== process.argv[1] || l.packages[""].version !== process.argv[1]) process.exit(1)' "$VERSION"
+   node -e 'const p=require("./editor-support/vscode-extension/ulsbs-tex-tools/package.json"); const l=require("./editor-support/vscode-extension/ulsbs-tex-tools/package-lock.json"); if (p.version !== process.argv[1] || l.version !== process.argv[1] || l.packages[""].version !== process.argv[1]) process.exit(1)' "$VERSION"
    ./ulsbs-test
-   npm --prefix vscode-extension/ulsbs-tex-tools ci
-   npm --prefix vscode-extension/ulsbs-tex-tools run compile-web
-   npm --prefix vscode-extension/ulsbs-tex-tools run test:grammar
-   npm --prefix vscode-extension/ulsbs-tex-tools run test:songbooks
-   npm --prefix vscode-extension/ulsbs-tex-tools run test:verse
-   npm --prefix vscode-extension/ulsbs-tex-tools run package
+   npm --prefix editor-support/vscode-extension/ulsbs-tex-tools ci
+   npm --prefix editor-support/vscode-extension/ulsbs-tex-tools run compile-web
+   npm --prefix editor-support/vscode-extension/ulsbs-tex-tools run test:grammar
+   npm --prefix editor-support/vscode-extension/ulsbs-tex-tools run test:songbooks
+   npm --prefix editor-support/vscode-extension/ulsbs-tex-tools run test:verse
+   npm --prefix editor-support/vscode-extension/ulsbs-tex-tools run package
    git diff --check
    git status --short
    ```
@@ -174,9 +174,9 @@ Run these commands from the ULSBS repository root on `main`.
    ```sh
    git diff
    git add pyproject.toml CHANGELOG.md \
-     vscode-extension/ulsbs-tex-tools/package.json \
-     vscode-extension/ulsbs-tex-tools/package-lock.json \
-     vscode-extension/ulsbs-tex-tools/CHANGELOG.md
+     editor-support/vscode-extension/ulsbs-tex-tools/package.json \
+     editor-support/vscode-extension/ulsbs-tex-tools/package-lock.json \
+     editor-support/vscode-extension/ulsbs-tex-tools/CHANGELOG.md
    git commit -m "Prepare $TAG"
    ```
 

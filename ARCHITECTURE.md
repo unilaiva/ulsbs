@@ -2045,6 +2045,30 @@ note-name languages, major/minor/chromatic material, source transposition,
 slash chords, both voices, charango tunings, bass clef, tablature retries,
 external scores resolved through TeX, and reuse from a fresh job directory.
 
+##### Editor source mapping
+
+`--synctex` is opt-in and applies to ordinary PDFs only. The private
+`lilypond_book.py` launcher observes the resolved input paths and the writer's
+actual replacement chunks without changing their output. `synctex.py` maps
+copied lines using each chunk's original character offsets, accounts for the
+graphics import and the compiler's preamble, and anchors generated snippet
+expansions to their opening line. Generated score fragments can be shared by
+multiple snippets; their own source positions are not remapped to LilyPond notes.
+
+After the final full LuaLaTeX pass (including convergence retries) and the
+geometry-preserving PDF optimizer, the sidecar writer rebases original paths to
+the host, coalesces tags for reopened inputs, and recomputes the SyncTeX v1 byte
+anchors without touching geometry. A missing or incompatible mapping produces
+a warning, not a failed PDF build. The sidecar is placed before the atomic PDF
+replacement and is omitted from deployment inventories. A new ordinary PDF
+published without SyncTeX invalidates any previous sidecar of the same name.
+`tests/test_synctex.py` checks the sidecar format and both directions against a
+real multi-file book with LilyPond preprocessing.
+The experimental TeXstudio resources in `editor-support/texstudio/` are a
+curated authoring subset, not a second language definition. Run
+`python3 editor-support/texstudio/check_cwl.py` from the engine checkout to
+check the option tables against the TeX registrations.
+
 ### Layer protocol
 
 Layers transpose verse chords, inline `\ac` references, pitched melody hints and

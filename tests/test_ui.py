@@ -180,6 +180,7 @@ class SpinnerOutputTests(unittest.TestCase):
             (True, {"NO_COLOR": "1"}, False),
         ):
             with self.subTest(tty=tty, env=env), patch.dict(os.environ, env), \
+                    patch.object(sys, "stdin", Mock(isatty=Mock(return_value=tty))), \
                     patch.object(container, "_pick_container_engine", return_value="docker"), \
                     patch.object(container, "ensure_container_image"), \
                     patch.object(container.subprocess, "run", return_value=
@@ -197,8 +198,8 @@ class SpinnerOutputTests(unittest.TestCase):
                                  for index, arg in enumerate(command) if arg == "-e")
                 self.assertEqual(forwarded.get("ULSBS_NOSPINNER"),
                                  "1" if suppressed else None)
-                self.assertIn("-it", command)
-                # Container stdout is a TTY regardless of the host destination.
+                self.assertEqual("-it" in command, tty)
+                # Even in a TTY, the inner UI must respect forwarded limits.
                 self.isatty.return_value = True
                 ui._spinner_supported = None
                 with patch.dict(os.environ, {**forwarded, "TERM": "xterm-256color"}):

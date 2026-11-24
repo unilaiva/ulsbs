@@ -28,11 +28,15 @@
 #
 # CLI overrides for individual runs:
 # --quick builds only the default variant's ordinary PDF, skips extras/deploy,
-# and keeps temporary files.
+#   and keeps temporary files.
+# --synctex is off by default; enable it alongside --quick (or on an ordinary
+#   build) to publish editor data beside ordinary PDFs in the results directory,
+#   not printouts or multikey.
 # --no-printouts, --no-coverimage, --no-json, --no-midi, and --no-audio omit outputs.
 # --variants all or --variants default,lyric selects declared variants.
 # --no-multikey omits multikey editions.
 # --no-deploy skips deployment; --no-container uses the host toolchain.
+#
 # Explicit .tex arguments replace the configured songbook selection.
 # Run ./ulsbs/ulsbs-compile --help for the complete CLI reference.
 #

@@ -20,8 +20,7 @@
 
 /** Globs always excluded from scanning, even if the user overrides `excludeGlob`. */
 const INTERNAL_EXCLUDE_GLOBS = [
-  "**/ulsbs-tex-tools/assets/**",
-  "**/vscode-extension/ulsbs-tex-tools/assets/**"
+  "**/ulsbs-tex-tools/assets/**"
 ];
 
 /** Globs always excluded from songbook discovery. */
