@@ -29,6 +29,8 @@ from ulsbs import pipeline, resultlist, variants
 from ulsbs.config import Config
 from ulsbs.constants import (
     RESULT_MULTIKEY_SUBDIRNAME,
+    RESULT_TYPE_EDITION,
+    RESULT_TYPE_EDITION_MULTIKEY,
     RESULT_TYPE_JSON,
     RESULT_TYPE_MAIN_PDF,
     RESULT_TYPE_MULTIKEY_PDF,
@@ -76,12 +78,18 @@ class MultikeyPipelineTests(unittest.TestCase):
         """Create or reuse a variant/edition's isolated synthetic compile directory."""
         directory = self.root / (variant + ("-multikey" if multikey else ""))
         directory.mkdir(exist_ok=True)
-        return Job(self.doc, self.doc.stem, variant, directory, multikey=multikey)
+        return Job(self.doc, self.doc.stem, variant, directory, multikey=multikey, is_songbook=True)
 
     @contextmanager
     def packaging(self):
         """Keep pipeline publication logic real while replacing PDF-heavy helpers."""
-        package, publish = Mock(), Mock()
+        def stage_index(master, canonical, envelope, directory, **kwargs):
+            directory.mkdir(exist_ok=True)
+            index = directory / (master.stem + "_RANGES.json")
+            index.write_text("{}", encoding="utf-8")
+            return index
+
+        package, publish = Mock(side_effect=stage_index), Mock()
         with patch.dict(sys.modules, {
             "ulsbs.multikey_ranges": SimpleNamespace(package_ranges=package),
             "ulsbs.multikey_publish": SimpleNamespace(
@@ -394,7 +402,15 @@ class MultikeyPipelineTests(unittest.TestCase):
                     if not multikey:
                         expected.append(f"{RESULT_TYPE_MAIN_PDF}\t{basename}.pdf")
 
-            self.assertEqual(resultlist.lines(), expected)
+            lines = resultlist.lines()
+            self.assertEqual([line for line in lines if line.startswith(RESULT_TYPE_MAIN_PDF)], expected)
+            receipts = resultlist.edition_records(lines, RESULT_TYPE_EDITION)
+            self.assertEqual(len(receipts), len(variants))
+            for variant in variants:
+                name = build_job_basename(self.job(variant)) + ".pdf"
+                self.assertEqual(receipts[name]["variant"], variant)
+                self.assertIsNone(receipts[name]["json_sha256"])
+                self.assertEqual(receipts[name]["pdf_sha256"], resultlist.file_sha256(self.result / name))
             self.assertFalse((self.result / "json").exists())
             self.assertFalse(list((self.result / RESULT_MULTIKEY_SUBDIRNAME).glob("*")))
         finally:
@@ -681,7 +697,11 @@ class MultikeyPipelineTests(unittest.TestCase):
                             self.assertFalse(output.exists())
                             package.assert_not_called()
                         fonts.assert_called_once()
-                        self.assertEqual(resultlist.lines(), [f"{RESULT_TYPE_MAIN_PDF}\t{canonical.name}"])
+                        lines = resultlist.lines()
+                        self.assertEqual([line for line in lines if not line.startswith(RESULT_TYPE_EDITION_MULTIKEY)],
+                                         [f"{RESULT_TYPE_MAIN_PDF}\t{canonical.name}"])
+                        self.assertEqual(canonical.name in resultlist.edition_records(lines, RESULT_TYPE_EDITION_MULTIKEY),
+                                         status == statuses[0])
                         engraving.assert_called_once()
                         self.assertEqual(len(passes), 3)
                 finally:
@@ -798,6 +818,8 @@ class MultikeyPipelineTests(unittest.TestCase):
                     self.assertFalse((self.result / "multikey" / master.name).exists())
                     self.assertFalse(stale_range.exists())
                     kwargs["warn"]("Range remains larger than requested target")
+                    staged_index.parent.mkdir(exist_ok=True)
+                    staged_index.write_text("{}", encoding="utf-8")
                     return staged_index
 
                 def publish_package(*args, index_name=index_name, range_name=range_name,
@@ -848,6 +870,8 @@ class MultikeyPipelineTests(unittest.TestCase):
                     self.assertFalse((self.result / "multikey" / master.name).exists())
                     companion = self.result / "json" / (build_job_basename(multikey) + ".json")
                     self.assertFalse(companion.exists())
+                    receipt = resultlist.edition_records(resultlist.lines(), RESULT_TYPE_EDITION_MULTIKEY)[canonical.name]
+                    self.assertEqual(receipt["index_sha256"], resultlist.file_sha256(self.result / "multikey" / index_name))
                     if enabled:
                         ordinary_json = companion.parent / (build_job_basename(ordinary) + ".json")
                         data = json.loads(ordinary_json.read_text(encoding="utf-8"))
@@ -855,8 +879,10 @@ class MultikeyPipelineTests(unittest.TestCase):
                         expected["book_info"]["multikey_json_file"] = f"multikey/{index_name}"
                         self.assertEqual(data, expected)
                         self.assertIn(f"{RESULT_TYPE_JSON}\t{ordinary_json.name}", resultlist.lines())
+                        self.assertEqual(receipt["json_sha256"], resultlist.file_sha256(ordinary_json))
                     else:
                         self.assertFalse((self.result / "json").exists())
+                        self.assertIsNone(receipt["json_sha256"])
                 finally:
                     resultlist.delete()
                     if (self.result / "json").exists():

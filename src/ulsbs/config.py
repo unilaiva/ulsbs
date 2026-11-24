@@ -93,6 +93,8 @@ class Config:
     deploy: bool = True
     deploy_last: bool = False
     deploy_common: bool = False
+    require_multikey_for_pdf_deploy: bool = False
+    require_json_for_pdf_deploy: bool = False
     # Resolved deploy directory (absolute); may be overridden via config/CLI.
     deploy_dir: Path = Path("deploy")
 
@@ -590,6 +592,8 @@ _ALLOWED_FILE_KEYS: Set[str] = {
     "deploy",
     "deploy_last",
     "deploy_common",
+    "require_multikey_for_pdf_deploy",
+    "require_json_for_pdf_deploy",
     "create_printouts",
     "coverimage",
     "json",
@@ -770,6 +774,9 @@ def build_config(
     _ensure_known_keys(f"profile '{profile}'", prof_eff, _ALLOWED_FILE_KEYS)
 
     for data in (flat, prof_eff):
+        for name in ("require_multikey_for_pdf_deploy", "require_json_for_pdf_deploy"):
+            if name in data and not isinstance(data[name], bool):
+                raise ValueError(f"{name.replace('_', '-')} must be a boolean")
         # Reject booleans as well as numeric coercions: bool is an int subclass.
         # Validate flat defaults even when the selected profile overrides them.
         for name in ("multikey_max_pages_per_range", "multikey_target_max_range_bytes"):

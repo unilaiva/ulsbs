@@ -14,6 +14,8 @@ still need an atomic edition-directory deployment for a consistent snapshot.
 
 from __future__ import annotations
 
+from contextlib import ExitStack
+import hashlib
 import json
 import os
 import re
@@ -22,6 +24,7 @@ import tempfile
 from pathlib import Path
 
 from .constants import MULTIKEY_INDEX_MAX_BYTES
+from .resultlist import file_sha256
 from .util import files_are_identical
 
 
@@ -72,7 +75,9 @@ def owned_ranges(index_path: Path) -> set[str]:
 
 
 def publish_package(index_path: Path, destination: Path, canonical_path: Path, *,
-                    canonical_destination: Path | None = None) -> list[str]:
+                    canonical_destination: Path | None = None,
+                    metadata: tuple[Path, Path] | None = None,
+                    expected: dict[Path, str] | None = None) -> list[str]:
     """Preflight, install, and clean one indexed family, with rollback on failure.
 
     ``index_path`` and its sibling ranges are the completed staging/source family.
@@ -92,40 +97,72 @@ def publish_package(index_path: Path, destination: Path, canonical_path: Path, *
     including byte-identical files skipped during installation but excluding
     the optional ordinary PDF.
     Validation and filesystem exceptions propagate to the caller. This does not
-    provide multi-file atomic visibility to concurrent readers or update book
-    metadata/result-list records; callers coordinate those publication steps.
+    provide multi-file atomic visibility to concurrent readers. Optional ordinary
+    metadata is installed last in the same rollback operation. With run receipts,
+    verify staged bytes against the expected digests before replacing any file.
     """
     from .multikey_ranges import validate_index
 
-    data = json.loads(index_path.read_text(encoding="utf-8"))
+    index_bytes = index_path.read_bytes()
+    if expected is not None and hashlib.sha256(index_bytes).hexdigest() != expected[index_path]:
+        raise ValueError(f"{index_path.name} changed while preparing deployment")
+    data = json.loads(index_bytes)
     validate_index(data, index_path, canonical_path)
-    destination.mkdir(parents=True, exist_ok=True)
     obsolete = owned_ranges(destination / index_path.name)
     names = [entry["file"] for entry in data["ranges"]] + [index_path.name]
     operations = [(index_path.parent / name, destination / name) for name in names]
     if canonical_destination is not None:
         # Deploy the ordinary PDF and its family as one rollback boundary.
         operations.insert(0, (canonical_path, canonical_destination))
+    if metadata is not None:
+        operations.append(metadata)
+    if expected is not None:
+        expected = {**expected, **{index_path.parent / entry["file"]: entry["sha256"]
+                                  for entry in data["ranges"]}}
+    install_files(operations, obsolete=tuple(destination / name for name in sorted(obsolete - set(names))),
+                  expected=expected)
+    return names
+
+
+def install_files(operations: list[tuple[Path, Path]], *, obsolete: tuple[Path, ...] = (),
+                  expected: dict[Path, str] | None = None) -> None:
+    """Install one edition in order, rolling back replacements and removals on error."""
+    if not operations:
+        return
     installed = []
-    with tempfile.TemporaryDirectory(prefix=".ulsbs-package-", dir=destination) as work:
-        work = Path(work)
+    with ExitStack() as stack:
+        staging = {}
+
+        def stage_dir(parent: Path) -> Path:
+            if parent not in staging:
+                parent.mkdir(parents=True, exist_ok=True)
+                staging[parent] = Path(stack.enter_context(tempfile.TemporaryDirectory(
+                    prefix=".ulsbs-package-", dir=parent)))
+            return staging[parent]
+
+        staged = []
         backups = {}
+        for number, (source, target) in enumerate(operations):
+            digest = (expected or {}).get(source)
+            if target.is_file() and (file_sha256(target) == digest if digest is not None
+                                     else files_are_identical(source, target)):
+                continue
+            candidate = stage_dir(target.parent) / str(number)
+            shutil.copy2(source, candidate)
+            if digest is not None and file_sha256(candidate) != digest:
+                raise ValueError(f"{source.name} changed while staging deployment")
+            staged.append((candidate, target))
         try:
-            for number, (source, target) in enumerate(operations):
-                if target.exists() and files_are_identical(source, target):
-                    continue
-                candidate = work / str(number)
-                shutil.copy2(source, candidate)
+            for number, (candidate, target) in enumerate(staged):
                 if target.exists():
-                    backup = work / f"old-{number}"
+                    backup = candidate.with_name(f"old-{number}")
                     shutil.copy2(target, backup)
                     backups[target] = backup
                 os.replace(candidate, target)
                 installed.append(target)
-            for number, name in enumerate(obsolete - set(names)):
-                target = destination / name
+            for number, target in enumerate(obsolete):
                 if target.exists():
-                    backup = work / f"obsolete-{number}"
+                    backup = stage_dir(target.parent) / f"obsolete-{number}"
                     shutil.copy2(target, backup)
                     backups[target] = backup
                     target.unlink()
@@ -137,7 +174,6 @@ def publish_package(index_path: Path, destination: Path, canonical_path: Path, *
                 else:
                     target.unlink(missing_ok=True)
             raise
-    return names
 
 
 def remove_package(index_path: Path) -> None:

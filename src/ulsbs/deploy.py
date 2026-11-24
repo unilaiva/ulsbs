@@ -9,6 +9,7 @@ This file is part of the 'ulsbs' package.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -22,6 +23,8 @@ from .constants import (
     RESULT_TYPE_MULTIKEY_JSON,
     RESULT_TYPE_PRINTOUT_PDF,
     RESULT_TYPE_JSON,
+    RESULT_TYPE_EDITION,
+    RESULT_TYPE_EDITION_MULTIKEY,
     RESULT_TYPE_IMAGE,
     RESULT_TYPE_MIDIDIR,
     RESULT_TYPE_AUDIODIR,
@@ -50,14 +53,134 @@ from .constants import (
 import ulsbs.resultlist as resultlist
 from .ui import UI
 from .util import ensure_dir, files_are_identical, sync_tree
+from .variants import VARIANTS
+
+
+def _validate_package(name: str, result_dir: Path, records: set[str]) -> dict:
+    """Validate an advertised multikey family and its exact canonical PDF."""
+    from .multikey_ranges import validate_index
+
+    if Path(name).name != name or not name.endswith("_MULTIKEY_RANGES.json"):
+        raise ValueError(f"Invalid MULTIKEY entry point in inventory: {name}")
+    source = result_dir / RESULT_MULTIKEY_SUBDIRNAME / name
+    if source.stat().st_size > MULTIKEY_INDEX_MAX_BYTES:
+        raise ValueError(f"MULTIKEY index exceeds {MULTIKEY_INDEX_MAX_BYTES:,} bytes")
+    data = json.loads(source.read_text(encoding="utf-8"))
+    canonical_name = name.removesuffix("_MULTIKEY_RANGES.json") + ".pdf"
+    if f"{RESULT_TYPE_MAIN_PDF}{RESULTLIST_SEPARATOR}{canonical_name}" not in records:
+        raise ValueError(f"MULTIKEY canonical PDF missing from inventory: {canonical_name}")
+    validate_index(data, source, result_dir / canonical_name)
+    for entry in data["ranges"]:
+        if f"{RESULT_TYPE_MULTIKEY_PDF}{RESULTLIST_SEPARATOR}{entry['file']}" not in records:
+            raise ValueError(f"MULTIKEY range missing from inventory: {entry['file']}")
+    return data
+
+
+_EDITION_ARTIFACTS = {RESULT_TYPE_MAIN_PDF, RESULT_TYPE_JSON, RESULT_TYPE_MULTIKEY_JSON,
+                      RESULT_TYPE_MULTIKEY_PDF}
+
+
+def _deploy_checked_editions(ui: UI, cfg: Config, lines: list[str]) -> None:
+    """Deploy verified edition groups without borrowing artifacts from earlier runs."""
+    from .multikey_publish import install_files, publish_package, remove_legacy_outputs
+
+    result_dir = cfg.runtime.project_paths.result_dir
+    deploy_dir = cfg.deploy_dir
+    records = set(lines)
+    receipts = resultlist.edition_records(lines, RESULT_TYPE_EDITION)
+    companions = resultlist.edition_records(lines, RESULT_TYPE_EDITION_MULTIKEY)
+    stems = set()
+    for line in lines:
+        kind, _, name = line.partition(RESULTLIST_SEPARATOR)
+        if kind not in _EDITION_ARTIFACTS:
+            continue
+        if Path(name).name != name or not name:
+            ui.nodeploy_line(f"{name!r} not deployed: invalid edition filename")
+        elif kind == RESULT_TYPE_MAIN_PDF and name.endswith(".pdf"):
+            stems.add(name.removesuffix(".pdf"))
+        elif kind == RESULT_TYPE_JSON and name.endswith(".json"):
+            stems.add(name.removesuffix(".json"))
+        elif kind == RESULT_TYPE_MULTIKEY_JSON and name.endswith("_MULTIKEY_RANGES.json"):
+            stems.add(name.removesuffix("_MULTIKEY_RANGES.json"))
+        elif kind == RESULT_TYPE_MULTIKEY_PDF:
+            match = re.fullmatch(r"(.+)_MULTIKEY_RANGE_[1-9]\d*-[1-9]\d*\.pdf", name)
+            if match:
+                stems.add(match[1])
+        else:
+            ui.nodeploy_line(f"{name} not deployed: invalid edition filename")
+
+    for stem in sorted(stems):
+        pdf_name = stem + ".pdf"
+        json_name = stem + ".json"
+        index_name = stem + "_MULTIKEY_RANGES.json"
+        if NODEPLOY_FNAMEPART in pdf_name:
+            ui.nodeploy_line(f"{pdf_name} not deployed due to filename")
+            continue
+        pdf = result_dir / pdf_name
+        index = result_dir / RESULT_MULTIKEY_SUBDIRNAME / index_name
+        metadata = None
+        has_json = f"{RESULT_TYPE_JSON}{RESULTLIST_SEPARATOR}{json_name}" in records
+        has_multikey = f"{RESULT_TYPE_MULTIKEY_JSON}{RESULTLIST_SEPARATOR}{index_name}" in records
+        expected = {}
+
+        def verify(path: Path, digest: str | None) -> None:
+            if not digest or resultlist.file_sha256(path) != digest:
+                raise ValueError(f"{path.name} does not match this run's edition receipt")
+            expected[path] = digest
+
+        try:
+            if f"{RESULT_TYPE_MAIN_PDF}{RESULTLIST_SEPARATOR}{pdf_name}" not in records:
+                raise ValueError("ordinary PDF missing from this run's inventory")
+            receipt = receipts.get(pdf_name)
+            if receipt is None or "variant" not in receipt:
+                raise ValueError("no edition receipt in this run's inventory; rebuild before deploying")
+            variant = receipt["variant"]
+            if variant is not None and (not isinstance(variant, str) or variant not in VARIANTS):
+                raise ValueError("unknown variant in this run's edition receipt")
+            missing = []
+            if cfg.require_json_for_pdf_deploy and variant is not None and not has_json:
+                missing.append("ordinary JSON")
+            if (cfg.require_multikey_for_pdf_deploy and variant is not None
+                    and "multikey" in VARIANTS[variant].editions and not has_multikey):
+                missing.append("multikey package")
+            if missing:
+                raise ValueError(f"required {' and '.join(missing)} missing from this run's inventory")
+            verify(pdf, receipt.get("pdf_sha256"))
+            if has_multikey:
+                companion = companions.get(pdf_name, {})
+                verify(index, companion.get("index_sha256"))
+                _validate_package(index_name, result_dir, records)
+            if has_json:
+                source = result_dir / RESULT_JSON_SUBDIRNAME / json_name
+                verify(source, (companion if has_multikey else receipt).get("json_sha256"))
+                metadata = (source, deploy_dir / DEPLOY_JSON_SUBDIRNAME / json_name)
+        except (OSError, ValueError, TypeError, KeyError) as error:
+            ui.nodeploy_line(f"{pdf_name} not deployed: {error}")
+            continue
+
+        if has_multikey:
+            publish_package(index, deploy_dir / DEPLOY_MULTIKEY_SUBDIRNAME, pdf,
+                            canonical_destination=deploy_dir / pdf_name, metadata=metadata,
+                            expected=expected)
+            remove_legacy_outputs(deploy_dir / DEPLOY_MULTIKEY_SUBDIRNAME,
+                                  deploy_dir / DEPLOY_JSON_SUBDIRNAME, stem)
+            ui.deploy_line(f"{DEPLOY_MULTIKEY_SUBDIRNAME}/{index_name}")
+        else:
+            operations = [(pdf, deploy_dir / pdf_name)]
+            if metadata is not None:
+                operations.append(metadata)
+            install_files(operations, expected=expected)
+            ui.deploy_line(pdf_name)
+        if metadata is not None:
+            ui.deploy_line(f"{DEPLOY_JSON_SUBDIRNAME}/{json_name}")
 
 
 def deploy_results(ui: UI, cfg: Config) -> None:
-    """Deploy inventoried results, validating all advertised range packages first.
+    """Deploy inventoried results under the selected PDF deployment requirements.
 
-    A package's ordinary PDF and ranges share a rollback boundary; its index is
-    installed after those PDFs, and referring metadata follows the package.
-    This ordering is not a multi-file atomic update for concurrent readers.
+    Strict mode filters incomplete editions individually and installs each complete
+    group together. Otherwise retain the existing all-package preflight and copy
+    order. Neither mode gives concurrent readers multi-file atomic visibility.
     """
     result_dir = cfg.runtime.project_paths.result_dir
     deploy_dir = cfg.deploy_dir
@@ -85,36 +208,25 @@ def deploy_results(ui: UI, cfg: Config) -> None:
     for oth in sorted(cfg.common_deploy_other):
         resultlist.append_line_if_missing(RESULT_TYPE_COMMONOTHER, oth)
 
-    # Validate every advertised package before changing any deployed output.
-    # In particular, --deploy-last must not combine a stale index with new PDFs.
     lines = resultlist.lines()
     records = set(lines)
     packages = {}
     package_canonicals = set()
-    if not cfg.deploy_common:
-        from .multikey_ranges import validate_index
-
+    checked = not cfg.deploy_common and (cfg.require_multikey_for_pdf_deploy
+                                         or cfg.require_json_for_pdf_deploy)
+    if checked:
+        _deploy_checked_editions(ui, cfg, lines)
+    elif not cfg.deploy_common:
+        # With neither requirement enabled, preserve the existing all-package
+        # preflight before changing any deployed output.
         for line in lines:
             if not line.startswith(RESULT_TYPE_MULTIKEY_JSON + RESULTLIST_SEPARATOR):
                 continue
             name = line.split(RESULTLIST_SEPARATOR, 1)[1]
             if NODEPLOY_FNAMEPART in name:
                 continue
-            if Path(name).name != name or not name.endswith("_MULTIKEY_RANGES.json"):
-                raise ValueError(f"Invalid MULTIKEY entry point in inventory: {name}")
-            source = result_dir / RESULT_MULTIKEY_SUBDIRNAME / name
-            # Enforce protocol v1's raw-file bound before JSON parsing;
-            # validate_index also bounds the compact serialized representation.
-            if source.stat().st_size > MULTIKEY_INDEX_MAX_BYTES:
-                raise ValueError(f"MULTIKEY index exceeds {MULTIKEY_INDEX_MAX_BYTES:,} bytes")
-            data = json.loads(source.read_text(encoding="utf-8"))
+            data = _validate_package(name, result_dir, records)
             canonical_name = data["canonical"]["file"]
-            if f"{RESULT_TYPE_MAIN_PDF}{RESULTLIST_SEPARATOR}{canonical_name}" not in records:
-                raise ValueError(f"MULTIKEY canonical PDF missing from inventory: {canonical_name}")
-            validate_index(data, source, result_dir / canonical_name)
-            for entry in data["ranges"]:
-                if f"{RESULT_TYPE_MULTIKEY_PDF}{RESULTLIST_SEPARATOR}{entry['file']}" not in records:
-                    raise ValueError(f"MULTIKEY range missing from inventory: {entry['file']}")
             packages[name] = data
             package_canonicals.add(canonical_name)
 
@@ -134,6 +246,11 @@ def deploy_results(ui: UI, cfg: Config) -> None:
             ftype, fname = line.split(RESULTLIST_SEPARATOR, 1)
         except ValueError:
             ui.warning_line(f"Skipping deformed result list line: {line}")
+            continue
+
+        if ftype in (RESULT_TYPE_EDITION, RESULT_TYPE_EDITION_MULTIKEY) or (
+            checked and ftype in _EDITION_ARTIFACTS
+        ):
             continue
 
         if NODEPLOY_FNAMEPART in fname:

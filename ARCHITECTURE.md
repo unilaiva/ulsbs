@@ -1507,7 +1507,7 @@ rollback. Cleanup recognizes only safe range basenames from that edition's
 previous index, not neighboring files. Unreadable or oversized old inventories
 conservatively leave orphan ranges rather than authorize a directory sweep.
 
-Deployment preflights package identities before copying anything and can include
+Deployment preflights package identities before copying the group and can include
 the paired ordinary PDF in the same rollback boundary. Result-list records and
 ordinary JSON references remain the caller's responsibility. Index-last ordering
 and rollback do not provide atomic multi-file visibility to concurrent HTTP
@@ -1515,6 +1515,16 @@ readers. A live site needs an atomic edition-directory deployment for a consiste
 ordinary-PDF/index/ranges snapshot. The packager rejects unsupported numeric or
 direct-page Link destinations rather than attempting automatic normalization;
 the protocol's permitted normalization is not an implemented fallback.
+
+With either strict PDF deployment requirement enabled, the deployer uses a
+per-variant inventory. A committed ordinary job records its source/variant
+eligibility and PDF/JSON digests; a committed multikey job records the index and
+updated ordinary JSON digests. Deployment trusts only records from the selected
+run and verifies their content. Incomplete or invalid edition groups are skipped
+individually. Required and other advertised edition files share a rollback
+operation, with ordinary metadata installed after the index. Independent output
+records and the rule against automatic deployment after any build failure are
+unchanged.
 
 Multikey jobs suppress even intermediate LilyPond MIDI generation, not merely
 its publication. Ordinary editions of non-default variants suppress that MIDI

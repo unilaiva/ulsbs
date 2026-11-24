@@ -33,6 +33,12 @@ class Job:
     variant: str
     compile_dir: Path
     multikey: bool = False
+    is_songbook: bool = False
+
+    @property
+    def supports_multikey(self) -> bool:
+        """Whether the source and variant support a companion, regardless of build settings."""
+        return self.is_songbook and "multikey" in VARIANTS[self.variant].editions
 
 
 def build_variant_basename(original_base: str, insert: str) -> str:
@@ -84,10 +90,10 @@ def build_job_queue(cfg: Config) -> List[Job]:
         # Declaration order is authoritative except that selected default is first.
         selected.sort(key=lambda name: name != "default")
         matched.update(selected)
-        jobs.extend(Job(doc, base, name, project_root / TEMP_DIRNAME / base / name)
-                    for name in selected)
         songbook = declaration is not None and declaration.name.startswith("ulsbs-songbook")
-        if cfg.multikey_books and songbook:
+        jobs.extend(Job(doc, base, name, project_root / TEMP_DIRNAME / base / name,
+                        is_songbook=songbook) for name in selected)
+        if cfg.multikey_books:
             standard_jobs = jobs[first_job:]
             jobs.extend(
                 replace(
@@ -96,7 +102,7 @@ def build_job_queue(cfg: Config) -> List[Job]:
                     compile_dir=job.compile_dir.with_name(f"{job.variant}-multikey"),
                 )
                 for job in standard_jobs
-                if "multikey" in VARIANTS[job.variant].editions
+                if job.supports_multikey
             )
     if requested is not None and (unmatched := set(requested) - matched):
         raise ValueError(f"Requested variants available in none of the selected books: {', '.join(sorted(unmatched))}")

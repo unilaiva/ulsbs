@@ -11,6 +11,7 @@ appearance qualification belongs to the range-packager and TeX integration tests
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -23,7 +24,10 @@ import pikepdf
 
 from ulsbs import resultlist
 from ulsbs.config import Config
-from ulsbs.constants import RESULT_TYPE_MAIN_PDF, RESULT_TYPE_MULTIKEY_JSON, RESULT_TYPE_MULTIKEY_PDF
+from ulsbs.constants import (
+    RESULT_TYPE_EDITION, RESULT_TYPE_EDITION_MULTIKEY, RESULT_TYPE_JSON,
+    RESULT_TYPE_MAIN_PDF, RESULT_TYPE_MULTIKEY_JSON, RESULT_TYPE_MULTIKEY_PDF,
+)
 from ulsbs.deploy import deploy_results
 from ulsbs.multikey_publish import owned_ranges, publish_package, remove_legacy_outputs, remove_package
 
@@ -213,6 +217,56 @@ class PackagePublicationTests(unittest.TestCase):
         self.assertEqual({path.name for path in (deploy / "multikey").iterdir()}, set(names))
         self.assertFalse((deploy / "multikey" / self.master.name).exists())
         self.assertEqual((deploy / self.canonical.name).read_bytes(), self.canonical.read_bytes())
+
+    def test_checked_deploy_installs_only_verified_editions_and_rolls_back_json_failure(self):
+        result, deploy = self.root / "result", self.root / "deploy"
+        result.mkdir()
+        deploy.mkdir()
+        (result / "json").mkdir()
+        index = self.package(2)
+        pdf_name = self.canonical.name
+        result_pdf = result / pdf_name
+        shutil.copy2(self.canonical, result_pdf)
+        names = publish_package(index, result / "multikey", result_pdf)
+        metadata = result / "json/Book_A5.json"
+        metadata.write_text(json.dumps({"book_info": {"multikey_json_file": f"multikey/{index.name}"}}))
+        cfg = replace(Config(), deploy_dir=deploy, require_multikey_for_pdf_deploy=True,
+                      require_json_for_pdf_deploy=True,
+                      runtime=SimpleNamespace(in_container=False,
+                                              project_paths=SimpleNamespace(result_dir=result)))
+        resultlist.initialize(result, "checked")
+        self.addCleanup(lambda: resultlist.delete() if resultlist._initialized else None)
+        resultlist.append_line(RESULT_TYPE_MAIN_PDF, pdf_name)
+        resultlist.append_line(RESULT_TYPE_JSON, metadata.name)
+        resultlist.append_line(RESULT_TYPE_MULTIKEY_JSON, index.name)
+        for name in names[:-1]:
+            resultlist.append_line(RESULT_TYPE_MULTIKEY_PDF, name)
+        resultlist.record_edition(RESULT_TYPE_EDITION, pdf_name, variant="default",
+                                  pdf_sha256=resultlist.file_sha256(result_pdf), json_sha256="before-linking")
+        resultlist.record_edition(RESULT_TYPE_EDITION_MULTIKEY, pdf_name,
+                                  index_sha256=resultlist.file_sha256(result / "multikey" / index.name),
+                                  json_sha256=resultlist.file_sha256(metadata))
+        (deploy / pdf_name).write_bytes(b"old PDF")
+        replace_file = os.replace
+
+        def fail_at_metadata(source, target):
+            if Path(target).name == metadata.name and Path(source).name.isdigit():
+                raise OSError("injected metadata write failure")
+            return replace_file(source, target)
+
+        with patch("ulsbs.multikey_publish.os.replace", side_effect=fail_at_metadata), \
+                self.assertRaisesRegex(OSError, "injected metadata write failure"):
+            deploy_results(Mock(), cfg)
+        self.assertEqual((deploy / pdf_name).read_bytes(), b"old PDF")
+        self.assertEqual(list((deploy / "multikey").iterdir()), [])
+        self.assertFalse((deploy / "json" / metadata.name).exists())
+
+        ui = Mock()
+        deploy_results(ui, cfg)
+        ui.nodeploy_line.assert_not_called()
+        self.assertEqual((deploy / pdf_name).read_bytes(), result_pdf.read_bytes())
+        self.assertEqual((deploy / "json" / metadata.name).read_bytes(), metadata.read_bytes())
+        self.assertEqual({part.name for part in (deploy / "multikey").iterdir()}, set(names))
 
 
 if __name__ == "__main__":

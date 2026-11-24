@@ -74,6 +74,18 @@ class MultikeyConfigTests(unittest.TestCase):
                             self.assertEqual(getattr(cfg, name.replace("-", "_")), value)
                             self.assertFalse(cfg.multikey_books)
 
+    def test_pdf_deploy_requirements_default_off_and_follow_profiles(self) -> None:
+        for name in ("require-multikey-for-pdf-deploy", "require-json-for-pdf-deploy"):
+            field = name.replace("-", "_")
+            with self.subTest(name=name):
+                self.assertFalse(getattr(self.build(""), field))
+                config = f'{name} = true\n[profiles.permissive]\n{field} = false\n'
+                self.assertTrue(getattr(self.build(config), field))
+                self.assertFalse(getattr(self.build(config, "permissive"), field))
+                for value in ('"true"', "1"):
+                    with self.assertRaisesRegex(ValueError, f"{name} must be a boolean"):
+                        self.build(f"[profiles.default]\n{name} = {value}")
+
     def test_range_sizes_follow_profile_inheritance_and_overrides(self) -> None:
         for name in ("multikey-max-pages-per-range", "multikey-target-max-range-bytes"):
             with self.subTest(name=name):

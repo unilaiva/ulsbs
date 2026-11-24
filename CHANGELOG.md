@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add optional `require-multikey-for-pdf-deploy` and `require-json-for-pdf-deploy`
+  settings to skip incomplete songbook editions during deployment, including
+  `--deploy-last`. Both default to off.
 - Annotations on separate rows now share space within words by default. Opt
   out with `\ulLaneAwareAnnotationSpacing{false}`. Both modes use a configurable
   `\ulChordHyphenAllowance` (default `0.4em`, at least the hyphen width).

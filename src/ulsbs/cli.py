@@ -409,6 +409,15 @@ def _run_cli(ui: UI, assets: EngineAssets, argv: List[str] | None) -> int:
         except ValueError as ex:
             ui.error_line(f"Compilation plan error: {ex}")
             return 1
+        if cfg.deploy and not cfg.runtime.in_container:
+            if (cfg.require_multikey_for_pdf_deploy and not cfg.multikey_books
+                    and any(job.supports_multikey for job in jobs)):
+                ui.warning_line("Multikey generation is disabled, but require-multikey-for-pdf-deploy "
+                                "is enabled. Eligible variants will not be deployed.")
+            if (cfg.require_json_for_pdf_deploy and not cfg.json
+                    and any(job.is_songbook for job in jobs)):
+                ui.warning_line("JSON export is disabled, but require-json-for-pdf-deploy is enabled. "
+                                "Songbook editions will not be deployed.")
 
     # Host-only temp dir setup
     if not cfg.runtime.in_container:

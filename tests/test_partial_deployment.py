@@ -22,6 +22,8 @@ from ulsbs import cli, pipeline, resultlist
 from ulsbs.config import Config
 from ulsbs.constants import (
     RESULTLIST_SEPARATOR,
+    RESULT_TYPE_EDITION,
+    RESULT_TYPE_AUDIODIR,
     RESULT_TYPE_JSON,
     RESULT_TYPE_MAIN_PDF,
     RESULT_TYPE_MULTIKEY_JSON,
@@ -88,6 +90,63 @@ class PartialDeploymentTests(unittest.TestCase):
     def finish_and_deploy(self, outcome) -> None:
         resultlist.finalize(runresult=outcome)
         deploy_results(self.ui, self.cfg)
+
+    def edition(self, stem, variant="default", *, metadata=True):
+        pdf = self.artifact(RESULT_TYPE_MAIN_PDF, stem + ".pdf")
+        book_json = self.artifact(RESULT_TYPE_JSON, stem + ".json", "json") if metadata else None
+        resultlist.record_edition(
+            RESULT_TYPE_EDITION, pdf.name, variant=variant,
+            pdf_sha256=resultlist.file_sha256(pdf),
+            json_sha256=resultlist.file_sha256(book_json) if book_json else None,
+        )
+        return pdf, book_json
+
+    def test_requirements_skip_each_incomplete_edition_and_keep_independent_outputs(self):
+        self.edition("book")
+        self.edition("book_LYRICS-ONLY", "lyric")
+        self.edition("incomplete_LYRICS-ONLY", "lyric", metadata=False)
+        self.edition("unrelated", None, metadata=False)
+        self.artifact(RESULT_TYPE_MULTIKEY_JSON, "orphan_MULTIKEY_RANGES.json", "multikey")
+        audio = self.result_dir / "audio/book"
+        audio.mkdir(parents=True)
+        (audio / "track.mp3").write_bytes(b"audio")
+        resultlist.append_line(RESULT_TYPE_AUDIODIR, "book")
+        old_pdf = self.deploy_dir / "book.pdf"
+        old_pdf.write_bytes(b"old PDF")
+        old_json = self.deploy_dir / "json/book.json"
+        old_json.parent.mkdir()
+        old_json.write_bytes(b"old JSON")
+        # A file left under result/ is not evidence that it was built in this run.
+        (self.result_dir / "multikey/book_MULTIKEY_RANGES.json").write_bytes(b"stale index")
+        deploy_results(self.ui, replace(self.cfg, require_multikey_for_pdf_deploy=True,
+                                        require_json_for_pdf_deploy=True))
+        self.assertEqual(old_pdf.read_bytes(), b"old PDF")
+        self.assertEqual(old_json.read_bytes(), b"old JSON")
+        self.assertTrue((self.deploy_dir / "book_LYRICS-ONLY.pdf").is_file())
+        self.assertTrue((self.deploy_dir / "json/book_LYRICS-ONLY.json").is_file())
+        self.assertTrue((self.deploy_dir / "unrelated.pdf").is_file())
+        self.assertTrue((self.deploy_dir / "audio/book/track.mp3").is_file())
+        self.assertFalse((self.deploy_dir / "incomplete_LYRICS-ONLY.pdf").exists())
+        notices = [call.args[0] for call in self.ui.nodeploy_line.call_args_list]
+        self.assertEqual(len(notices), 3)
+        self.assertTrue(any("book.pdf" in notice and "required multikey" in notice for notice in notices))
+        self.assertTrue(any("orphan.pdf" in notice and "ordinary PDF missing" in notice for notice in notices))
+
+    def test_deploy_last_checks_receipts_instead_of_current_generation_settings(self):
+        self.edition("good")
+        changed_pdf, _ = self.edition("changed-pdf")
+        changed_pdf.write_bytes(b"newer PDF")
+        _, changed_json = self.edition("changed-json")
+        changed_json.write_bytes(b"newer JSON")
+        self.artifact(RESULT_TYPE_MAIN_PDF, "legacy.pdf")
+        resultlist.finalize()
+        cfg = replace(self.cfg, deploy_last=True, require_json_for_pdf_deploy=True, json=False)
+        with patch.object(cli.ProjectPaths, "from_docs", return_value=self.paths), \
+                patch.object(cli, "build_config", return_value=cfg):
+            self.assertEqual(cli._run_cli(self.ui, Mock(), ["--deploy-last"]), 0)
+        self.assertEqual(list(self.deploy_dir.glob("*.pdf")), [self.deploy_dir / "good.pdf"])
+        self.assertTrue((self.deploy_dir / "json/good.json").is_file())
+        self.assertEqual(self.ui.nodeploy_line.call_count, 3)
 
     def test_failed_ordinary_pdf_is_not_inventoried_or_deployed(self) -> None:
         failed, successful = self.job("failed"), self.job("successful")

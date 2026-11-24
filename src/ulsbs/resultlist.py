@@ -11,6 +11,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
+import hashlib
+import json
 from pathlib import Path
 from threading import RLock
 from typing import TYPE_CHECKING
@@ -37,6 +39,37 @@ _lock = RLock()
 _unscoped = object()
 _job_key: ContextVar[object] = ContextVar("resultlist_job_key", default=_unscoped)
 _pending: dict[object, list[str]] = {}
+
+
+def file_sha256(path: Path) -> str:
+    """Fingerprint an artifact without loading it all into memory."""
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def record_edition(kind: str, pdf: str, **fields) -> None:
+    """Buffer the fingerprints for an ordinary or completed companion job."""
+    append_line(kind, json.dumps({"pdf": pdf, **fields}, separators=(",", ":")))
+
+
+def edition_records(records: list[str], kind: str) -> dict[str, dict]:
+    """Read edition receipts from this run only; ambiguous duplicates are unusable."""
+    editions = {}
+    ambiguous = set()
+    for line in records:
+        record_kind, _, payload = line.partition(RESULTLIST_SEPARATOR)
+        if record_kind != kind:
+            continue
+        try:
+            receipt = json.loads(payload)
+            pdf = receipt["pdf"]
+        except (ValueError, TypeError, KeyError):
+            continue
+        if isinstance(pdf, str):
+            if pdf in editions:
+                ambiguous.add(pdf)
+            editions[pdf] = receipt
+    return {pdf: receipt for pdf, receipt in editions.items() if pdf not in ambiguous}
 
 
 def _synchronized(function):

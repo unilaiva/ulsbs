@@ -75,6 +75,15 @@ pull = false                 # git pull --rebase, then update submodules before 
 # it does not upload them to a website. Set false to keep only result/ outputs.
 deploy = true
 
+# Optional publication requirements for ordinary songbook PDFs. When enabled,
+# require matching artifacts produced by the same run, including for --deploy-last.
+# Multikey applies only to supported variants (default, charango, bassclef);
+# ordinary book JSON can be required for every songbook variant, including lyric.
+# Skip incomplete editions with NODEPLOY without replacing their deployed files.
+# These options do not enable generation or affect printouts, covers, or media.
+require-multikey-for-pdf-deploy = false
+require-json-for-pdf-deploy = false
+
 # The default destination is <project root>/deploy. An explicit destination must
 # already exist on the host; relative paths start at this config's directory.
 # deploy-dir = "deploy"

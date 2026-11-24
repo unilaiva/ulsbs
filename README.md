@@ -358,6 +358,19 @@ does not deploy artifacts from failed or blocked jobs. Obsolete inventories are
 retired rather than replayed against newer files. The result directory itself is
 not an all-or-nothing snapshot and can still contain older or partial files.
 
+For sites that need matching outputs, set `require-json-for-pdf-deploy = true`
+to require ordinary book JSON for every songbook variant, or
+`require-multikey-for-pdf-deploy = true` to require a complete multikey package
+for default and instrument variants (not lyrics-only). Both default to `false`
+and can be enabled together. They do not turn on output generation.
+
+These requirements also apply to `--deploy-last`. Deployment checks the files
+against the selected run's inventory, not older files still in `result/`.
+An incomplete edition prints `NODEPLOY` and leaves its previously deployed
+PDF, JSON, and multikey files untouched. Other editions and independent outputs
+such as printouts, covers, MIDI, and audio remain eligible. If an older inventory
+lacks the verification records, rebuild before deploying with these settings.
+
 ## Variants and editions
 
 A **variant** is a named preset of a source book: `default`, `lyric`, `charango`,

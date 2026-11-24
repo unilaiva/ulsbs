@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import concurrent.futures as cf
 import importlib.metadata
+import hashlib
 import json
 import os
 import re
@@ -45,6 +46,8 @@ from .constants import (
     LUALATEX_MAX_EXTRA_PASSES,
     PAPERA5_FNAMEPART,
     RESULT_TYPE_MAIN_PDF,
+    RESULT_TYPE_EDITION,
+    RESULT_TYPE_EDITION_MULTIKEY,
     RESULT_TYPE_MULTIKEY_PDF,
     RESULT_TYPE_MULTIKEY_JSON,
     RESULT_TYPE_PRINTOUT_PDF,
@@ -1621,7 +1624,8 @@ def step_multikey_ranges(
                 or (ordinary_job.doc_tex_abs, ordinary_job.variant) != (job.doc_tex_abs, job.variant)):
             raise ValueError("No successful matching ordinary edition in this run")
         canonical = result_dir / f"{build_job_basename(ordinary_job)}.pdf"
-        records = set(resultlist.lines()) if resultlist.exists() else set()
+        lines = resultlist.lines() if resultlist.exists() else []
+        records = set(lines)
         if f"{RESULT_TYPE_MAIN_PDF}{RESULTLIST_SEPARATOR}{canonical.name}" not in records:
             raise ValueError("Ordinary PDF is not in this run's output inventory")
 
@@ -1650,14 +1654,23 @@ def step_multikey_ranges(
         # Replace its metadata last: a failed packaging step must not leave a
         # successful ordinary job advertising an uncommitted companion.
         source_name = f"{build_job_basename(ordinary_job)}.json"
+        json_sha256 = None
         if cfg.json and f"{RESULT_TYPE_JSON}{RESULTLIST_SEPARATOR}{source_name}" in records:
             json_dir = result_dir / RESULT_JSON_SUBDIRNAME
-            data = json.loads(read_text(json_dir / source_name))
+            original = (json_dir / source_name).read_bytes()
+            receipt = resultlist.edition_records(lines, RESULT_TYPE_EDITION).get(canonical.name)
+            if receipt is not None and hashlib.sha256(original).hexdigest() != receipt.get("json_sha256"):
+                raise ValueError("Ordinary JSON no longer matches this run's output inventory")
+            data = json.loads(original)
             data["book_info"].pop("multikey_file", None)
             data["book_info"]["multikey_json_file"] = f"{RESULT_MULTIKEY_SUBDIRNAME}/{output_name}"
             temporary = json_dir / f".{source_name}.tmp"
             write_text(temporary, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+            json_sha256 = resultlist.file_sha256(temporary)
             os.replace(temporary, json_dir / source_name)
+        resultlist.record_edition(RESULT_TYPE_EDITION_MULTIKEY, canonical.name,
+                                  index_sha256=resultlist.file_sha256(staged_index),
+                                  json_sha256=json_sha256)
     except Exception as error:
         # An earlier index may describe an ordinary PDF replaced in this run.
         # Keep a newly published complete package if only bookkeeping failed.
@@ -1921,6 +1934,14 @@ def _compile_job_stages(
 
         if job.multikey:
             ui.info_line(f"{txt_doc} Compilation complete; awaiting MULTIKEY range packaging.")
+        else:
+            export = job.compile_dir / f"{processed_tex.stem}.json"
+            resultlist.record_edition(
+                RESULT_TYPE_EDITION, produced_pdf.name,
+                variant=job.variant if job.is_songbook else None,
+                pdf_sha256=resultlist.file_sha256(produced_pdf),
+                json_sha256=resultlist.file_sha256(export) if cfg.json and song_db is not None else None,
+            )
         return CompilationResult(warning_count=warn_count, next_step=step)
     finally:
         lock.release()
