@@ -5,11 +5,13 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from ulsbs.config import Config
 from ulsbs.constants import MULTIKEY_FNAMEPART, RESULT_TYPE_MULTIKEY_PDF
@@ -82,15 +84,14 @@ class MultikeyJobTests(unittest.TestCase):
         jobs = build_job_queue(cfg)
         self.assertEqual([job.variant for job in jobs], ["lyric", "bassclef", "bassclef"])
         self.assertTrue(all(job.doc_tex_abs == self.doc for job in jobs))
-        from unittest.mock import patch
         from ulsbs.cli import print_variant_selections
 
         ui = UI(use_colors=False)
         with patch.object(ui, "info_line") as info:
             print_variant_selections(ui, cfg, jobs)
         self.assertEqual([call.args[0] for call in info.call_args_list], [
-            "other.tex: selected <none>; skipped lyric, bassclef (unavailable)",
-            "book_A5.tex: selected lyric, bassclef",
+            "[other] selected: <none>; skipped: lyric, bassclef (unavailable)",
+            "[book_A5] selected: lyric, bassclef",
         ])
         for docs in ((other,), (other, self.doc)):
             other.write_text(r"\documentclass{ulsbs-songbook}", encoding="utf-8")
@@ -98,6 +99,24 @@ class MultikeyJobTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unavailable variants|available in none"):
                 build_job_queue(replace(cfg, songbooks=docs))
         self.assertFalse((self.root / "temp").exists())
+
+    def test_variant_selection_uses_job_label_colors(self) -> None:
+        from ulsbs.cli import print_variant_selections
+
+        jobs = build_job_queue(self.cfg)
+        with patch.dict(os.environ, {"NO_COLOR": ""}), patch.object(
+            UI, "_terminal_supports_colors", return_value=True,
+        ):
+            ui = UI()
+        with patch.object(ui, "info_line") as info:
+            print_variant_selections(ui, self.cfg, jobs)
+
+        label = ui.fmt_doc(jobs[0]).split(":", 1)[0] + f"]{ui.C_RESET}"
+        info.assert_called_once_with(
+            f"{label} selected: {ui.C_GREEN}default{ui.C_RESET}, "
+            f"{ui.C_YELLOW}lyric{ui.C_RESET}, {ui.C_MAGENTA}charango{ui.C_RESET}, "
+            f"{ui.C_BROWN}bassclef{ui.C_RESET}"
+        )
 
     def test_invalid_availability_and_selection_fail_before_outputs(self) -> None:
         for option in ("{}", "{lyric}", "{default,lyrics}", "{default,default}", r"\names"):

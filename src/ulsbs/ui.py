@@ -841,25 +841,27 @@ class UI:
     # END spinner
 
     def fmt_doc(self, job: "Job") -> str:
-        """Format a document label for a Job in a consistent, colored style.
+        """Format a job label with its variant and optional multikey suffix."""
+        return self.fmt_doc_label(job.doc_stem, job.variant, multikey=job.multikey)
 
-        The document stem is colored per-book (stable across the run), and
-        the :<variant> suffix is colored using a fixed mapping. Multikey
-        companion editions have an additional :multikey label.
-        """
-        doc_color = self._color_for_doc_stem(job.doc_stem)
-        variant = job.variant
+    def fmt_doc_label(self, stem: str, variant: str | None = None, *,
+                      multikey: bool = False) -> str:
+        """Format a bracketed book label, with edition details if supplied."""
+        doc_color = self._color_for_doc_stem(stem)
+        inner = f"{doc_color}{stem}{self.C_DGRAY}"
 
         if variant:
             variant_color = self._color_for_variant(variant)
-            inner = f"{doc_color}{job.doc_stem}{self.C_DGRAY}:{variant_color}{variant}{self.C_DGRAY}"
-        else:
-            inner = f"{doc_color}{job.doc_stem}{self.C_DGRAY}"
+            inner += f":{variant_color}{variant}{self.C_DGRAY}"
 
-        if job.multikey:
+        if multikey:
             inner += f":{self.C_CYAN}multikey{self.C_DGRAY}"
 
         return f"{self.C_DGRAY}[{inner}]{self.C_RESET}"
+
+    def fmt_variant(self, variant: str) -> str:
+        """Color a standalone variant name using the job-label palette."""
+        return self.colorize(variant, self._color_for_variant(variant))
 
     def fmt_step(self, step: int) -> str:
         """Return given compile step number as colorized string"""

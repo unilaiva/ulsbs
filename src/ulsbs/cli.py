@@ -173,8 +173,10 @@ def print_variant_selections(ui: UI, cfg: Config, jobs: list[Job]) -> None:
         skipped = [] if cfg.variants == "all" else [
             name for name in cfg.variants if name not in selected
         ]
-        ui.info_line(f"{doc.name}: selected {', '.join(selected) or '<none>'}"
-                     + (f"; skipped {', '.join(skipped)} (unavailable)" if skipped else ""))
+        selected_text = ", ".join(ui.fmt_variant(name) for name in selected) or "<none>"
+        skipped_text = ui.colorize(", ".join(skipped), ui.C_DGRAY) if skipped else ""
+        ui.info_line(f"{ui.fmt_doc_label(doc.stem)} selected: {selected_text}"
+                     + (f"; skipped: {skipped_text} (unavailable)" if skipped else ""))
 
 
 def print_run_summary(ui, cfg, result, jobs_count, elapsed_seconds):
