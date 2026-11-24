@@ -12,6 +12,9 @@
   system's tighter fit does not make it look smaller than its neighbors. The
   original score still determines where all keys split across pages.
 - Fix seams in chapter corner marks and keep dashes evenly spaced when resized.
+- Keep repeat bars solid across lyric wraps; continuation dashes still mark
+  column and page breaks. Inline repeat strokes follow the measure-bar height
+  on all lyric lines and extend above the upper dots where present.
 - Add `\ulIncludeOnlySongIds` for selections that stay valid across renumbering.
   Both ID and number selectors keep the first source match for each entry and
   report a compiler warning if there are duplicates. Use `\ulSelectionNumbering`

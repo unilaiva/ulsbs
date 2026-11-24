@@ -58,6 +58,8 @@ local function collect_rule(context, n, x, baseline, parent)
     return
   end
   context.sequence = context.sequence + 1
+  -- Glue traversal can produce floats while an overlay uses integer kerns.
+  x = math.floor(x + .5)
   local key = tostring(repeat_id) .. ":" .. tostring(x)
   local group = context.groups[key]
   local top = baseline - n.height

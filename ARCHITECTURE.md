@@ -919,25 +919,27 @@ Missing selected melody references use nominal lane positions and retained circl
 metrics, not another rendering. `\altchords` bars use level-zero policy.
 
 `\ulUseVerseAnnotationMinimum` can promote zero-level lines of an annotated verse
-to a one-level minimum without inventing absent upper rows. Entirely zero-level
+to a one-level minimum without adding chord labels. Entirely zero-level
 verses remain compact. `\ulRepeatBarBottomScale` sets depth in lyric A units.
 `\ulRepeatBarMinimumGap` separates completed same-column repeat strokes; it excludes
 nested or continuing segments, and zero disables it. `\prep` uses the highest
 occupied reference bottom with its authored fallback. Retained meter boxes are
 consumed once; geometry repair never re-renders their tokens.
 
-When a repeat's final paragraph wraps, `\endrep` emits an attributed zero-extent
-continuation box for the remaining bar fragment. Trailing `\hss` absorbs the
-content and verse insets without moving the ink or producing an overfull hbox.
-The retained attributes and source-line depth still drive geometry repair and
-shipout coalescing.
+When a lyric paragraph wraps within a repeat, the paragraph callback copies its
+retained repeat prefix at the same horizontal position as a zero-width overlay on
+each wrapped line. The stanza pass attaches the `\endrep` marker to the last line
+before page/column splitting. Shipout coalesces the fragments per physical
+segment and adds continuation dashes only where an endpoint is missing.
 
-Inline `\lrep`/`\rrep` signs remain music-owned. Lyric-row dots/bars always print;
-only effective chords add upper dots at `\ulChordLineBaselineSkip`. The common
-height helper uses the current baseline plus the WithChords adjustment when chords
-are effective, lyric A height plus NoChords otherwise. Authored width/depth and
-adjustments remain authoritative. Repeat signs do not evaluate neighbors or join
-transposable alternatives.
+Inline `\lrep`/`\rrep` signs retain lyric dots and the authored rule width and
+depth. On all physical lyric lines, the rule uses the measure-bar target,
+including the optional stanza annotation minimum. Visible annotations or a
+promotion to that minimum add upper dots at `\ulChordLineBaselineSkip` and a
+floor just above them. The WithChords adjustment supplies another minimum when
+upper dots are present. Outside stanzas, the standalone height adjustments still
+follow chord visibility.
+Repeat signs do not re-evaluate source or join transposable alternatives.
 
 `\ulVerseBaseline{natural}{stretch}{shrink}` and `\ulVerseSeparation` evaluate scalar
 expressions in the configured lyric font and cache the resulting glue in capital-A

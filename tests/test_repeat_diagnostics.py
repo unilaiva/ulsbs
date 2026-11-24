@@ -11,7 +11,6 @@ import unittest
 
 import test_song_lifecycle as lifecycle
 import test_song_order as order
-from test_pdf_transposition_layers import rendered_pages, words_and_geometry
 from test_tex_integration import ROOT
 
 
@@ -28,9 +27,8 @@ class RepeatDiagnosticsTests(unittest.TestCase):
         cls.diagnostics.mkdir(parents=True, exist_ok=True)
 
     def check(self, *, selected, mode):
-        # Each final source paragraph wraps, so endrep must emit the remaining
-        # repeat-bar fragment. Its zero-width overlay must accommodate the
-        # content inset plus the optional verse inset without a warning.
+        # Wrapped repeat fragments must accommodate the content inset and the
+        # optional verse inset without a box warning.
         body = "\\begin{ulSongs}{titleidx,authidx,tagidx}\n"
         body += "\\beginsong{Wrapped}[id={wrapped},by={Author},tags={fire}]\n"
         for option in ("", "[1]"):
@@ -85,7 +83,31 @@ class RepeatDiagnosticsTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 self.check(selected=True, mode=mode)
 
-    def test_wrapped_repeat_overlays_preserve_legacy_output(self):
+    def test_wrapped_nested_repeats_preserve_once_only_effects(self):
+        color_audit = r"""
+\directlua{
+local prefix = \number\csname c__ulsbs_music_repeat_prefix_attribute_int\endcsname
+local hlist, vlist, whatsit = node.id('hlist'), node.id('vlist'), node.id('whatsit')
+local color = node.subtype('pdf_colorstack')
+local function audit(list)
+  for n in node.traverse(list) do
+    if n.id == hlist and node.has_attribute(n, prefix) then
+      local pushes, pops = 0, 0
+      for item in node.traverse_id(whatsit, n.list) do
+        if item.subtype == color and item.command == 1 then pushes = pushes + 1 end
+        if item.subtype == color and item.command == 2 then pops = pops + 1 end
+      end
+      assert(pushes > 0 and pushes == pops, 'repeat prefix must restore color inside the box')
+      texio.write_nl('REPEAT-COLOR-BALANCED')
+    elseif n.id == hlist or n.id == vlist then audit(n.list) end
+  end
+end
+luatexbase.add_to_callback('pre_shipout_filter', function(head)
+  audit(head.list)
+  return true
+end, 'ulsbs-test-repeat-color')
+}
+"""
         body = r"\begin{ulSongs}{}\beginsong{Wrapped repeats}[id={wrapped},by={Author},key={C}]"
         for option in ("", "[1]"):
             body += ("\n\\beginverse" + option + "\n\\beginrep\n\\Effect |\\[C]"
@@ -95,39 +117,20 @@ class RepeatDiagnosticsTests(unittest.TestCase):
                  + "\n\\endrep\n\\endrep\n\\endverse\n"
                  + r"\beginverse*AFTERMARK\endverse\endsong\end{ulSongs}"
                  + r"\typeout{REPEAT-EFFECTS:\the\Effects}")
-        legacy_patch = r"""
-\makeatletter\ExplSyntaxOn
-% Preserve literal spaces in the primitive hbox attr syntax while patching.
-\char_set_catcode_space:n {32}
-\patchcmd{\endrep}{\hss}{}{}{\errmessage{Repeat overlay glue not found}}
-\ExplSyntaxOff\makeatother
-"""
         modes = (("chorded", "default", "", False),
                  ("hidden", "default", r"\chordsoff", False),
                  ("lyrics", "lyric", "", False),
                  ("layered", "default", "", True))
         for mode, variant, setting, layers in modes:
             with self.subTest(mode=mode):
-                snapshots = []
-                for label, patch in (("current", ""), ("legacy", legacy_patch)):
-                    preamble = (r"\ulSongPosition{0}\newcount\Effects"
-                                r"\def\Effect{\global\advance\Effects1\relax}"
-                                + setting + patch)
-                    source = (r"\def\ulPdfTranspositionLayers{" + str(layers).lower() + "}"
-                              + lifecycle.document(body, preamble, variant=variant))
-                    output = self.compile_source(source, label=f"{mode}-{label}", passes=2)
-                    if label == "current":
-                        self.assertNotIn("Overfull \\hbox", output)
-                    else:
-                        self.assertIn("Overfull \\hbox (7.33pt too wide)", output)
-                        self.assertIn("Overfull \\hbox (17.33pt too wide)", output)
-                    self.assertEqual(re.findall(r"REPEAT-EFFECTS:(\d+)", output), ["3", "3"])
-                    pdf = (self.book / "book.pdf").read_bytes()
-                    anchors = [line for line in (self.book / "book.ulsbs.psv").read_text().splitlines()
-                               if line.startswith("ID-NR-PAGE-Y|")]
-                    self.assertTrue(anchors)
-                    snapshots.append((words_and_geometry(pdf), rendered_pages(pdf), anchors))
-                self.assertEqual(*snapshots)
+                preamble = (r"\ulSongPosition{0}\newcount\Effects"
+                            r"\def\Effect{\global\advance\Effects1\relax}" + setting + color_audit)
+                source = (r"\def\ulPdfTranspositionLayers{" + str(layers).lower() + "}"
+                          + lifecycle.document(body, preamble, variant=variant))
+                output = self.compile_source(source, label=mode)
+                self.assertNotIn("Overfull \\hbox", output)
+                self.assertEqual(re.findall(r"REPEAT-EFFECTS:(\d+)", output), ["3"])
+                self.assertGreater(output.count("REPEAT-COLOR-BALANCED"), 4)
 
     def test_configured_gap_reaches_real_adjacent_source_sections(self):
         capture = r"""\directlua{

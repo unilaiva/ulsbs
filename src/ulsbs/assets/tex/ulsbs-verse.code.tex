@@ -132,7 +132,7 @@
          \vskip\csname ulsbs@verse@minimumgap\endcsname sp\relax}
    \bool_gset_true:N \g__ulsbs_stanza_active_bool
     \bool_gset_true:N \g__ulsbs_verse_first_line_bool
-    \global\ulsbs@rep@level=0\relax\global\ulsbs@prevparlines=0\relax
+     \global\ulsbs@rep@level=0\relax
    \ulVerseMark\nobreak
     \char_set_catcode_active:n {13}\char_set_active_eq:nN {13}\__ulsbs_verse_line:
     \vbox_set:Nw \l__ulsbs_verse_box
@@ -173,7 +173,6 @@
   {\mode_if_horizontal:T
     {\int_set:Nn \l__ulsbs_verse_line_penalty_int {\interlinepenalty}
       \interlinepenalty=10000\relax\tex_par:D
-      \global\ulsbs@prevparlines=\prevgraf\relax
      \interlinepenalty=\l__ulsbs_verse_line_penalty_int\relax
      \penalty\interlinepenalty}}
 

@@ -127,7 +127,6 @@
 
 % Scratch registers:
 \newlength\ulsbs@tmp@rep@allbarswidth
-\newcount\ulsbs@tmp@rep@prevlinestoreach
 \newdimen\ulsbs@tmp@rep@barhtbase
 \newdimen\ulsbs@tmp@rep@normalbarhtbase
 
@@ -139,15 +138,6 @@
       % If current bar was started on earlier lyric line (par), increase the
       % current line's repeat bar height to reach through the gap
       \advance\ulsbs@tmp@rep@barhtbase by \ulRepeatBarContinuingOverlap\relax
-      % If previous lyric line (par) was (long and) wrapped to more than one
-      % line, make the current line's repeat bar higher to reach through
-      % them all.
-      \ifnum\ulsbs@prevparlines>1\relax%
-        \ulsbs@tmp@rep@prevlinestoreach=\ulsbs@prevparlines%
-        \advance\ulsbs@tmp@rep@prevlinestoreach by -1\relax%
-        \advance\ulsbs@tmp@rep@barhtbase by
-         \dimexpr \baselineskip * \numexpr\ulsbs@tmp@rep@prevlinestoreach\relax\relax%
-      \fi%
       % Draw the repeat bar with smash to take no vertical space
       \ulsbs@rep@tagrule{#1}{0}{\ulsbs@tmp@rep@normalbarhtbase}{\smash{%
         \vrule\@width\ulRepeatBarWidth%
@@ -173,17 +163,19 @@
 % Legacy inline-sign height only; verse fragments use the music owner's policy.
 \def\ulsbs@rep@setbarhtbase{%
   \ifulShowChords%
-    \global\ulsbs@tmp@rep@barhtbase=\baselineskip%
-    \global\advance\ulsbs@tmp@rep@barhtbase \ulRepeatBarHeightAdjustmentWithChords\relax%
+     \ulsbs@tmp@rep@barhtbase=\dimexpr\baselineskip+\ulRepeatBarHeightAdjustmentWithChords\relax%
   \else%
-    \global\settoheight{\ulsbs@tmp@rep@barhtbase}{\vphantom{A}}%
-    \global\advance\ulsbs@tmp@rep@barhtbase \ulRepeatBarHeightAdjustmentNoChords\relax%
-  \fi%
+     \ulsbs@rep@setplainheight%
+   \fi%
+}
+\def\ulsbs@rep@setplainheight{%
+  \ulsbs@tmp@rep@barhtbase=\dimexpr\fontcharht\font`A+\ulRepeatBarHeightAdjustmentNoChords\relax%
 }
 
 % Draw all repetition bars (fragments) for the current lyric line.
 \def\ulsbs@rep@drawbars{%
-  {% block to contain color
+  % Close the color group inside the box so both commands travel with copies.
+  \hbox attr \csname c__ulsbs_music_repeat_prefix_attribute_int\endcsname=1 {{%
     \color{ulRepetitionSignColor}%
     \ulsbs@rep@setlinebase%
     \ulsbs@tmp@rep@normalbarhtbase=\ulsbs@tmp@rep@barhtbase%
@@ -193,7 +185,7 @@
     \ifdim\ulsbs@tmp@rep@allbarswidth<\ulContentIndentWidth%
       \kern\dimexpr\ulContentIndentWidth-\ulsbs@tmp@rep@allbarswidth\relax%
     \fi%
-  }%
+  }}%
 }
 
 % === Inline repeat marks ===

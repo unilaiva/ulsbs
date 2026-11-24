@@ -329,7 +329,8 @@ after the right repeat mark:
 ```
 
 Use `\beginrep` and `\endrep` for repeat bars down the left of lyric lines.
-They can be nested:
+The bar stays solid when a lyric line wraps. Dashes mark a repeat that carries
+over to another column or page. Repeat bars can be nested:
 
 ```tex
 \beginsong{My Song}[id={my-song}]
@@ -1635,7 +1636,7 @@ not update a previously copied `ulLanguageSectionMarkColor`.
 | `\ulChordWhitespaceMinimumWidth` | Renew; `.8ex` in lyric font; zero disables the source-whitespace minimum |
 | `\ulRepeatBarWidth`, `\ulRepeatBarGap` | `\setlength`; `1.4pt`, `2.265pt` |
 | `\ulRepeatBarDepth` | `\setlength`; `.25pt` inline repeat-sign depth, not the verse-left bottom policy |
-| `\ulRepeatBarHeightAdjustmentWithChords`, `\ulRepeatBarHeightAdjustmentNoChords` | `\setlength`; `-2.5pt`, `.5pt`, for inline repeat-sign heights |
+| `\ulRepeatBarHeightAdjustmentWithChords`, `\ulRepeatBarHeightAdjustmentNoChords` | `\setlength`; `-2.5pt`, `.5pt`, for standalone repeat signs. The first also sets a minimum height relative to the baseline skip when upper dots are present. |
 | `\ulRepeatBarContinuationDashLength`, `\ulRepeatBarContinuationDashGap` | `\setlength`; `2pt`, `1.25pt` at page/column continuations |
 | `\ulRepeatBarContinuingOverlap` | Renew; `.7\baselineskip` resolved at use, for continuous multi-line repeat bars |
 

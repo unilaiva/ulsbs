@@ -180,7 +180,7 @@ Outside.
 \end{ulSongs}
 """)
 
-    def test_inline_repeat_owner_is_unique_and_uses_effective_chord_policy(self):
+    def test_inline_repeat_owner_is_unique(self):
         entry = (ROOT / "src/ulsbs/assets/tex/ulsbs.sty").read_text()
         repeats = (ROOT / "src/ulsbs/assets/tex/ulsbs-repeats.code.tex").read_text()
         music = (ROOT / "src/ulsbs/assets/tex/ulsbs-music.code.tex").read_text()
@@ -188,8 +188,6 @@ Outside.
             self.assertNotRegex(entry, r"\\(?:DeclareDocumentCommand|newcommand)\\" + name)
             self.assertNotRegex(repeats, r"\\(?:DeclareDocumentCommand|newcommand)\\" + name)
             self.assertEqual(music.count("\\cs_set_protected:Npn \\" + name), 1)
-        inline = music.split("% Inline left/right signs", 1)[1].split("% #1 is repeat-count", 1)[0]
-        self.assertEqual(inline.count(r"\ifulShowChords"), 2)
 
     def test_inline_repeat_effective_chord_row_and_authored_rules_on_both_entry_paths(self):
         # Deliberately non-default metrics: compare real rules, not just predicates.
@@ -240,7 +238,7 @@ Outside.
                     # Both authored height branches use the common helper unchanged.
                     self.assertEqual(dims["restored"], dims["aftersong"])
 
-    def test_inline_repeats_keep_compact_real_annotation_ink_and_once_only_effects(self):
+    def test_inline_repeats_follow_visible_annotations_with_once_only_effects(self):
         preamble = r"""
 \ulShowChords{true}\ulShowNotes{true}\ulShowBeats{true}
 \newcount\ChordEffects\newcount\OffsetEffects\newcount\LyricEffects
@@ -274,19 +272,78 @@ Outside.
             rows = dict((key, tuple(float(v) for v in values)) for key, *values in re.findall(
                 r"STANZA:(\w+):([\d.]+)pt/([\d.]+)pt/([\d.]+)pt", output))
             self.assertEqual(re.findall(r"EFFECTS:([\d/]+)", output), ["2/4/8"] * 3)
-            # No upper repeat row is manufactured for independent pitches/beats.
-            # Tighter A-based leading can expose the existing inline sign's real
-            # .25pt low hang in any compact mode; it must not add an annotation row.
-            for mode in ("hidden", "beat", "pitch"):
-                self.assertAlmostEqual(rows[mode + "marks"][1], rows[mode + "plain"][1], delta=.25)
+            # Invisible ink does not manufacture an upper repeat row. Visible
+            # notation may increase the fitted reach but not the bar's low hang.
+            self.assertAlmostEqual(rows["hiddenmarks"][1], rows["hiddenplain"][1], delta=.25)
+            for mode in ("hidden", "beat", "pitch", "chord"):
                 self.assertEqual(rows[mode + "marks"][2], rows[mode + "plain"][2])
-            # Compact beat ink may fit within the lyric-leading lower bound.
-            self.assertLessEqual(rows["hiddenmarks"][1], rows["beatmarks"][1])
-            self.assertLess(rows["beatmarks"][1], rows["pitchmarks"][1])
-            self.assertGreater(rows["chordmarks"][1], rows["hiddenmarks"][1])
+            for mode in ("beat", "pitch", "chord"):
+                self.assertGreater(rows[mode + "marks"][1], rows["hiddenmarks"][1])
             self.assertNotIn("Missing character:", output)
             results.append(rows)
         self.assertEqual(*results)
+
+    def test_inline_repeat_rules_follow_measure_reach_and_clear_upper_dots(self):
+        preamble = r"""
+\ulShowChords{true}\ulShowNotes{true}\ulShowBeats{true}
+\ulUseVerseAnnotationMinimum{false}
+\ulMeasureBarTop{0}{0}{1.6}\ulMeasureBarTop{1}{1}{3}\ulMeasureBarTop{2}{2}{2}
+\renewcommand\ulChordLineBaselineSkip{11pt}
+\directlua{
+local inline = \number\csname c__ulsbs_music_inline_repeat_attribute_int\endcsname
+local measure = \number\csname c__ulsbs_music_measure_attribute_int\endcsname
+local finish = ulsbs_music.finish_verse
+local hlist, vlist, rule, glyph = node.id('hlist'), node.id('vlist'), node.id('rule'), node.id('glyph')
+function ulsbs_music.finish_verse(id)
+  finish(id)
+  for line in node.traverse_id(hlist, tex.box[id].list) do
+    local reach, signs = nil, {}
+    for n in node.traverse(line.list) do
+      if n.id == hlist and node.has_attribute(n, inline) then
+        table.insert(signs, n)
+      elseif n.id == vlist and node.has_attribute(n, measure) == 1 then
+        reach = n.height - n.shift
+      end
+    end
+    if next(signs) then
+      assert(reach, 'expected a measure on the same physical line')
+      for _, sign in ipairs(signs) do
+        local stroke, upper, lower
+        for n in node.traverse(sign.list) do
+          if n.id == rule then stroke = n end
+          if n.id == hlist then upper = n end
+          if n.id == glyph and n.char == 58 then lower = n end
+        end
+        assert(stroke and lower, 'both signs retain the lyric colon and rule')
+        if upper then
+          assert(upper.list.char == 58 and upper.shift == -tex.sp('11pt'), 'upper colon and raise')
+          assert(stroke.height >= upper.height - upper.shift + tex.sp('.5pt'), 'upper dot clearance')
+          assert(stroke.height >= reach, 'inline rule reaches the measure-bar top')
+        else
+          assert(stroke.height == reach, 'plain sign matches the measure-bar top')
+        end
+        texio.write_nl(upper and 'INLINE-REACH:upper' or 'INLINE-REACH:plain')
+      end
+    end
+  end
+end
+}
+"""
+        source = helpers.document(r"""
+\begin{ulSongs}{}\beginsong{Inline repeat geometry}[key={C}]
+\beginverse*\meter{}{}\lrep |Plain \rrep\hfil\break\meter{}{}\lrep |\[C]Chord \rrep\endverse
+\beginverse*\chordsoff\meter{}{}\lrep |\[<C>C]Pitch \rrep\endverse
+\beginverse*\chordsoff\notesoff\meter{}{}\lrep |\[<*>C]Beat \rrep\endverse
+\beginverse*\chordsoff\notesoff\beatsoff\meter{}{}\lrep |\[<* C>C]Hidden \rrep\endverse
+{\ulUseVerseAnnotationMinimum{true}
+\beginverse*\meter{}{}\lrep |Plain throughout the stanza \rrep\endverse
+\beginverse*\meter{}{}\lrep |Plain in an annotated stanza \rrep
+\[C]Chord on the next line\endverse}
+\endsong\end{ulSongs}
+""", preamble)
+        output = self.compile_source(source)
+        self.assertEqual(re.findall(r"INLINE-REACH:(\w+)", output),
+                         ["plain"] * 2 + ["upper"] * 6 + ["plain"] * 4 + ["upper"] * 2)
 
     def test_measure_ink_uses_effective_policy_and_consumes_pending_meter_once(self):
         preamble = r"""
@@ -460,12 +517,14 @@ Text.
          end
          assert(rules == 1, 'one measure rule')
        end
-       if measure_line == 1 then assert(\string#repetitions > 0, 'verse-left repeat present') end
-       for _, entry in ipairs(repetitions) do
-         local bar = entry.box
-         local prior = before_rules[node.direct.todirect(bar)]
-          local target = math.max(0, repeat_target - entry.baseline)
-          assert(bar.height == target + math.max(0, prior[1] - prior[2]),
+        assert(\string#repetitions > 0, 'verse-left repeat present on every physical lyric line')
+        for _, entry in ipairs(repetitions) do
+          local bar = entry.box
+          local prior = before_rules[node.direct.todirect(bar)]
+          assert(prior or index > 1, 'only wrapped lines get new repeat fragments')
+           local target = math.max(0, repeat_target - entry.baseline)
+           local overlap = prior and math.max(0, prior[1] - prior[2]) or 0
+           assert(bar.height == target + overlap,
             'repeat rule must use its own policy and preserve authored overlap')
           assert(node.has_attribute(bar, normal_height) == target,
             'incoming continuation metadata must retain adjusted reach')

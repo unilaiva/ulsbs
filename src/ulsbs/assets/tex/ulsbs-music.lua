@@ -20,6 +20,7 @@ local M = {}
 -- Public helpers share this setup's configuration store and retained-node metrics.
 function M.setup(a)
   local hlist, vlist, rule, glue = node.id('hlist'), node.id('vlist'), node.id('rule'), node.id('glue')
+  local glyph, kern, whatsit = node.id('glyph'), node.id('kern'), node.id('whatsit')
   local glue_types, configs, config_ids = {}, {}, {}
   for id, name in pairs(node.subtypes('glue')) do glue_types[name] = id end
   -- Round scaled-point geometry, diagnosing nonfinite or out-of-range results.
@@ -42,6 +43,9 @@ function M.setup(a)
     local p = node.getproperty(n)
     if not p then p = {}; node.setproperty(n, p) end
     return p
+  end
+  local function first_of(id, list)
+    for n in node.traverse_id(id, list) do return n end
   end
   -- Exclude dimensionless wrappers, notably multikey's alternate PDF overlays.
   local function visible_box(n)
@@ -484,7 +488,7 @@ function M.setup(a)
   -- (3), independent of visual placement. References retain bottom and base
   -- separately: capital-A height for text, actual circle diameter for melody.
   local function inspect_line(line)
-    local info = {level = 0, refs = {}, bars = {}, repetitions = {}, preps = {}}
+    local info = {level = 0, refs = {}, bars = {}, repetitions = {}, inline_repeats = {}, preps = {}}
     local notes = {}
     -- Keep the reference with the highest unscaled top at this logical level.
     local function reference(level, bottom, base)
@@ -517,6 +521,7 @@ function M.setup(a)
     -- Read an annotation's visible chord metric and any retained melody circles.
     local function raw_anchor(n, baseline)
       local metric = node.has_attribute(n, a.row)
+      if metric then info.annotated = true end
       if metric and metric > 0 then
         local base = node.has_attribute(n, a.chord_a) or find_attribute(n.list, a.chord_a)
         assert(base, 'visible chord must retain its capital-A metric')
@@ -543,6 +548,8 @@ function M.setup(a)
           local raised = baseline - n.shift
           if node.has_attribute(n, a.prep) then
             info.preps[#info.preps + 1] = {box = n, baseline = baseline}
+          elseif node.has_attribute(n, a.inline_repeat) then
+            info.inline_repeats[#info.inline_repeats + 1] = {box = n, baseline = raised}
           elseif node.has_attribute(n, a.measure) == 1 then
             info.bars[#info.bars + 1] = {box = n, baseline = raised}
           elseif node.has_attribute(n, a.annotation) then
@@ -600,6 +607,29 @@ function M.setup(a)
     row.height = ink.height
     bar.height = meter + ink.height
   end
+  -- The upper colon follows visible annotations or the stanza's chord minimum.
+  local function inline_repeat_geometry(entry, info, minimum)
+    local box = entry.box
+    local bar, colon = first_of(rule, box.list), first_of(glyph, box.list)
+    local top, level = target(info, configuration(box), 'measure', minimum)
+    local reach = math.max(0, top - entry.baseline)
+    local height, depth = colon.height, colon.depth
+    if info.annotated or level > 0 then
+      local dots = first_of(hlist, box.list)
+      if not dots then
+        dots = node.new(hlist)
+        dots.dir, dots.height, dots.depth = box.dir, colon.height, colon.depth
+        dots.shift = -node.has_attribute(box, a.inline_raise)
+        dots.list = node.copy(colon)
+        box.list = node.insert_before(box.list, colon, dots)
+      end
+      reach = math.max(reach, node.has_attribute(box, a.inline_repeat), dots.height - dots.shift + tex.sp('.5pt'))
+      depth = math.max(depth, dots.depth + dots.shift)
+    end
+    bar.height = reach
+    box.height = math.max(reach, height)
+    box.depth = math.max(bar.depth, depth)
+  end
   -- Apply each bar's captured policy and lift prep markers to the active lane's
   -- bottom, never below their original raise. Repeat reach excludes continuation
   -- overlap, which is preserved separately; low hang uses the lyric reference.
@@ -612,6 +642,7 @@ function M.setup(a)
       local cfg = configuration(entry.box)
       measure_geometry(entry, target(info, cfg, 'measure', minimum))
     end
+    for _, entry in ipairs(info.inline_repeats) do inline_repeat_geometry(entry, info, minimum) end
     for _, entry in ipairs(info.preps) do
       local ref = info.refs[info.level]
       local fallback = entry.baseline + node.has_attribute(entry.box, a.prep)
@@ -643,6 +674,10 @@ function M.setup(a)
         line.height = math.max(line.height, entry.baseline + entry.box.height)
         line.depth = math.max(line.depth, entry.box.depth - entry.baseline)
       end
+      for _, entry in ipairs(info.inline_repeats) do
+        line.height = math.max(line.height, entry.baseline + entry.box.height)
+        line.depth = math.max(line.depth, entry.box.depth - entry.baseline)
+      end
       for _, entry in ipairs(info.repetitions) do
         if node.has_attribute(entry.box, a.repetition_start) then
           line.height = math.max(line.height, entry.baseline + node.has_attribute(entry.box, a.normal_height))
@@ -659,9 +694,46 @@ function M.setup(a)
     return {width = skip.width, stretch = skip.stretch, shrink = skip.shrink,
       stretch_order = skip.stretch_order, shrink_order = skip.shrink_order}
   end
+  -- The prefix was typeset once, on the first line of the paragraph. Copy its
+  -- ink (including color) to wrapped lines at the same x, with no added advance.
+  local function repeat_prefix(line)
+    local x = line.shift
+    for n in node.traverse(line.list) do
+      if n.id == hlist and node.has_attribute(n, a.repeat_prefix) then return n, x end
+      if n.id == glue then x = x + node.effective_glue(n, line)
+      elseif n.id == kern then x = x + n.kern
+      elseif n.width then x = x + n.width end
+    end
+  end
+  local function copy_repeat_prefix(line, prefix, x)
+    local copy = node.copy(prefix)
+    local function continuation_rules(list)
+      for n in node.traverse(list) do
+        if n.id == rule and node.has_attribute(n, a.repetition) then
+          node.unset_attribute(n, a.repetition_start)
+          n.height = node.has_attribute(n, a.normal_height)
+        elseif n.id == hlist then continuation_rules(n.list) end
+      end
+    end
+    continuation_rules(copy.list)
+    copy.width = 0
+    local offset = node.new(kern)
+    offset.kern = math.floor(x - line.shift + .5)
+    local overlay = node.new(hlist)
+    overlay.dir = line.dir
+    overlay.list = node.insert_before(copy, copy, offset)
+    line.list = node.insert_before(line.list, line.list, overlay)
+  end
   -- Paragraph phase: capture line policy and baseline glue while still in scope,
   -- then resolve retained ink without repacking or fitting the stanza's lines.
   luatexbase.add_to_callback('post_linebreak_filter', function(head)
+    local first_line = first_of(hlist, head)
+    local prefix, x
+    if first_line then prefix, x = repeat_prefix(first_line) end
+    -- Copy before fitting records the first line's authored overlap on its rules.
+    if prefix then
+      for line in node.traverse_id(hlist, first_line.next) do copy_repeat_prefix(line, prefix, x) end
+    end
     for line in node.traverse_id(hlist, head) do
       node.set_attribute(line, a.config, find_attribute(line.list, a.config)
         or node.has_attribute(line, a.config) or M.capture_config())
@@ -673,11 +745,25 @@ function M.setup(a)
   end, 'ulsbs-measure-reach')
 
   -- Stanza phase: find a shared chord minimum (actual chords outrank nominal
-  -- note anchors), fit marked lines, and repair baseline glue and repeat endings.
+  -- note anchors), fit marked lines, and repair baseline glue.
   -- box_id is the caller-owned TeX box register; its list stays owned by that box.
   function M.finish_verse(box_id)
     local box = tex.box[box_id]
     if not box.list then return end
+    -- Keep each semantic end on its final lyric line, not after a potential
+    -- page/column break. Several nested repeats can close on the same line.
+    local previous_line, cursor = nil, box.list
+    while cursor do
+      local next_node = cursor.next
+      if cursor.id == hlist and (node.getproperty(cursor) or {}).ulsbs_music then
+        previous_line = cursor
+      elseif previous_line and cursor.id == whatsit and node.has_attribute(cursor, a.repetition_end) then
+        box.list = node.remove(box.list, cursor)
+        cursor.prev, cursor.next = nil, nil
+        previous_line.list = node.insert_after(previous_line.list, node.tail(previous_line.list), cursor)
+      end
+      cursor = next_node
+    end
     local minimum, actual_chord
     for line in node.traverse_id(hlist, box.list) do
       if (node.getproperty(line) or {}).ulsbs_music then
@@ -695,7 +781,7 @@ function M.setup(a)
     end
     -- Revisit only baseline/lineskip glue between retained lines; unrelated glue
     -- and intervening boxes retain their own layout semantics.
-    local previous_depth, pending, previous_line
+    local previous_depth, pending
     for n in node.traverse(box.list) do
       if n.id == glue and (n.subtype == glue_types.baselineskip or n.subtype == glue_types.lineskip) then
         pending = n
@@ -716,34 +802,6 @@ function M.setup(a)
             pending.shrink = spec.shrink_order == 0 and math.min(spec.shrink, width - minimum_gap) or 0
             pending.shrink_order = 0
           end
-          previous_line = n
-        -- A separately boxed repeat endpoint uses its source line's references
-        -- and its own captured policy, including scaled low hang and overlap.
-        elseif node.has_attribute(n, a.end_fragment) and previous_line then
-          local info = property(previous_line).ulsbs_music.geometry
-          local cfg = configuration(n)
-          local depth = rounded(info.refs[0].base * cfg.bottom)
-          previous_line.depth = math.max(previous_line.depth, depth)
-          -- The inner raisebox already compensates the source line's old depth.
-          -- Only add the delta introduced by fitting the scaled repeat low hang.
-          local old_depth = node.has_attribute(n, a.end_fragment)
-          for wrapper in node.traverse_id(hlist, n.list) do
-            wrapper.shift = old_depth - previous_line.depth
-          end
-          -- Repair retained endpoint rules through their horizontal wrappers.
-          local function fragments(list)
-            for item in node.traverse(list) do
-              if item.id == rule and node.has_attribute(item, a.repetition) then
-                local old = node.has_attribute(item, a.normal_height) or item.height
-                local overlap = math.max(0, item.height - old)
-                local normal = target(info, cfg, 'repetition', minimum)
-                item.height, item.depth = normal + overlap, depth
-                node.set_attribute(item, a.normal_height, normal)
-                node.set_attribute(item, a.repeat_gap, cfg.gap)
-              elseif item.id == hlist then fragments(item.list) end
-            end
-          end
-          fragments(n.list)
         end
         previous_depth, pending = n.depth, nil
       end

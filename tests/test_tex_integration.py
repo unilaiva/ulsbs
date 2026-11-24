@@ -161,6 +161,33 @@ class RepeatBarIntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(len(dash_heights), 2)
         self.assertGreaterEqual(len(solid_heights), 4)
 
+    def test_wrapped_repeat_only_dashes_at_the_physical_break(self) -> None:
+        for columns in (1, 2):
+            with self.subTest(columns=columns):
+                source = REPEAT_STYLE + r"""
+\pdfvariable compresslevel=0
+\pdfvariable objcompresslevel=0
+\documentclass[paper={a5paper}]{ulsbs-songbook}
+\begin{document}
+""" + rf"\ulSongColumns{{{columns}}}" + r"""
+\begin{ulSongs}{}
+\beginsong{Wrapped repeat with a physical break}
+\beginverse[1]
+\beginrep
+First segment\hfil\break wraps here.
+\forcebrk
+Last segment\hfil\break wraps here.\endrep
+\endverse
+\endsong
+\end{ulSongs}
+\end{document}
+"""
+                _, pdf = compile_fixture("repeat-break", files={"repeat-break.tex": source.encode()})
+                heights = [float(value) for value in REPEAT_RECTANGLE.findall(pdf)]
+                self.assertEqual(len(re.findall(rb"/Type\s*/Page\b", pdf)), 3 - columns)
+                self.assertEqual(sum(height < 2.1 for height in heights), 4)
+                self.assertEqual(sum(height >= 2.1 for height in heights), 2)
+
 
 class MelodySyntaxIntegrationTests(unittest.TestCase):
     @classmethod

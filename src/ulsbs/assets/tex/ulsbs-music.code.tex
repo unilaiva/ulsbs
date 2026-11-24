@@ -16,7 +16,7 @@
 % Source transpose/preferred accidental state is scoped by TeX groups. Song begin
 % resets the source/layer offsets, repeat bookkeeping, and pending 4/4 meter.
 % Parsing scratch is local; meter tokens and repeat counters deliberately survive
-% inner boxes. Verse paragraph hooks provide previous-line counts for repeat ink.
+% inner boxes. Verse paragraph hooks insert prefixes for repeat-bar ink.
 % Source offsets produce the effective original first; interactive offsets apply
 % to that result, never to the raw source for a second source transposition.
 
@@ -55,8 +55,12 @@
 \int_const:Nn \c__ulsbs_music_lyric_a_attribute_int {\allocationnumber}
 \newattribute\__ulsbs_music_prep_attribute
 \int_const:Nn \c__ulsbs_music_prep_attribute_int {\allocationnumber}
-\newattribute\__ulsbs_music_end_fragment_attribute
-\int_const:Nn \c__ulsbs_music_end_fragment_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_music_repeat_prefix_attribute
+\int_const:Nn \c__ulsbs_music_repeat_prefix_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_music_inline_repeat_attribute
+\int_const:Nn \c__ulsbs_music_inline_repeat_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_music_inline_raise_attribute
+\int_const:Nn \c__ulsbs_music_inline_raise_attribute_int {\allocationnumber}
 \newattribute\__ulsbs_music_config_attribute
 \int_const:Nn \c__ulsbs_music_config_attribute_int {\allocationnumber}
 \newattribute\__ulsbs_music_spacing_part_attribute
@@ -99,7 +103,7 @@
   {\int_zero:N \l__ulsbs_music_transpose_int
    \int_zero:N \l__ulsbs_music_layer_int
    \tl_clear:N \l__ulsbs_music_override_source_key_tl
-   \global\ulsbs@rep@level=0\relax\global\ulsbs@prevparlines=0\relax
+    \global\ulsbs@rep@level=0\relax
    \ulBoolReset{g__ulsbs_repeat_cont_prop}\meter{4}{4}}
 \AddToHook{ulsbs/song/begin}{\__ulsbs_music_reset:}
 
@@ -507,10 +511,10 @@
      \rlap{\kern\ulsbs@melodyoffset\copy\ulsbs@melodyprimarybox}
      \rlap{\kern\ulsbs@melodyoffset\copy\ulsbs@melodysecondarybox}
       \rlap{\kern\ulsbs@melodyoffset\copy\ulsbs@melodybeatbox}\kern\l_tmpa_dim}
-      \legacy_if:nT {ulsbs@annotationfullclearance}
-        {\directlua{node.set_attribute(tex.box[\number\l__ulsbs_chord_box],
-          \int_use:N\c__ulsbs_chord_row_attribute_int,
-          \bool_if:NTF\l_tmpb_bool{1}{-1})}}}
+       \legacy_if:nT {ulsbs@annotationvisible}
+         {\directlua{node.set_attribute(tex.box[\number\l__ulsbs_chord_box],
+           \int_use:N\c__ulsbs_chord_row_attribute_int,
+           \bool_if:NTF\l_tmpb_bool{1}{-1})}}}
 
 % Pure visual renderer for pitch tokens #1; circle/tag geometry stays shared.
 \cs_new_protected:Npn \__ulsbs_music_circle:n #1
@@ -561,42 +565,45 @@
 % End any current paragraph before globally pushing repeat nesting and a unique
 % serial. Paragraph hooks use these IDs for continuous bars across wrapped lines.
 \cs_set_protected:Npn \beginrep
-  {\mode_if_horizontal:T {\par}
+   {\mode_if_horizontal:T {\__ulsbs_verse_line:\unpenalty}
    \global\advance\ulsbs@rep@level 1\relax
    \global\advance\ulsbs@rep@serial 1\relax
    \cs_gset:cpx {ulsbs@rep@id@\the\ulsbs@rep@level}{\the\ulsbs@rep@serial}
    \ulBoolSetFalse{g__ulsbs_repeat_cont_prop}{\the\ulsbs@rep@level}\ignorespaces}
 
-% Close a repeat after ending its paragraph; wrapped final lines need an extra
-% bar prefix before the end marker. Unmatched ends warn without underflowing.
+% Close a repeat after ending its paragraph. The stanza pass attaches the marker
+% to the last physical line, so it cannot be split away from the final rule.
 \cs_set_protected:Npn \endrep
-  {\mode_if_horizontal:T {\par}
+  {\mode_if_horizontal:T {\__ulsbs_verse_line:\unpenalty}
    \int_compare:nNnTF {\ulsbs@rep@level}>{0}
-    {\ifnum\ulsbs@prevparlines>1\relax
-        \advance\ulsbs@prevparlines by -1\relax
-        \dim_set:Nn \l_tmpa_dim {\prevdepth}\nointerlineskip
-          % Absorb the positive insets without moving the zero-width overlay ink.
-          \hbox~attr~\c__ulsbs_music_end_fragment_attribute_int~\number\l_tmpa_dim~to~0pt{\kern\l__ulsbs_verse_indent_dim
-           \raisebox{\l_tmpa_dim}[0pt][0pt]{\ulsbs@rep@drawbars}\hss}
-     \fi
-     \ulsbs@rep@endmarker\ulBoolSetFalse{g__ulsbs_repeat_cont_prop}{\the\ulsbs@rep@level}
-     \global\advance\ulsbs@rep@level -1\relax}
+    {\ulsbs@rep@endmarker\ulBoolSetFalse{g__ulsbs_repeat_cont_prop}{\the\ulsbs@rep@level}
+      \global\advance\ulsbs@rep@level -1\relax}
     {\PackageWarning{ulsbs}{Unmatched~\string\endrep:~ignored}}
    \ignorespaces}
 
-% Inline left/right signs always retain lyric dots/bars and authored bar metrics.
-% Only effective chords add chord-row dots at the authored baseline. Pitches and
-% beats own their retained ink clearance; neither requests a second repeat row.
-% This is the sole lrep/rrep owner; it never changes repeat nesting or replays ink.
+% In verses, retain the lyric sign and let the geometry pass resolve rule reach
+% and upper dots from the physical line and stanza policy. Standalone hbox/prose
+% uses keep the authored chord switch and height adjustments.
+\cs_new_protected:Npn \__ulsbs_music_inline_repeat:nn #1#2
+  {\mode_leave_vertical:
+   {\color{ulRepetitionSignColor}
+    \bool_if:NTF \g__ulsbs_stanza_active_bool
+      {\__ulsbs_music_context:\ulsbs@rep@setplainheight
+       \hbox~attr~\c__ulsbs_music_inline_repeat_attribute_int~
+         \number\dimexpr\baselineskip+\ulRepeatBarHeightAdjustmentWithChords\relax
+         attr~\c__ulsbs_music_inline_raise_attribute_int~\number\dimexpr\ulChordLineBaselineSkip\relax
+         {#1:#2}}
+      {\ulsbs@rep@setbarhtbase
+       #1\ifulShowChords\rlap{\raisebox{\ulChordLineBaselineSkip}{:}}\fi :#2}}}
+
+\cs_new_protected:Npn \__ulsbs_music_inline_repeat_rule:
+  {\vrule width1.618034\ulRepeatBarWidth height\ulsbs@tmp@rep@barhtbase depth\ulRepeatBarDepth}
+
 \cs_set_protected:Npn \lrep
-  {{\color{ulRepetitionSignColor}\ulsbs@rep@setbarhtbase
-    \vrule width1.618034\ulRepeatBarWidth height\ulsbs@tmp@rep@barhtbase depth\ulRepeatBarDepth
-    \ifulShowChords\rlap{\raisebox{\ulChordLineBaselineSkip}{:}}\fi :\kern.25ex}}
+  {\__ulsbs_music_inline_repeat:nn {\__ulsbs_music_inline_repeat_rule:}{}\kern.25ex\relax}
 
 \cs_set_protected:Npn \rrep
-  {{\color{ulRepetitionSignColor}\ulsbs@rep@setbarhtbase\kern.25ex
-    \ifulShowChords\rlap{\raisebox{\ulChordLineBaselineSkip}{:}}\fi :
-    \vrule width1.618034\ulRepeatBarWidth height\ulsbs@tmp@rep@barhtbase depth\ulRepeatBarDepth}}
+  {\mode_leave_vertical:\kern.25ex\relax\__ulsbs_music_inline_repeat:nn {}{\__ulsbs_music_inline_repeat_rule:}}
 
 % #1 is repeat-count text. The retained marker follows its line's actual levels.
 \cs_set_protected:Npn \rep #1 {{\color{ulRepetitionSignColor}(\texttimes#1)}}
@@ -606,7 +613,7 @@
    \raise1ex\hbox~attr~\c__ulsbs_music_prep_attribute_int~\number\dimexpr1ex\relax~
      {{\color{ulRepetitionSignColor}#1×:}}}
 % Initial line fragments use the font reference only; the physical-line policy
-% resolves their final levels after breaking. Inline lrep/rrep retain old knobs.
+% resolves their final levels after breaking.
 \cs_new_protected:cpn {ulsbs@rep@setlinebase}
   {\__ulsbs_music_lyric_a:
    \ulsbs@tmp@rep@barhtbase=\directlua{tex.sprint(ulsbs_music.initial_height('repetition',
@@ -701,11 +708,14 @@
     chord_a = \number\csname c__ulsbs_music_chord_a_attribute_int\endcsname,
     lyric_a = \number\csname c__ulsbs_music_lyric_a_attribute_int\endcsname,
     prep = \number\csname c__ulsbs_music_prep_attribute_int\endcsname,
-    end_fragment = \number\csname c__ulsbs_music_end_fragment_attribute_int\endcsname,
+    repeat_prefix = \number\csname c__ulsbs_music_repeat_prefix_attribute_int\endcsname,
+    inline_repeat = \number\csname c__ulsbs_music_inline_repeat_attribute_int\endcsname,
+    inline_raise = \number\csname c__ulsbs_music_inline_raise_attribute_int\endcsname,
     config = \number\csname c__ulsbs_music_config_attribute_int\endcsname,
     measure = \number\csname c__ulsbs_music_measure_attribute_int\endcsname,
     repetition = \ulsbs@rep@attribute,
     repetition_start = \ulsbs@rep@startattribute,
+    repetition_end = \ulsbs@rep@endattribute,
     normal_height = \ulsbs@rep@heightattribute,
     repeat_gap = \ulsbs@rep@gapattribute
   }

@@ -232,15 +232,6 @@
   \hspace{\ulCircledHorizontalPadding}%
 }
 
-% Holds the line count of previous paragraph, updated with para/after hook below
-\newcount\ulsbs@prevparlines\ulsbs@prevparlines=0
-
-% Capture line count at end of each paragraph and save it in \ulsbs@prevparlines
-\AddToHook{para/after}{%
-  \global\ulsbs@prevparlines=\prevgraf\relax%
-}
-
-
 % \ulRepeatTimes{<count>}{<callable>}
 %
 % Invoke <callable> exactly <count> times, appending one braced, 1-based index
