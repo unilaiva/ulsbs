@@ -344,7 +344,7 @@ def generate_scores_staged(ui, job, basename: str, scores: dict[str, Score],
                 if not trusted:
                     detail = (
                         f" (SHA-256 {digest}). Run python3 -m ulsbs.lilypond_score_cache "
-                        f"{shlex.quote(str(asset_directory))} (installed alias: ulsbs-score-cache-assets) "
+                        f"{shlex.quote(str(asset_directory))} "
                         "and review changed files and dependencies before rewriting the trusted-asset "
                         "manifest with --rewrite."
                     ) if verbose else ""

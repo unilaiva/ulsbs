@@ -1855,153 +1855,179 @@ avoid concurrent builds when requiring a reliably cold run.
 
 #### Trusted Cache Assets
 
-Trusted hashes live in the packaged `assets/lilypond-score-cache-assets.json`
-(in the checkout, `src/ulsbs/assets/lilypond-score-cache-assets.json`), not in
-Python's former `_TRUSTED_ASSETS` set. The manifest has `schema_version: 1`, an
-`assets` map from bundled source filenames to SHA-256 digests, and a `variants`
-map from reviewed generated-variant labels to SHA-256 digests. The shipped
-variants include `common-tail-convert-ly-2.26.0` and `midi-disabled`.
-Runtime validates the manifest; a missing or malformed file makes score caching
-ineligible with a nonfatal warning, never automatic approval. Unknown asset
-digests likewise disable caching, not engraving or validation.
+**The score cache and the trusted-asset manifest are two different things.**
+The cache stores already-engraved **alternate** scores so the next build can
+skip that work. The manifest, [`lilypond-score-cache-assets.json`](src/ulsbs/assets/lilypond-score-cache-assets.json),
+records which bundled LilyPond files and generated copies have been reviewed
+for caching. It does not store scores or list supported LilyPond versions.
 
-This trust record is neither a security sandbox nor a LilyPond-version allowlist.
-Toolchain fingerprints automatically invalidate entries when the executable,
-version, data or other keyed toolchain inputs change.
-The two explicitly recognized pipeline mutations are normalized for this trust
-check only; their full modified bytes are still part of the cache fingerprint.
-A LilyPond upgrade alone needs no manifest edit. If an upgrade also requires
-changed assets or different `convert-ly` output, review and explicitly approve
-those exact file contents before expecting cache reuse for them.
+For each alternate score, ULSBS asks two questions:
 
-Use the read-only developer audit command after changing assets or running
-`convert-ly`:
+1. **Can this score be cached?** ULSBS checks the score and its includes. The
+   manifest supplies SHA-256 hashes for reviewed files, including bundled files
+   containing Scheme that the cache would not otherwise accept. An unknown hash
+   can make an affected score ineligible for caching. A missing or malformed
+   manifest disables score caching. Neither case stops engraving or bypasses
+   score validation.
+2. **Do we already have the result for these exact inputs?** ULSBS computes a
+   cache key from the score, its dependencies, layout and transposition inputs,
+   and the LilyPond toolchain. If a keyed input changes, the old entry no longer
+   matches. ULSBS engraves the alternate and caches it if it passes validation
+   and is eligible. There is no manual refresh step.
+
+##### When to do something
+
+| What changed? | What to do |
+| --- | --- |
+| You edited a song, its includes, or its layout. | Nothing for ordinary edits. ULSBS uses a new key when a relevant input changes. Custom Scheme or unresolved includes may make a score uncacheable; don't add song code to the bundled manifest just to get a cache hit. |
+| You upgraded LilyPond or changed fonts, but the bundled files stayed the same. | Nothing. The toolchain is fingerprinted separately. No new manifest entry and no need to clear the cache. |
+| You added, edited, or removed a bundled `.ly` or `.ily` file in `src/ulsbs/assets/ly/`. | Review the change, then rewrite the manifest's `assets` map. No need to clear the cache. |
+| A supported workflow now generates a different asset that should be cacheable. | Review the generated file and record its hash in `variants`. Remove obsolete variants after review. No need to clear the cache. |
+| You want to test from a cold cache or remove corrupt cache entries. | Run the compiler with `--clear-score-cache`. This clears the container cache by default, or the host cache with `--no-container`. It does not edit the trusted-asset manifest. |
+
+##### Why there is a `convert-ly` entry
+
+The normal compiler container uses LilyPond 2.24 and reads the bundled
+`ulsbs-internal-common-tail.ly` as-is. Its hash is already in `assets`.
+Some integration tests run against a newer LilyPond on the development machine.
+They use `convert-ly` on a temporary copy of the tail because LilyPond 2.26
+removed the old `set-global-fonts` API. `common-tail-convert-ly-2.26.0` is the
+hash of that **converted file**, not of the `convert-ly` executable. Normal
+builds don't run `convert-ly`, and there is no separate Docker 2.24 variant to
+record.
+
+The other shipped variant, `midi-disabled`, covers the exact comment-only file
+the pipeline substitutes for the MIDI include when MIDI is disabled. Two small
+changes to copied assets are already recognized without separate entries:
+inserting the standard charango tuning line and appending the score-boundary
+include. The trust check ignores those exact changes, but the cache key still
+includes the complete modified file contents.
+
+##### Check the manifest without changing it
+
+Run these commands from the engine checkout (`ulsbs/`, the directory containing
+`pyproject.toml`):
 
 ```bash
-# Installed command: audit all bundled .ly/.ily assets.
-ulsbs-score-cache-assets
-
-# Audit a copied/mutated job asset directory or an individual converted tail.
-ulsbs-score-cache-assets /path/to/job/ulsbs-assets/ly
-ulsbs-score-cache-assets /path/to/converted-tail.ly
-
-# From the engine checkout, without reinstalling entry points.
+# Check the bundled assets.
 PYTHONPATH=src python3 -m ulsbs.lilypond_score_cache
 
-# Inside a normal compiler shell (PYTHONPATH is already configured).
-python3 -m ulsbs.lilypond_score_cache /path/to/job/ulsbs-assets/ly
+# Check the copies used by one job, or a single generated file.
+PYTHONPATH=src python3 -m ulsbs.lilypond_score_cache /path/to/job/ulsbs-assets/ly
+PYTHONPATH=src python3 -m ulsbs.lilypond_score_cache /path/to/converted-tail.ly
 ```
 
-Each line reports `TRUSTED` or `UNTRUSTED`, the audit SHA-256 digest and the path.
-Directory arguments scan their immediate `.ly` and `.ily` files. The audit
-normalizes only the same two approved pipeline mutations used by cache
-eligibility; its digest can therefore differ from raw `sha256sum` output for
-mutated job copies. The complete modified bytes remain fingerprinted separately.
-Exit status is 0 when all files match audited hashes, 1 for unknown hashes, and
-2 for unreadable/missing inputs or an asset directory without `.ly`/`.ily` files.
-Without `--rewrite`, the command is read-only and never approves hashes or edits
-the manifest. It checks hash membership, not whole-score cache eligibility or
-the safety of arbitrary code. Neither audit nor rewrite executes LilyPond,
-Scheme, or `convert-ly`.
+Inside a normal compiler shell, `PYTHONPATH` is already configured, so use
+`python3 -m ulsbs.lilypond_score_cache` without the prefix.
+The audit is a maintainer tool; it does not have a separate console command.
 
-Before approving changes, inspect the source diffs and all dependencies, ensure
-that executable Scheme has no untracked file/environment inputs. `--rewrite` records the maintainer's
-explicit approval; it does not verify code safety. All 21 bundled `.ly`/`.ily`
-source headers carry maintenance notes with rewrite instructions.
+The audit prints `TRUSTED` or `UNTRUSTED`, the SHA-256 hash, and the path for
+each file. A directory argument checks the `.ly` and `.ily` files immediately
+inside it. The hash may differ from `sha256sum` for job copies because the
+audit ignores the two known changes described above. Exit status is 0 if all
+checked files match known hashes, 1 if any hash is unknown, and 2 if the audit
+could not run (for example, a missing file or an invalid manifest). This is a
+hash check, not a proof that a score is cacheable or that its Scheme is safe.
 
-After that review, regenerate the source records from the ULSBS source root:
+When a job requests score alternatives, it runs this check once on the copied
+assets. An unknown file produces one warning for that job, not one per score or
+key. Verbose output adds the hash and the audit command. Ordinary editions and
+jobs without alternate-score requests don't run the check. Custom song Scheme
+is handled separately by the per-score checks and debug diagnostics.
+
+##### Update the manifest after review
+
+Review the file changes and their dependencies first, especially any Scheme
+that reads files or environment variables not tracked by the cache. Rewriting
+the manifest records approval; it is not a safety check. For changes to the
+bundled sources, run from `ulsbs/`:
 
 ```bash
-# Source-root invocation avoids an entry point that may require installation.
 PYTHONPATH=src python3 -m ulsbs.lilypond_score_cache --rewrite
-
-# Equivalent installed entry point (uses sources bundled next to that tool).
-ulsbs-score-cache-assets --rewrite
 ```
 
-`--rewrite` always reads the bundled sources next to the tool, never positional
-paths. It atomically replaces the entire `assets` map with current source
-records, removing obsolete source records while preserving named `variants`.
-The optional `--manifest FILE` selects the manifest used for audit or the output
-manifest for rewrite, for developer workflows; it does not change which bundled
-sources rewrite approves.
+In the manifest (schema version 1), `assets` lists hashes by bundled filename
+and `variants` lists hashes by generated variant name. `--rewrite` replaces the
+whole `assets` map in one operation, dropping entries for removed files. It
+preserves `variants` unless you explicitly update a named variant. It always
+reads the bundled sources next to the Python module, not a job directory.
+`--manifest FILE` selects a different manifest to read or write without changing
+where the tool finds the bundled sources.
 
-For a generated common-tail variant, convert a copy separately, review its diff
-and dependencies before approval. For example,
-using `convert-ly` 2.26.0 from the ULSBS source root:
+If you changed the common tail and still need to cache the 2.26.0 test fixture,
+regenerate that copy too. With `convert-ly` 2.26.0, write the converted output
+to a separate file, leaving the bundled source untouched:
 
 ```bash
-cp src/ulsbs/assets/ly/ulsbs-internal-common-tail.ly /path/to/converted-tail.ly
-convert-ly -f2.24.4 -e /path/to/converted-tail.ly
-# Only after reviewing the conversion and its dependencies:
-PYTHONPATH=src python3 -m ulsbs.lilypond_score_cache --rewrite --variant common-tail-convert-ly-2.26.0=/path/to/converted-tail.ly
+convert-ly -f2.24.4 src/ulsbs/assets/ly/ulsbs-internal-common-tail.ly > /path/to/converted-tail.ly
 ```
 
-`--variant NAME=FILE` is allowed only with `--rewrite`. It adds or replaces the
-reviewed generated variant by label; all other variants are retained. Manually
-remove obsolete named variants from the manifest after review. A variant rewrite
-also refreshes all bundled source records, so review those sources too. Do not
-approve every reported hash merely to silence a warning.
-After regenerating hashes, run the cache and relevant score regressions,
-audit the sources again, and review the manifest diff before committing.
+Review the converted file and its dependencies, then record it:
 
-When a score-generation job has requests, it audits the job's copied bundled
-asset directory once. Each unknown asset produces one warning with its filename,
-audit hash and maintenance command, not eleven warnings per score or repeated
-occurrence. Audit failures are nonfatal warnings; ordinary source/dependency
-eligibility checks remain authoritative. Known instrument/boundary mutations and
-audited converted tails do not warn. The pipeline's exact comment-only
-MIDI-disabled replacement is recorded as the `midi-disabled` variant. Ordinary
-editions and jobs not generating score alternatives do not run this check.
-Changed custom song Scheme retains
-the existing debug diagnostics rather than being presented as bundled-asset drift.
+```bash
+PYTHONPATH=src python3 -m ulsbs.lilypond_score_cache --rewrite \
+  --variant common-tail-convert-ly-2.26.0=/path/to/converted-tail.ly
+```
 
-The manifest workflow changes trust-record maintenance, not the two recognized
-mutation normalizations or cache fingerprint semantics. `--clear-score-cache`
-and the named home-cache volume retain the behavior described above.
+`--variant NAME=FILE` adds or replaces a single named variant. It requires
+`--rewrite`, so it also refreshes all bundled source hashes. Review both sets
+of changes. Neither audit nor rewrite runs LilyPond, Scheme, or `convert-ly`.
+Before committing, audit the files again, review the manifest diff, and run
+the cache and relevant score regression tests.
 
 #### Cache Validation
 
-Only successful, musically validated alternatives are published. Publication
-uses a private staging directory and atomic rename; concurrent first writers
-cannot expose partial entries. Manifests and every artifact carry content
-hashes, and restored PDFs, logs, crops, scales and musical boundaries are
-revalidated. Files are copied, not hard-linked, into the job. Missing/corrupt or
-unwritable entries are nonfatal cache misses; failed attempts are not cached.
-Originals are still engraved normally. The result manifest reports actual
-`engravings` and `cache_hits` separately from requested candidate `attempts`.
-Warm processing uses a fresh `_lp-source` directory containing the configured
-main input and engine asset aliases, not processed song imports. Both source
-discovery and LilyPond's LaTeX geometry probe exclude the job's generated
-root/content/include search paths. Probe outputs stay inside the job; source
-directories need not be writable. `_lp` is cleared before each invocation.
+Only successful, validated alternatives are saved. ULSBS writes each entry in
+a private staging directory and renames it into place in one operation, so a
+concurrent build cannot read a half-written entry. On a cache hit, ULSBS checks
+the hashes in the entry, then rechecks the log, PDFs, crop boxes, fit limits,
+and musical boundaries. It copies the files into the job so edits to the job
+copy cannot change the cache. If an entry is missing or corrupt, ULSBS tries to
+engrave the alternate normally. If the cache is unwritable, the job can still
+use a freshly engraved result. Failed engraving attempts are not cached.
 
-The private `lilypond_book.py` launcher runs the installed Python lilypond-book
-script with its recursive `do_file` traversal guarded by normalized output
-document path. LilyPond 2.24 and 2.26 otherwise concatenate repeated visits into
-the same generated TeX file. Processing each output once preserves every TeX
-input command, so repeated runtime song occurrences remain independent without
-duplicating the imported file's content. The launcher does not change snippets,
-musical transformations, or installed toolchain files.
+Original scores are still engraved normally. In the score results file,
+`engravings` counts actual engraving runs, `cache_hits` counts reused results,
+and `attempts` counts candidates considered, including retries.
 
-Each successful run writes `<job>.ulsbs-lilypond-systems.json`, a private array
-of job-relative current systems fragments. Score preparation uses this inventory
-instead of mistaking old, removed snippets for current candidates. Retained
-graphics are working files, not cache entries. Warm tests cover source and
-dependency edits, preamble geometry changes, removals, repeated/nested inputs,
-engine aliases, source-tree cleanliness, and fatal original engraving failure.
-Source include paths are supplied to lilypond-book itself as well as its
-engraving subprocess, so external `\lilypondfile` inputs resolve from original
-sources. External snippets use the same content-hashed output naming as inline
-snippets. `--use-source-file-names` is deliberately absent: with the shared
-engraving/output directory, LilyPond does not create the renamed files, leaving
-dangling TeX references. Hashed naming also avoids collisions between different
-external scores sharing a basename. Tests resolve actual graphics through TeX
-and verify independent edits of such external scores.
-Integration tests cover page-spanning multi-system overlays, exact
-boundary replay, original callback preservation, note-name language changes,
-major/minor/chromatic material, source transposition, slash chords, both voices,
-charango tunings, bass clef, tablature retries, and fresh-directory cache reuse.
+##### Original engraving and job files
+
+Even when the alternate-score cache is warm, lilypond-book starts with a fresh
+`_lp-source` directory containing the configured main input and engine asset
+aliases, not previously processed imports. Source discovery and the LaTeX
+geometry probe skip the job's generated root, content, and include search paths
+so old output cannot be mistaken for current input. Probe outputs stay inside
+the job, and `_lp` is cleared before each invocation. Source directories do not
+need to be writable.
+
+Two safeguards keep lilypond-book's output tied to the current sources:
+
+- The private `lilypond_book.py` launcher processes each generated TeX output
+  path once. Without this guard, LilyPond 2.24 and 2.26 can append a document's
+  contents again when they encounter a repeated input. The launcher preserves
+  every TeX input command, so repeated song occurrences stay independent. It
+  doesn't change snippets, transformations, or installed toolchain files.
+- Each successful run writes `<job>.ulsbs-lilypond-systems.json`, a private list
+  of the current systems fragments, relative to the job. Score preparation
+  uses this list rather than scanning for old files that no longer correspond
+  to a score. Graphics left in the job directory are not cache entries.
+
+Both lilypond-book and its engraving subprocess receive the source include
+paths, so `\lilypondfile` references resolve from the original sources.
+External snippets use content-hashed filenames just like inline snippets.
+This avoids collisions when different external scores share a basename.
+`--use-source-file-names` is deliberately omitted: with the shared engraving
+and output directory, LilyPond would leave TeX references to files it did not
+create.
+
+Warm-build regressions check that source edits, dependency edits, preamble
+geometry changes, and removals take effect; that repeated or nested inputs and
+engine aliases resolve correctly; and that source trees stay clean. They also
+check that failure to engrave an original remains fatal. Other integration
+tests cover page-spanning overlays, exact boundary replay, original callbacks,
+note-name languages, major/minor/chromatic material, source transposition,
+slash chords, both voices, charango tunings, bass clef, tablature retries,
+external scores resolved through TeX, and reuse from a fresh job directory.
 
 ### Layer protocol
 

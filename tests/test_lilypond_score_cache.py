@@ -410,7 +410,7 @@ class ScoreCacheTests(unittest.TestCase):
             with self.subTest(source=source):
                 header = "\n".join(source.read_text().splitlines()[:15])
                 self.assertIn("assets/lilypond-score-cache-assets.json", header)
-                self.assertIn("ulsbs-score-cache-assets --rewrite", header)
+                self.assertIn("PYTHONPATH=src python3 -m ulsbs.lilypond_score_cache --rewrite", header)
 
     def test_pipeline_boundary_instrumentation_retains_safe_eligibility(self):
         for source in cache._BUNDLED.iterdir():

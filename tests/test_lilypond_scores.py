@@ -162,7 +162,7 @@ class LilyPondScoreTests(unittest.TestCase):
                     self.assertIn(tail.name, warning)
                     self.assertIn("caching, not engraving", warning)
                     self.assertNotIn(scores.cache._asset_digest(data), warning)
-                    self.assertNotIn("ulsbs-score-cache-assets", warning)
+                    self.assertNotIn("python3 -m ulsbs.lilypond_score_cache", warning)
                     self.assertEqual(self.ui.warning_line.call_args.kwargs,
                                      {"source": "Cache", "category": "assets"})
         self.ui.reset_mock()
@@ -172,7 +172,7 @@ class LilyPondScoreTests(unittest.TestCase):
         self.ui.warning_line.assert_called_once()
         warning = self.ui.warning_line.call_args.args[0]
         self.assertIn(scores.cache._asset_digest(data), warning)
-        self.assertIn("ulsbs-score-cache-assets", warning)
+        self.assertIn("python3 -m ulsbs.lilypond_score_cache", warning)
         self.assertIn("before rewriting the trusted-asset manifest", warning)
 
     def test_asset_audit_errors_are_nonfatal(self):
