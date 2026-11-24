@@ -106,6 +106,17 @@ function M.setup(a)
     node.set_attribute(tex.box[id], a.config, M.capture_config())
   end
 
+  -- Look past the one glue node TeX will remove, unless its width was authored
+  -- with \ulSpace. Check before removal so even an explicit zero is preserved.
+  function M.measure_bar_uses_default_gap()
+    local n = tex.nest.top.tail
+    if n and n.id == glue then
+      if node.has_attribute(n, a.explicit_space) then return false end
+      n = n.prev
+    end
+    return n and n.id == vlist and node.has_attribute(n, a.measure) ~= nil
+  end
+
   -- Mark independent horizontal parts before TeX overlays them. Most parts use
   -- their retained box dimensions. Beats hide their real extents from TeX.
   function M.tag_spacing_part(id, width, top, bottom)
@@ -168,6 +179,7 @@ function M.setup(a)
       node.setglue(space, math.floor(w + .5), math.floor(stretch + .5), math.floor(shrink + .5),
         space.stretch_order, space.shrink_order)
     end
+    node.set_attribute(space, a.explicit_space, 1)
     if mark then node.set_attribute(space, a.spacing, 0) end
   end
 

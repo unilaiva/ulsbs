@@ -3,7 +3,7 @@
 ## Unreleased
 
 - Add completions and snippets for lane-aware annotation spacing and explicit
-  lyric spaces (`\ulSpace` and `\ulSpace*`).
+  lyric spaces (`\ulSpace` and `\ulSpace*`), including `\ulSpace` between bars.
 - Add snippets for selecting songs by stable ID (preferred) or printed number,
   choosing selection numbering, and setting a selected song's printed key.
 

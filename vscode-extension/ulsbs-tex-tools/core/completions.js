@@ -529,7 +529,7 @@ function registerCompletionProvider(vscode, context) {
             {
               name: "ulSpace",
               title: "Explicit lyric space (ULSBS)",
-              doc: "Insert a breakable lyric space. Use `\\ulSpace*` to center a continuation hyphen within a word. An optional multiplier such as `[1.5]` scales the space.",
+              doc: "Insert a breakable lyric space, including between adjacent measure bars. Use `\\ulSpace*` to center a continuation hyphen within a word. An optional multiplier such as `[1.5]` scales the space.",
               snippet: "ulSpace${1|,*|}$0",
               isAllowed: (ctx) => ctx.inVerse || ctx.inTranslation
             },

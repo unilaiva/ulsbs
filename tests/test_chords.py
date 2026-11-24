@@ -232,6 +232,40 @@ Earlier \[<F>Fmaj7]lo\[<E>]ve\[<C>]ly
         self.assertAlmostEqual(bar_one - bar_zero, 5 * 72 / 72.27, delta=.03)
         self.assertAlmostEqual(bar_wide - bar_zero, 7.5 * 72 / 72.27, delta=.03)
 
+    def test_ul_space_overrides_the_consecutive_measure_bar_gap(self):
+        output = self.compile_checked(r"""
+\begin{ulSongs}{}\beginsong{Consecutive measure spacing}
+\beginverse*
+\spaceskip=5pt plus 2pt minus 1pt\relax
+\typeout{DEFAULT-BAR-GAP=\the\dimexpr1.2em\relax}
+\meter{}{}blah blah ||Bare
+blah blah | |Ordinary
+blah blah |\ulSpace[0] |Zero
+blah blah |\ulSpace[1] |Single
+blah blah |\ulSpace[5] |Scaled
+blah blah | \ulSpace[5] |Spaced
+{\ulLaneAwareAnnotationSpacing{false}
+blah blah |\ulSpace[0] |DisabledZero
+blah blah |\ulSpace[1] |DisabledSingle
+blah blah |\ulSpace[5] |DisabledScaled
+}
+{\renewcommand{\ulMeasureBarGap}{8pt}
+blah blah ||Custom
+blah blah |\ulSpace[5]|CustomScaled
+}
+blah blah ||Restored
+\endverse\endsong\end{ulSongs}
+""")
+        zero = self.word_box("Zero")[2]
+        default_gap = float(re.search(r"DEFAULT-BAR-GAP=([\d.]+)pt", output)[1])
+        expected_gaps = {"Bare": default_gap, "Ordinary": default_gap, "Single": 5,
+                         "Scaled": 25, "Spaced": 30, "DisabledZero": 0, "DisabledSingle": 5,
+                         "DisabledScaled": 25, "Custom": 8, "CustomScaled": 25,
+                         "Restored": default_gap}
+        for label, gap in expected_gaps.items():
+            with self.subTest(label=label):
+                self.assertAlmostEqual(self.word_box(label)[2] - zero, gap * 72 / 72.27, delta=.03)
+
     def test_ul_space_marks_only_selected_word_boundaries(self):
         self.compile_checked(r"""
 \begin{ulSongs}{}\beginsong{Boundary geometry}

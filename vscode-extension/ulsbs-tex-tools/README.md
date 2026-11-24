@@ -158,7 +158,7 @@ Use Tab to move between a snippet's editable fields.
 | `begin{ulSongs}` | Book-level song collection with its required index-list argument |
 | `ulMelodyPrimaryPosition`, `ulMelodySecondaryPosition`, `ulMelodyStyleMapping` | Scoped melody-placement/style commands |
 | `ulLaneAwareAnnotationSpacing` | Set `false` to opt out of default lane-aware annotation spacing |
-| `ulSpace`, `ulSpace*` | Insert a breakable lyric space, or center a continuation hyphen within a word; both accept an optional multiplier |
+| `ulSpace`, `ulSpace*` | Insert a breakable lyric space (including between measure bars), or center a continuation hyphen within a word; both accept an optional multiplier |
 | `ulTagFile` | Preamble-only tag filename setter with its required argument |
 | `ulNewIndex`, `ulNewAuthorIndex`, `ulNewTagIndex` | Title/author/tag index declaration with identifier and filename-stem arguments |
 | `ulIndexTagFont` | Tag-index heading font customization |

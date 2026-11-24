@@ -1583,6 +1583,9 @@ still reserves enough room for the chord.
 The second example uses `\ulSpace` just for extra room between the beat mark
 and the bar; it also works with lane-aware spacing off.
 
+Between consecutive measure bars, `|\ulSpace[5]|` uses five normal spaces
+instead of the default bar gap. No literal space is needed next to either bar.
+
 Use `\ulSpace*` for a gap **within** a word. It centers one continuation
 hyphen between the lyric fragments, including any width already reserved by
 an annotation with no lyrics of its own. For example, the second `^` in
@@ -1634,6 +1637,7 @@ not update a previously copied `ulLanguageSectionMarkColor`.
 | `\ulColumnBottomGlue` | Renew; `0pt plus .5\textheight`, finite stretch to absorb unused column space |
 | `\ulChordLineBaselineSkip`, `\ulChordLineLineskipLimit`, `\ulChordLineLineskip` | Renew dimension-valued macros, not length registers; 10pt defaults `10.6pt`, `.5pt`, `.5pt`; 11pt `11pt`, `.8pt`, `.8pt`; 12pt `12pt`, `1pt`, `1pt` |
 | `\ulChordWhitespaceMinimumWidth` | Renew; `.8ex` in lyric font; zero disables the source-whitespace minimum |
+| `\ulMeasureBarGap` | Renew; `1.2em` in the current font, between consecutive measure bars unless `\ulSpace` supplies the gap |
 | `\ulRepeatBarWidth`, `\ulRepeatBarGap` | `\setlength`; `1.4pt`, `2.265pt` |
 | `\ulRepeatBarDepth` | `\setlength`; `.25pt` inline repeat-sign depth, not the verse-left bottom policy |
 | `\ulRepeatBarHeightAdjustmentWithChords`, `\ulRepeatBarHeightAdjustmentNoChords` | `\setlength`; `-2.5pt`, `.5pt`, for standalone repeat signs. The first also sets a minimum height relative to the baseline skip when upper dots are present. |

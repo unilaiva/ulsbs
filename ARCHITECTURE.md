@@ -885,6 +885,12 @@ tested at the glue's minimum width. When ink would protrude at a wrap, a
 discretionary reserves the missing width only on the broken line, while the real
 glue retains its stretch and shrink on an unbroken line.
 
+Unstarred `\ulSpace` also marks its glue as explicit regardless of the lane
+policy. The measure renderer checks that marker before removing and restoring
+the trailing glue around its break penalty. Consecutive bars use the fallback
+`\ulMeasureBarGap` only in the absence of explicit glue; bars themselves still
+stop lane-aware runs.
+
 `\ulSpace*` uses the retained lyric advance and intervening lyric-free
 annotation stacks to center an authored hyphen. It replaces only a synthetic
 hyphen at that boundary and makes the starred discretionary the breakpoint.

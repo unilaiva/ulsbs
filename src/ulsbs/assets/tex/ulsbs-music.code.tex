@@ -626,6 +626,8 @@
 \box_new:N \l__ulsbs_music_meter_bottom_box
 \newattribute\__ulsbs_music_measure_attribute
 \int_const:Nn \c__ulsbs_music_measure_attribute_int {\allocationnumber}
+% Fallback gap for consecutive bars, resolved in the current font.
+\providecommand{\ulMeasureBarGap}{1.2em}
 
 % #1/#2 are pending top/bottom meter tokens, globally retained across inner boxes
 % until the next enabled measurebar consumes and clears them.
@@ -633,23 +635,18 @@
   {\tl_gset:Nn \l__ulsbs_music_meter_top_tl {#1}
    \tl_gset:Nn \l__ulsbs_music_meter_bottom_tl {#2}}
 
-% Render one enabled bar with pending meter. Adjacent bars are recognized from
-% an attribute on the last emitted vlist, not by expanding source or consulting
-% replay state. Preserve surrounding glue; consecutive bar nodes get 1em spacing.
+% Render one enabled bar with pending meter. Preserve surrounding glue except
+% between consecutive bar nodes, where the fallback gap yields to \ulSpace.
 % Measure meter tokens once into retained boxes, then consume them in the vbox.
 \cs_set_protected:Npn \measurebar
   {\legacy_if:nT {ulShowMeasures}
    {
     \ifhmode
-      \skip_set:Nn \l_tmpa_skip {\lastskip}\unskip
-      % Inspect the last typeset node, not source tokens or replay state.
-      \ifnum\directlua{
-        local~n=tex.nest.top.tail;
-        tex.sprint(n~and~n.id==node.id('vlist')~and~node.has_attribute(n,
-           \int_use:N\c__ulsbs_music_measure_attribute_int)~and~1~or~0)
-      }=1\relax
-        \penalty100\hskip1em\relax
-      \else\penalty100\hskip\l_tmpa_skip\relax\fi
+       \skip_set:Nn \l_tmpa_skip {\lastskip}
+       \ifnum\directlua{tex.sprint(ulsbs_music.measure_bar_uses_default_gap()~and~1~or~0)}=1\relax
+         \skip_set:Nn \l_tmpa_skip {\dim_eval:n {\ulMeasureBarGap}}
+       \fi
+       \unskip\penalty100\hskip\l_tmpa_skip\relax
     \fi
     \mode_leave_vertical:
     \hbox_set:Nn \l__ulsbs_music_meter_top_box
@@ -695,6 +692,7 @@
     annotation = \number\csname c__ulsbs_chord_annotation_attribute_int\endcsname,
     row = \number\csname c__ulsbs_chord_row_attribute_int\endcsname,
     spacing = \number\csname c__ulsbs_chord_spacing_attribute_int\endcsname,
+    explicit_space = \number\csname c__ulsbs_chord_explicit_space_attribute_int\endcsname,
     lyric_advance = \number\csname c__ulsbs_chord_lyric_advance_attribute_int\endcsname,
     spacing_part = \number\csname c__ulsbs_music_spacing_part_attribute_int\endcsname,
     spacing_top = \number\csname c__ulsbs_music_spacing_top_attribute_int\endcsname,

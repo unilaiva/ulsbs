@@ -94,7 +94,7 @@
   "Scaled lyric space (ULSBS)": {
     "prefix": "ulSpace",
     "body": "\\ulSpace[${1:1.5}]$0",
-    "description": "Insert a breakable lyric space with an optional multiplier (omit the brackets for one normal space)."
+    "description": "Insert a breakable lyric space, including between adjacent measure bars. Omit the multiplier for one normal space."
   },
 
   "Centered continuation hyphen (ULSBS)": {
