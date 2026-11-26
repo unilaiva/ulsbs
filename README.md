@@ -854,8 +854,8 @@ ULSBS owes a substantial debt to the
 **Kevin W. Hamlen**. We used it for years, first building compiler and publication
 infrastructure around its song-layout and indexing facilities, then incrementally
 patching and extending it for our songbooks and new features. That work eventually
-led to a ULSBS renderer and in-process index generator, allowing us to let
-go of the upstream runtime without replacing authors' song notation.
+led to a ULSBS renderer and in-process index generator that replaced the upstream
+runtime. For supported authoring syntax, see [Writing Songbooks](WRITING_SONGBOOKS.md).
 
 The original `songs` package is copyright (C) 2018 Kevin W. Hamlen and is licensed
 under **GNU GPL version 2 or later**, as stated in its

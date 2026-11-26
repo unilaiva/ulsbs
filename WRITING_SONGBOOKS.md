@@ -1876,11 +1876,10 @@ that is still the normal compiler workflow.
 
 Direct LuaLaTeX invocation is useful for isolating typesetting problems or checking
 the engine in a small standalone fixture. A book containing lyrics, chords and
-melody hints can compile this way without Python, LilyPond or an upstream `songs`
-install, but raw LilyPond environments require the compiler's preprocessing.
-Keep all companion ULSBS assets together, not just `ulsbs.sty`. For these advanced
-checks, from the project root with the engine checked out in `ulsbs/`, a POSIX-shell
-setup is:
+melody hints can compile this way without Python or LilyPond, but raw LilyPond
+environments require the compiler's preprocessing. Keep all companion ULSBS assets
+together, not just `ulsbs.sty`. For these advanced checks, from the project root
+with the engine checked out in `ulsbs/`, a POSIX-shell setup is:
 
 ```sh
 export TEXINPUTS="$(pwd)/ulsbs/src/ulsbs/assets/tex//:$(pwd)/ulsbs/src/ulsbs/assets/img//:$(pwd)/include//:${TEXINPUTS:-}"
