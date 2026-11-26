@@ -955,12 +955,21 @@ expressions in the configured lyric font and cache the resulting glue in capital
 units. Configure them after font customization; presets and later author calls
 select policy. Setters validate all arguments before changing state and respect
 grouping. Read-only `\ulVerseSpacingScale{baseline|separation}{natural|stretch|shrink}`
-supports relative settings. `\ulVerseMinimumGap{length}` supplies minimum ink clearance
-and an additional inter-verse boundary gap, not a forced baseline. Implicit final
-lines finish before stanza scope restores, so they keep their captured policy.
+supports relative settings. After fitting the line boxes, lyric-line glue is the
+nominal baseline minus the preceding depth and next height, clamped to the
+larger of `\ulVerseMinimumGap{length}` and the enabled
+`\ulVerseBaselineToTopGap{length}` minus preceding depth. This replaces the
+ordinary `\lineskip` fallback for lyric verses; finite shrink stops at the same
+floor. The ink gap also supplies an additional inter-verse boundary gap.
+Implicit final lines finish before stanza scope restores, so they keep their
+captured policy.
 
 Translation stanza entry restores `\normalbaselineskip` before stanza hooks;
-its small-font selection and `\ulTranslationFont` then select final font leading.
+its small-font selection and `\ulTranslationFont` then select leading, which
+`\ulTranslationBaselineMultiplier` scales without stretch or shrink when different
+from `1`. The default leaves the hook's leading untouched, including custom
+stretch and shrink. Translation line fitting still uses the font-leading fallback
+and the verse ink-gap floor.
 Explanation, passage and starred passage restore normal leading after selecting
 their font, then apply their existing multipliers without baseline stretch/shrink.
 The alternate passage style is `\begin{passage}*[LANG]{title} ... \end{passage}`.

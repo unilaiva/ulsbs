@@ -141,6 +141,7 @@
      \ulVerseFont\relax\__ulsbs_music_lyric_metrics:
      % Translations retain stanza semantics, but use font leading, not lyric policy.
      \ifulsbs@intranslation
+       \cs_set:cpn {ulsbs@verse@fontleading}{1}
        \skip_set_eq:NN \baselineskip \normalbaselineskip
      \else\__ulsbs_verse_baseline:\fi
      \ulVerseJustify

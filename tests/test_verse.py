@@ -231,6 +231,88 @@ class VerseTests(unittest.TestCase):
 """, preamble), label="verse-api-scope")
         self.assertIn("VERSE-API-SCOPE-PASS", output)
 
+    def test_baseline_to_top_gap_and_ink_gap_control_distinct_floors(self):
+        preamble = r"""
+\ulSongColumns{1}\ulSongPosition{0}
+\ulVerseBaselineToTopGap{3pt}\ulVerseMinimumGap{1pt}
+\directlua{
+  local finish = ulsbs_music.finish_verse
+  local hlist, glue = node.id('hlist'), node.id('glue')
+  local glue_types = node.subtypes('glue')
+  ulsbs_music.finish_verse = function(id)
+    finish(id)
+    local upper, gap, checked
+    for n in node.traverse(tex.box[id].list) do
+      if n.id == glue and (glue_types[n.subtype] == 'baselineskip' or glue_types[n.subtype] == 'lineskip') then
+        gap = n
+      elseif n.id == hlist then
+        local data = (node.getproperty(n) or {}).ulsbs_music
+        if data then
+          if upper then
+            local depth = tex.sp(expected_depth..'pt')
+            local floor = math.max(tex.sp('1pt'), tex.sp(expected_topgap..'pt')-depth)
+            assert(upper.depth == depth, 'fixture upper depth')
+            assert(data.level == expected_level, 'fixture lower annotation level')
+            local natural = math.max(floor, data.baseline.width-depth-n.height)
+            assert(gap and gap.width == natural and glue_types[gap.subtype] == 'baselineskip', 'natural line glue')
+            assert(gap.stretch == data.baseline.stretch, 'preserve baseline stretch')
+            assert(gap.shrink == math.min(data.baseline.shrink, natural-floor), 'shrink respects both floors')
+            assert(upper.depth+gap.width == tex.sp(expected_clearance..'pt') or expected_case == 'nominal',
+              'baseline-to-top clearance')
+            if expected_case == 'nominal' then
+              assert(gap.width+depth+n.height == data.baseline.width and gap.shrink > 0,
+                'nominal baseline has room to shrink')
+            end
+            checked = true
+          end
+          upper = n
+        end
+      end
+    end
+    assert(checked, 'two retained lyric lines')
+    texio.write_nl('VERSE-TOP-GAP-PASS')
+  end
+}
+"""
+        body = r"""\begin{ulSongs}{}\beginsong{Baseline clearance}[key={C}]
+\directlua{expected_depth=0;expected_topgap=3;expected_level=1;expected_clearance=3}
+\beginverse*
+AAA
+\[C]AAA
+\endverse
+\directlua{expected_depth=2}
+\beginverse*
+AAA\rule[-2pt]{1pt}{2pt}
+\[C]AAA
+\endverse
+\directlua{expected_depth=4;expected_clearance=5}
+\beginverse*
+AAA\rule[-4pt]{1pt}{4pt}
+\[C]AAA
+\endverse
+{\ulVerseBaselineToTopGap{5pt}\ulVerseBaseline{1.618034}{.25}{.5}
+\directlua{expected_depth=0;expected_topgap=5;expected_clearance=5}
+\beginverse*
+AAA
+\[C]AAA\endverse}
+{\ulVerseBaselineToTopGap{0pt}\ulVerseBaseline{0}{0}{0}
+\directlua{expected_topgap=0;expected_clearance=1}
+\beginverse*
+AAA
+\[C]AAA\endverse}
+\directlua{expected_topgap=3;expected_clearance=3}
+\beginverse*
+AAA
+\[C]AAA\endverse
+{\ulVerseBaseline{1.618034}{.25}{.5}
+\directlua{expected_level=0;expected_case='nominal'}
+\beginverse*
+AAA
+AAA\endverse}
+\endsong\end{ulSongs}"""
+        output = self.compile_source(document(body, preamble), label="baseline-to-top-gap")
+        self.assertEqual(output.count("VERSE-TOP-GAP-PASS"), 7)
+
     def test_scalar_verse_spacing_calltime_font_and_relative_getter_expressions(self):
         preamble = r"""
 \renewcommand\ulLyricFont{\sffamily\fontsize{19}{23}\selectfont}
@@ -319,8 +401,9 @@ class VerseTests(unittest.TestCase):
                     values = ["2", ".5", ".25"]
                     values[field] = value
                     invalid.append("\\" + command + "".join("{" + item + "}" for item in values))
-        invalid.extend(r"\ulVerseMinimumGap{" + value + "}"
-                       for value in ("-1pt", "2", "1mu", "nan", "20000pt", "1073741824sp", "1e2pt", ""))
+        for command in ("ulVerseMinimumGap", "ulVerseBaselineToTopGap"):
+            invalid.extend("\\" + command + "{" + value + "}"
+                           for value in ("-1pt", "2", "1mu", "nan", "20000pt", "1073741824sp", "1e2pt", ""))
         preamble = r"""
 \ulVerseBaseline{2}{.5}{.25}\ulVerseSeparation{3}{.75}{.125}
 \newcount\VerseErrors
@@ -334,7 +417,8 @@ class VerseTests(unittest.TestCase):
    verse_config[name]=token.get_macro(name)
   end
  end
- verse_config['ulsbs@verse@minimumgap']=token.get_macro('ulsbs@verse@minimumgap')
+  verse_config['ulsbs@verse@minimumgap']=token.get_macro('ulsbs@verse@minimumgap')
+  verse_config['ulsbs@verse@baselinetotopgap']=token.get_macro('ulsbs@verse@baselinetotopgap')
  verse_skips={}
  for _,name in ipairs({'l__ulsbs_verse_nominal_skip','ulsbs@verse@separation'}) do
   local s=tex.skip[name]

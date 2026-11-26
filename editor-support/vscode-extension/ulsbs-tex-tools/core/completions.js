@@ -454,7 +454,7 @@ function registerCompletionProvider(vscode, context) {
           /** @type {{name:string, snippet: string, isAllowed: (ctx:any)=>boolean, title: string, doc: string}[]} */
           const snippetMacros = [
             ...["ulLocalShow", "ulIfVariant", "ulIfMusical", "ulVerseBaseline",
-              "ulVerseSeparation", "ulVerseMinimumGap", "ulVerseSpacingScale"].map((name) => {
+              "ulVerseSeparation", "ulVerseBaselineToTopGap", "ulVerseMinimumGap", "ulVerseSpacingScale"].map((name) => {
               const snippet = Object.values(staticSnippets)
                 .find((entry) => entry.prefix === name);
               return {

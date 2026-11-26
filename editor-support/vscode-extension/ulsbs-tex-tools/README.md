@@ -208,7 +208,8 @@ Use Tab to move between a snippet's editable fields.
 | `ulIfVariant` | Immutable variant-identity test with yes/no branches |
 | `ulIfMusical` | Effective musical-visibility test with yes/no branches |
 | `ulVerseBaseline`, `ulVerseSeparation` | Natural/stretch/shrink spacing scalars, applied after font setup |
-| `ulVerseMinimumGap` | Minimum lyric-line clearance as a dimension |
+| `ulVerseBaselineToTopGap` | Minimum clearance from the preceding lyric baseline to the next line's top (default `3.5pt`) |
+| `ulVerseMinimumGap` | Minimum edge-to-edge lyric-line clearance (default `1pt`) |
 | `ulVerseSpacingScale` | Read a stored spacing scalar for relative calculations |
 
 Place `variants={default,lyric,charango,bassclef}` literally in the main document's

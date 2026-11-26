@@ -18,6 +18,7 @@
   lyric spaces (`\ulSpace` and `\ulSpace*`), including `\ulSpace` between bars.
 - Add snippets for selecting songs by stable ID (preferred) or printed number,
   choosing selection numbering, and setting a selected song's printed key.
+- Add completion and a snippet for `\ulVerseBaselineToTopGap`.
 
 ## v0.3.0 - 2026-11-18
 

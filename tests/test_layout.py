@@ -944,6 +944,7 @@ Translated second line.
 \renewcommand\ulPassageFont{\fontsize{12}{18}\selectfont}
 \renewcommand\ulAltPassageFont{\fontsize{12}{18}\selectfont}
 \renewcommand\ulTranslationFont{\fontsize{12}{18}\selectfont}
+\renewcommand\ulTranslationBaselineMultiplier{1.125}
 \begin{explanation}[EN]
 \CheckFontBaseline{custom-explanation}{1.25}Custom explanation.
 \end{explanation}
@@ -954,12 +955,22 @@ Translated second line.
 \CheckFontBaseline{custom-starred}{1.5}Custom starred passage.
 \end{passage}
 \begin{translation}[EN]
-\CheckFontBaseline{custom-translation}{1}Custom translation.
+\CheckFontBaseline{custom-translation}{1.125}Custom translation.
+Second custom translation line.
 \end{translation}
 }%
 {\renewcommand\ulVerseFont{\small}% Same size as translation's built-in selection.
 \begin{translation}
 \CheckFontBaseline{same-size-translation}{1}Same size translation.
+\end{translation}
+}%
+{\renewcommand\ulTranslationFont{\baselineskip=18pt plus 2pt minus 1pt\relax}
+\begin{translation}
+\ifdim\baselineskip=18pt\else\errmessage{Custom translation leading changed}\fi
+\ifdim\gluestretch\baselineskip=2pt\else\errmessage{Custom translation stretch lost}\fi
+\ifdim\glueshrink\baselineskip=1pt\else\errmessage{Custom translation shrink lost}\fi
+First elastic translation line.
+Second elastic translation line.
 \end{translation}
 }%
 \ifnum\BaselineInstalls=\InstallsBeforeBlocks\relax\else
@@ -977,7 +988,7 @@ Translated second line.
                         + document(body, preamble + rf"\ulVerseBaseline{{{scale}}}{{.2}}{{.1}}"),
                         label=f"font-baselines-{multikey}-{scale}")
                     rows = re.findall(r"FONT-BASELINE:([^=\r\n]+)=([^\r\n]+)", output)
-                    self.assertEqual(len(rows), 12, rows)
+                    self.assertEqual(len(rows), 13, rows)
                     baselines.append(rows)
         self.assertTrue(all(rows == baselines[0] for rows in baselines[1:]))
 

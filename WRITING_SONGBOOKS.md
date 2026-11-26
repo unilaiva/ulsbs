@@ -1454,7 +1454,7 @@ language lists are comma-separated uppercase codes, empty by default.
 | `\ulPassageFont`, `\ulAltPassageFont` | Lyric font; alternate adds normal-size sans-serif italics |
 | `\ulPassageTitleFont` | Delegates to `\ulSongTitleFont` |
 | `\ulExplanationFont`, `\ulExplanationTitleFont` | Serif `\footnotesize`; bold title declarations |
-| `\ulPassageBaselineMultiplier`, `\ulExplanationBaselineMultiplier` | `1`; multiply the selected prose font's normal leading |
+| `\ulTranslationBaselineMultiplier`, `\ulPassageBaselineMultiplier`, `\ulExplanationBaselineMultiplier` | `1`; multiply the selected prose font's leading without changing its size |
 | `\ulPassageLanguagesToSkip`, `\ulExplanationLanguagesToSkip` | Hide entire blocks with listed language codes, without changing visibility permissions |
 | `\ulPassageOmitLangCodes`, `\ulExplanationOmitLangCodes` | Hide only the language-code labels, not the text |
 | `\ulIndexHeadingFont` | Sans-serif bold `\LARGE` alphabet panels |
@@ -1687,46 +1687,51 @@ grid in agreement. The symbol/tag hooks are for appearance and are not run durin
 measurement. An annotation row shares its required baseline across a physical line,
 so a deep chord label does not leave just one melody hint floating above its neighbors.
 
-`\ulVerseBaseline{natural}{stretch}{shrink}` sets nominal lyric-line baseline
-glue; `\ulVerseSeparation{natural}{stretch}{shrink}` sets inter-verse glue.
-All three arguments are finite, nonnegative scalars multiplying the configured
-lyric font's capital-`A` height. The baseline is the **total nominal baseline
-distance**, not an amount added to the font size. Actual ink clearance and minimum
-gaps can require more space. `\ulVerseMinimumGap{dimension}` sets the minimum
-clearance between lyric lines.
+**Lyric verses.** Choose the setting that controls the space you want to change:
 
-Call the scalar setters after font customization: they resolve dimensions when
-called and do not automatically rescale after later font changes. Settings obey
-TeX grouping; keep a local override's group around the affected verses.
+| Default | What it controls |
+|---|---|
+| `\ulVerseBaseline{1.618034}{0}{0}` | Nominal baseline-to-baseline distance within a verse, not extra space added to the font size. |
+| `\ulVerseBaselineToTopGap{3.5pt}` | Minimum from the preceding lyric baseline to the next line's top, including annotations and bars. Use `0pt` to turn off this floor. |
+| `\ulVerseMinimumGap{1pt}` | Minimum from the bottom of one line to the top of the next. A deep descender pushes the next line down only when needed to maintain this gap. Also adds a gap at verse boundaries. |
+| `\ulVerseSeparation{1.618034}{0}{.4}` | Extra space between verses, not between lines. |
 
-The standard baseline is `\ulVerseBaseline{1.618034}{0}{0}`,
-`\ulVerseSeparation{1.618034}{0}{.4}` and `\ulVerseMinimumGap{1.25pt}`.
-These scalars are font-relative design choices, not fixed point dimensions.
-
-These scalar settings control lyric verses, not prose line leading. Translations
-use their selected font's normal line spacing (`\small` before
-`\ulTranslationFont`). Passages and explanations likewise use their selected
-font's normal line spacing, multiplied by `\ulPassageBaselineMultiplier` or
-`\ulExplanationBaselineMultiplier` (both default to `1`). For example:
-
-```tex
-\renewcommand{\ulTranslationFont}{\small\itshape}
-\renewcommand{\ulExplanationFont}{\rmfamily\small}
-\renewcommand{\ulExplanationBaselineMultiplier}{1.1}
-```
-
-Illustrative overrides only, **not documented defaults**, after font setup:
-
-```tex
-\ulVerseBaseline{1.8}{0}{0}
-\ulVerseSeparation{1.7}{0}{.2}
-\ulVerseMinimumGap{1pt}
-```
+The three arguments to `\ulVerseBaseline` and `\ulVerseSeparation` are natural
+size, stretch, and shrink, in multiples of the lyric font's capital-`A` height.
+Set the lyric font first: changing it later does not recalculate those lengths.
+The two line-clearance limits can increase the nominal spacing and limit shrink.
+For one song, put overrides after `\beginsong` and before the affected verses;
+`\endsong` restores the previous settings.
 
 For advanced relative calculations, the read-only, expandable
 `\ulVerseSpacingScale{baseline|separation}{natural|stretch|shrink}` returns the
-stored scalar (choose one key from each pair of braces). Use it in numeric
-expressions with these setters rather than accessing private registers.
+stored scalar (choose one key from each pair of braces).
+
+**Translations and other prose.** Choose the font and spacing before the block:
+
+| Block | Font hook | Leading multiplier |
+|---|---|---|
+| `translation` | `\ulTranslationFont` (applied after `\small`) | `\ulTranslationBaselineMultiplier` |
+| `passage` / `\begin{passage}*` | `\ulPassageFont` / `\ulAltPassageFont` | `\ulPassageBaselineMultiplier` |
+| `explanation` | `\ulExplanationFont` | `\ulExplanationBaselineMultiplier` |
+
+Multipliers default to `1`. They scale the chosen leading without changing the
+font size. Use the font hook rather than a size command in the body: a later
+size change resets LaTeX's leading without reapplying the multiplier. Only
+translations also enforce `\ulVerseMinimumGap`; none of these blocks use
+`\ulVerseBaseline` or `\ulVerseBaselineToTopGap`.
+
+To change one translation, group the overrides together with the block:
+
+```tex
+\begingroup
+\renewcommand{\ulTranslationFont}{\footnotesize}
+\renewcommand{\ulTranslationBaselineMultiplier}{1.1}
+\begin{translation}[EN]
+Translated text goes here.
+\end{translation}
+\endgroup
+```
 
 `\ulMeasureBarTop{occupied logical level}{reference level}{scale}` and
 `\ulRepeatBarTop{occupied logical level}{reference level}{scale}` independently
@@ -1757,7 +1762,7 @@ scoped too.
 For both measure and verse-left repeat bars, the baseline top policies are
 `{0}{0}{1.3}`, `{1}{1}{1.3}`, `{2}{2}{.85}` and `{3}{2}{.85}` for occupied
 levels 0 through 3. The verse annotation minimum is enabled, the repeat bottom
-scale is `.025`, and the repeat minimum gap is `3pt`. Minimum-gap setters resolve
+scale is `.025`, and the repeat minimum gap is `4pt`. Minimum-gap setters resolve
 `em`/`ex` at the call site; they do not track subsequent font changes.
 
 Illustrative overrides only, **not documented defaults**:

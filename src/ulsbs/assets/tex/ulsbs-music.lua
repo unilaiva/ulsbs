@@ -82,7 +82,10 @@ function M.setup(a)
     config.bottom = tonumber(token.get_macro('ulsbs@repeat@bottomscale'))
     config.gap = tonumber(token.get_macro('ulsbs@repeat@minimumgap'))
     config.linegap = tonumber(token.get_macro('ulsbs@verse@minimumgap'))
+    config.font_leading = token.get_macro('ulsbs@verse@fontleading') == '1'
+    config.topgap = tonumber(token.get_macro('ulsbs@verse@baselinetotopgap'))
     key[#key + 1] = tostring(config.minimum) .. ':' .. config.bottom .. ':' .. config.gap .. ':' .. config.linegap
+    key[#key + 1] = tostring(config.font_leading) .. ':' .. config.topgap
     key = table.concat(key, '/')
     local id = config_ids[key]
     if not id then id = #configs + 1; configs[id] = config; config_ids[key] = id end
@@ -802,13 +805,21 @@ function M.setup(a)
         if data then
           adjust_line(n, minimum, true)
           if pending and previous_depth then
-            local minimum_gap = configuration(n).linegap
+            local config = configuration(n)
+            local minimum_gap = config.linegap
             local width = data.baseline.width - previous_depth - n.height
             local spec = data.baseline
             pending.subtype = glue_types.baselineskip
-            if width < data.limit then spec, width = data.lineskip, data.lineskip.width; pending.subtype = glue_types.lineskip end
-            -- Preserve stretch but cap finite shrink at the minimum separation;
-            -- infinite-order shrink must not collapse the protected ink gap.
+            if config.font_leading then
+              if width < data.limit then
+                spec, width = data.lineskip, data.lineskip.width
+                pending.subtype = glue_types.lineskip
+              end
+            elseif config.topgap > 0 then
+              -- Express the baseline-to-top floor as edge-to-edge glue.
+              minimum_gap = math.max(minimum_gap, config.topgap - previous_depth)
+            end
+            -- Keep finite shrink above both clearance floors.
             width = math.max(width, minimum_gap)
             pending.width, pending.stretch, pending.stretch_order = width, spec.stretch, spec.stretch_order
             pending.shrink = spec.shrink_order == 0 and math.min(spec.shrink, width - minimum_gap) or 0

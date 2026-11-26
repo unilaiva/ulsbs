@@ -292,6 +292,8 @@
 % Translation font default: define before loading or renew afterward. It is
 % applied inside each translation block, after the built-in \small selection.
 \providecommand{\ulTranslationFont}{}
+% Numeric multiplier applied to the leading selected by the translation font.
+\providecommand{\ulTranslationBaselineMultiplier}{1}
 
 \newif\ifulsbs@intranslation\ulsbs@intranslationfalse%
 
@@ -331,6 +333,10 @@
   \ulsbs@blockstart%
   \chordsoff%
   \small\ulTranslationFont%
+  % Keep any elastic leading installed by an existing font hook at factor 1.
+  \ifdim\ulTranslationBaselineMultiplier pt=1pt\relax\else
+    \baselineskip=\ulTranslationBaselineMultiplier\baselineskip plus 0pt minus 0pt\relax
+  \fi%
 }{% post env
   \ifulsbs@hide% End hidden section (\endcomment from verbatim package):
     \expandafter\endcomment%

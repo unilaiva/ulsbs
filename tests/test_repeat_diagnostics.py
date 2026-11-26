@@ -195,6 +195,7 @@ end
                 # presentation defaults are intentionally free to be retuned.
                 preamble = (r"\ulSongColumns{1}\ulSongPosition{0}"
                             r"\ulVerseMinimumGap{1pt}\ulVerseBaseline{0}{0}{0}"
+                            r"\ulVerseBaselineToTopGap{0pt}"
                             r"\ulMeasureBarTop{1}{1}{2}\ulRepeatBarTop{1}{1}{2}"
                             + rf"\ulRepeatBarMinimumGap{{{gap}pt}}\directlua{{requested_gap=tex.sp('{gap}pt')}}")
                 source = capture + r"\def\ulPdfTranspositionLayers{" + str(layers).lower() + "}"

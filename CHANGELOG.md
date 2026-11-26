@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add `\ulTranslationBaselineMultiplier` (default `1`) to adjust translation
+  leading without changing font size, like the passage and explanation settings.
+- Add `\ulVerseBaselineToTopGap` (default `3.5pt`) so descenders only push the
+  following lyric line down when the edge-to-edge minimum requires it.
+  `\ulVerseMinimumGap` now defaults to `1pt`; nominal lyric leading is unchanged.
+- Increase `\ulRepeatBarMinimumGap` to `4pt` between separate, completed repeat bars.
 - Add experimental TeXstudio completion and embedded Build & View support in a
   dedicated profile.
 - Publish SyncTeX editor navigation data by default for ordinary PDFs in quick

@@ -1340,7 +1340,8 @@ SECOND
  texio.write_nl('SCALAR-SPACING-PASS')
 }}
 """
-        body = r"""\begin{ulSongs}{}\beginsong{Spacing policy}[key={C}]
+        body = r"""\ulVerseBaselineToTopGap{0pt}
+\begin{ulSongs}{}\beginsong{Spacing policy}[key={C}]
 {\ulVerseMinimumGap{1pt}\ulVerseBaseline{0}{0}{0}
 \directlua{spacing_gap=1;spacing_nominal=nil}
 \setbox\SpacingProbe=\vbox{

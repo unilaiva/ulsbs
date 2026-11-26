@@ -151,7 +151,7 @@ const ifMusical = Object.values(staticSnippets).find((snippet) => snippet.prefix
 assert.match(ifMusical.description, /effective chords OR inline pitches OR whole scores/i);
 assert.match(ifMusical.description, /excludes beats and measures/i);
 for (const name of ["ulLocalShow", "ulIfVariant", "ulIfMusical", "ulVerseBaseline",
-  "ulVerseSeparation", "ulVerseMinimumGap", "ulVerseSpacingScale"]) {
+  "ulVerseSeparation", "ulVerseBaselineToTopGap", "ulVerseMinimumGap", "ulVerseSpacingScale"]) {
   const snippet = Object.values(staticSnippets).find((entry) => entry.prefix === name);
   const item = completions(`\\beginsong{Test}\n\\${name}`).find((entry) => entry.label.label === name);
   assert.equal(item?.insertText.value, snippet.body.slice(1), name);

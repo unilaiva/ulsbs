@@ -9,10 +9,15 @@
     "body": "\\ulVerseSeparation{${1:1.7}}{${2:0}}{${3:.2}}$0",
     "description": "Set inter-verse glue using nonnegative capital-A height scalars (natural, stretch, shrink). Apply after font setup; values are illustrative, not defaults."
   },
+  "Verse baseline-to-top clearance (ULSBS)": {
+    "prefix": "ulVerseBaselineToTopGap",
+    "body": "\\ulVerseBaselineToTopGap{${1:3.5pt}}$0",
+    "description": "Set the minimum clearance from the preceding lyric baseline to the next line's top (default 3.5pt)."
+  },
   "Minimum lyric-line clearance (ULSBS)": {
     "prefix": "ulVerseMinimumGap",
     "body": "\\ulVerseMinimumGap{${1:1pt}}$0",
-    "description": "Set minimum clearance between lyric lines in the current scope. The dimension is illustrative, not a default."
+    "description": "Set minimum edge-to-edge clearance between lyric lines in the current scope (default 1pt)."
   },
   "Read verse spacing scalar (ULSBS)": {
     "prefix": "ulVerseSpacingScale",

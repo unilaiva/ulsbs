@@ -156,6 +156,8 @@
   {\__ulsbs_verse_spacing:nnnn {separation}{#1}{#2}{#3}}
 \NewDocumentCommand \ulVerseMinimumGap {m}
   {\__ulsbs_bar_dimension:nnn {#1}{ulsbs@verse@minimumgap}{verse}}
+\NewDocumentCommand \ulVerseBaselineToTopGap {m}
+  {\__ulsbs_bar_dimension:nnn {#1}{ulsbs@verse@baselinetotopgap}{verse~baseline-to-top}}
 \msg_new:nnn {ulsbs}{verse-spacing-key}
   {Invalid~verse~spacing~key~'#1'.~Use~baseline~or~separation,~then~natural,~stretch~or~shrink.}
 \cs_new:Npn \__ulsbs_verse_spacing_scale:nn #1#2
@@ -179,8 +181,9 @@
 \ulRepeatBarTop{3}{2}{.85}
 \ulUseVerseAnnotationMinimum{true}
 \ulRepeatBarBottomScale{.025}
-\ulRepeatBarMinimumGap{3pt}
+\ulRepeatBarMinimumGap{4pt}
 \ulVerseBaseline{1.618034}{0}{0}
 \ulVerseSeparation{1.618034}{0}{.4}
-\ulVerseMinimumGap{1.25pt}
+\ulVerseMinimumGap{1pt}
+\ulVerseBaselineToTopGap{3.5pt}
 \ExplSyntaxOff
