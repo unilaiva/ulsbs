@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.4.0 - 2026-11-26
+
 - Remove the `ulsbs-migrate-melody-syntax` alias; `ulsbs-migrate-syntax-v1`
   still works unchanged.
 - Add `\ulTranslationBaselineMultiplier` (default `1`) to adjust translation

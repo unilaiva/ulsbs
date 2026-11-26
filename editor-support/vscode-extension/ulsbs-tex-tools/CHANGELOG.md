@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.4.0 - 2026-11-26
+
 - Require VS Code 1.138.0 or newer.
 - Preview ordinary songbook PDFs beside the source, with two-way SyncTeX.
   Use the keyboard shortcut to locate the current source line in the PDF.

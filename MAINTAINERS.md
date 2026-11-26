@@ -113,7 +113,7 @@ Run these commands from the ULSBS repository root on `main`.
 1. Set release variables and start from an up-to-date, clean branch:
 
    ```sh
-   VERSION=0.3.0
+   VERSION=0.4.0
    TAG="v$VERSION"
    DATE="$(date +%F)"
 

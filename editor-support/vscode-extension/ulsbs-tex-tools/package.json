@@ -2,7 +2,7 @@
   "name": "ulsbs-tex-tools",
   "displayName": "ULSBS TeX Tools",
   "description": "Custom LaTeX support for ULSBS song macros",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "ulsbs",
   "license": "GPL-3.0-or-later",
   "author": {
@@ -145,9 +145,18 @@
     ],
     "menus": {
       "commandPalette": [
-        { "command": "ulsbsTexTools.openPdfPreview", "when": "ulsbsTexTools.enabled" },
-        { "command": "ulsbsTexTools.compilePdfPreview", "when": "ulsbsTexTools.enabled" },
-        { "command": "ulsbsTexTools.syncToPdf", "when": "ulsbsTexTools.enabled" }
+        {
+          "command": "ulsbsTexTools.openPdfPreview",
+          "when": "ulsbsTexTools.enabled"
+        },
+        {
+          "command": "ulsbsTexTools.compilePdfPreview",
+          "when": "ulsbsTexTools.enabled"
+        },
+        {
+          "command": "ulsbsTexTools.syncToPdf",
+          "when": "ulsbsTexTools.enabled"
+        }
       ],
       "editor/context": [
         {
