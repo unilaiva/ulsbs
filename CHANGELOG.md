@@ -3,9 +3,11 @@
 ## Unreleased
 
 - Add experimental TeXstudio completion and embedded Build & View support in a
-  dedicated profile. The optional compiler flag `--synctex` publishes editor
-  navigation data for ordinary PDFs, mapping preprocessed TeX lines back to the
-  source where possible.
+  dedicated profile.
+- Publish SyncTeX editor navigation data by default for ordinary PDFs in quick
+  and regular builds, mapping preprocessed TeX lines back to the source where
+  possible. Set `synctex = false` to opt out, or override config for one build
+  with `--synctex` or `--no-synctex`.
 - Organize the bundled VS Code extension and TeXstudio resources under `editor-support/`.
 - Add optional `require-multikey-for-pdf-deploy` and `require-json-for-pdf-deploy`
   settings to skip incomplete songbook editions during deployment, including

@@ -3,7 +3,7 @@
 
 """Map SyncTeX positions from generated TeX back to editable sources.
 
-For builds using ``--synctex``, the lilypond-book wrapper records the source
+When SyncTeX is enabled, the lilypond-book wrapper records the source
 path and line for each line of preprocessed TeX. After the final LuaLaTeX
 pass, this module uses that map to publish a SyncTeX v1 sidecar beside the
 ordinary PDF. It accounts for the compiler's injected preamble, translates

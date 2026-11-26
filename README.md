@@ -314,6 +314,14 @@ use subdirectories such as `printouts/`, `json/`, and `multikey/`.
 MIDI/MP3 output requires music notation that generates MIDI; chord-and-lyric text
 alone does not generate accompaniment or recordings.
 
+Quick and regular builds write a matching `.synctex.gz` next to each ordinary
+PDF by default for source navigation in compatible editors and viewers. Printouts
+and split multikey PDFs do not get sidecars, and sidecars are not deployed. Set
+`synctex = false` in the project config or a profile to opt out. For a single
+run, use `--synctex` or `--no-synctex` to override the config; the flags cannot
+be combined. Rebuilding an ordinary PDF with SyncTeX disabled removes its stale
+sidecar.
+
 Deployment is a local copy of selected build outputs and configured extra files
 to `deploy/` by default, not an upload to a web server. Disable it with
 `deploy = false` or `--no-deploy`. An explicitly configured `deploy-dir` or
@@ -658,7 +666,7 @@ settings unless they override them; `inherit-from` selects another parent
 profile. Arrays replace their parent's value unless listed in `merge-keys`.
 
 Common settings include `deploy`, `deploy-dir`, `create-printouts`, `coverimage`,
-`json`, `midifiles`, `audiofiles`, `variants`, and `multikey-books`.
+`synctex`, `json`, `midifiles`, `audiofiles`, `variants`, and `multikey-books`.
 The `common-deploy-icons`, `common-deploy-social-images`, `common-deploy-metadata`,
 and `common-deploy-other` lists add project files to deployment.
 
@@ -808,9 +816,8 @@ outlines, syntax help, and build commands.
 
 The [experimental TeXstudio integration](editor-support/texstudio/README.md)
 provides completion and Build & View with the embedded PDF viewer in a dedicated
-profile. SyncTeX works with compatible editors and viewers, independently of
-TeXstudio: the compiler's `--synctex` option writes a matching `.synctex.gz`
-next to each ordinary PDF in `result/`, not for printouts or split multikey PDFs.
+profile. The [compiler's SyncTeX sidecars](#output-locations) also work with
+other compatible editors and viewers.
 
 ## Troubleshooting
 

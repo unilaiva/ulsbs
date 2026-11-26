@@ -84,13 +84,18 @@ def _restore_cursor_on_exit() -> None:
 atexit.register(_restore_cursor_on_exit)
 
 
+def _has_terminal_output(stream: TextIO) -> bool:
+    """Recognize a real TTY or an editor pipe forwarding directly to a terminal."""
+    return stream.isatty() or os.environ.get("ULSBS_INTERNAL_TERMINAL_OUTPUT") == "1"
+
+
 def _detect_spinner_supported() -> bool:
     """Cache whether stdout and environment settings allow a terminal spinner."""
     global _spinner_supported
     if _spinner_supported is not None:
         return _spinner_supported
     try:
-        if not sys.stdout.isatty():
+        if not _has_terminal_output(sys.stdout):
             _spinner_supported = False
         else:
             term = os.environ.get("TERM", "")
@@ -429,11 +434,13 @@ class UI:
 
     def _terminal_supports_colors(self) -> bool:
         """Detect whether stdout supports ANSI colors."""
-        if not sys.stdout.isatty():
+        if not _has_terminal_output(sys.stdout):
+            return False
+        term = os.environ.get("TERM", "")
+        if term == "dumb":
             return False
         if os.environ.get("COLORTERM", ""):
             return True
-        term = os.environ.get("TERM", "")
         if "xterm" in term and "color" in term:
             return True
         if Path("/usr/bin/tput").exists():
@@ -595,10 +602,10 @@ class UI:
         return all_parts
 
     def _print_line(self, text: str, stderr: bool = False) -> None:
-        """Print a single line, stripping ANSI colors if target isn't a TTY."""
+        """Print a single line with colors only when enabled and supported by its destination."""
         with _output_lock:
             out = sys.stderr if stderr else sys.stdout
-            if not out.isatty():
+            if not self.use_colors or not _has_terminal_output(out):
                 text = ANSI_ESCAPE_RE.sub("", text)
             print(text, flush=True, file=out)
 

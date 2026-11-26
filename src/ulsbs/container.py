@@ -258,6 +258,10 @@ def run_self_in_container(
         ]
         if no_color_env is not None:
             env_args.extend(["-e", f"NO_COLOR={no_color_env}"])
+        # VS Code forwards these pipes to an ANSI terminal. Preserve that
+        # contract inside the container without allocating a TTY for Docker.
+        if os.environ.get("ULSBS_INTERNAL_TERMINAL_OUTPUT") == "1":
+            env_args.extend(["-e", "ULSBS_INTERNAL_TERMINAL_OUTPUT=1", "-e", f"TERM={os.environ.get('TERM', '')}"])
         # A pseudo-TTY can hide host redirection and terminal limits. Forward
         # spinner suppression independently of the color policy.
         if not ui.use_spinner or not _detect_spinner_supported():

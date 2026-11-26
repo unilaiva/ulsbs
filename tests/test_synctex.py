@@ -1,8 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Lari Natri <lari.natri@iki.fi>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Exercise published SyncTeX with real preprocessing and late/reopened tags."""
+"""Test SyncTeX configuration, source mapping, and sidecar publication."""
 
+from contextlib import redirect_stderr
 import gzip
 import importlib.metadata
 import io
@@ -13,9 +14,50 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 
+from ulsbs.cli import build_arg_parser
+from ulsbs.config import build_config
 from ulsbs.synctex import _rewrite
+from ulsbs.ui import UI
+
+
+class SyncTeXConfigTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.parser = build_arg_parser(UI(use_colors=False))
+
+    def build(self, text, *flags):
+        path = self.root / "ulsbs-config.toml"
+        path.write_text(text, encoding="utf-8")
+        args = self.parser.parse_args(["--no-deploy", *flags])
+        return build_config(args_ns=args, config_path=path, profile=args.profile, env={},
+                            runtime_project_paths=SimpleNamespace(project_root=self.root),
+                            runtime_in_container=False, runtime_unique_id="test")
+
+    def test_default_project_profile_and_cli_precedence(self):
+        for mode in ((), ("--quick",)):
+            with self.subTest(mode=mode):
+                self.assertIs(self.build("", *mode).synctex, True)
+                text = "synctex = false\n[profiles.on]\nsynctex = true\n"
+                self.assertIs(self.build(text, *mode).synctex, False)
+                self.assertIs(self.build(text, *mode, "--profile", "on").synctex, True)
+                self.assertIs(self.build(text, *mode, "--synctex").synctex, True)
+                self.assertIs(self.build(text, *mode, "--profile", "on", "--no-synctex").synctex, False)
+
+    def test_config_requires_boolean(self):
+        for prefix in ("", "[profiles.default]\n"):
+            with self.subTest(prefix=prefix), self.assertRaisesRegex(ValueError, "synctex must be a boolean"):
+                self.build(prefix + 'synctex = "false"')
+
+    def test_cli_flags_are_mutually_exclusive(self):
+        for flags in (("--synctex", "--no-synctex"), ("--no-synctex", "--synctex")):
+            with self.subTest(flags=flags), redirect_stderr(io.StringIO()) as stderr:
+                with self.assertRaises(SystemExit) as error:
+                    self.parser.parse_args(flags)
+                self.assertEqual(error.exception.code, 2)
+                self.assertIn("not allowed with argument", stderr.getvalue())
 
 
 class SyncTeXRewriteTests(unittest.TestCase):
@@ -106,8 +148,8 @@ MainDocumentAnchor\par
         cache = str(root / "texmf-cache")
         env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
                "ULSBS_USE_SYSTEM_TMP_FOR_TEMP": "false", "TEXMFVAR": cache, "TEXMFCACHE": cache}
-        argv = [sys.executable, "-m", "ulsbs", "--plain-output", "--no-deploy",
-                "--quick", "--no-container"]
+        argv = [sys.executable, "-m", "ulsbs", "--plain-output", "--no-deploy", "--no-container"]
+        book = str(root / "book.tex")
         pdf = root / "result/book.pdf"
         sidecar = pdf.with_suffix(".synctex.gz")
 
@@ -118,7 +160,7 @@ MainDocumentAnchor\par
             self.assertEqual(process.returncode, 0, output)
             return output
 
-        run([*argv, "--synctex", str(root / "book.tex")])
+        run([*argv, "--quick", book])
         data = gzip.decompress(sidecar.read_bytes()).decode("utf-8")
         for name, lines in {"book.tex": (3,), "content/song.tex": (4, 5, 13),
                             "content/second.tex": (4,)}.items():
@@ -144,6 +186,14 @@ MainDocumentAnchor\par
                 self.assertIn(f"Input:{root / name}\nLine:{line}\n", reverse)
         self.assertIn("Title Index", run(["pdftotext", "-layout", str(pdf), "-"]))
         self.assertRegex(data, r"Input:\d+:.*-systems\.tex")
-        run([*argv, str(root / "book.tex")])
+        uncompressed = pdf.with_suffix(".synctex")
+        uncompressed.write_text("stale", encoding="utf-8")
+        run([*argv, "--quick", "--no-synctex", book])
         self.assertTrue(pdf.is_file())
         self.assertFalse(sidecar.exists())
+        self.assertFalse(uncompressed.exists())
+
+        (root / "ulsbs-config.toml").write_text("synctex = false\n", encoding="utf-8")
+        run([*argv, "--no-printouts", "--no-coverimage", "--no-midi", "--no-audio",
+             "--no-json", "--synctex", book])
+        self.assertIn(f":{root / 'book.tex'}\n", gzip.decompress(sidecar.read_bytes()).decode("utf-8"))

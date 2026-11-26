@@ -88,7 +88,7 @@ class Config:
 
     # Quick mode (CLI-only; derivations are applied to other fields)
     quick: bool = False
-    synctex: bool = False  # CLI-only; ordinary PDFs only
+    synctex: bool = True  # Ordinary PDFs only
 
     # Deploy modes
     deploy: bool = True
@@ -596,6 +596,7 @@ _ALLOWED_FILE_KEYS: Set[str] = {
     "require_multikey_for_pdf_deploy",
     "require_json_for_pdf_deploy",
     "create_printouts",
+    "synctex",
     "coverimage",
     "json",
     "midifiles",
@@ -775,7 +776,7 @@ def build_config(
     _ensure_known_keys(f"profile '{profile}'", prof_eff, _ALLOWED_FILE_KEYS)
 
     for data in (flat, prof_eff):
-        for name in ("require_multikey_for_pdf_deploy", "require_json_for_pdf_deploy"):
+        for name in ("synctex", "require_multikey_for_pdf_deploy", "require_json_for_pdf_deploy"):
             if name in data and not isinstance(data[name], bool):
                 raise ValueError(f"{name.replace('_', '-')} must be a boolean")
         # Reject booleans as well as numeric coercions: bool is an int subclass.
@@ -917,8 +918,8 @@ def build_config(
             cli_over["multikey_require_song_ids"] = True
         if getattr(args_ns, "quick", False):
             cli_over["quick"] = True
-        if getattr(args_ns, "synctex", False):
-            cli_over["synctex"] = True
+        if (synctex_cli := getattr(args_ns, "synctex", None)) is not None:
+            cli_over["synctex"] = synctex_cli
         if getattr(args_ns, "fast_audio_encode", False):
             cli_over["fast_audio_encode"] = True
         if getattr(args_ns, "verbose", False):

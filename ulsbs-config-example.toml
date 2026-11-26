@@ -29,9 +29,7 @@
 # CLI overrides for individual runs:
 # --quick builds only the default variant's ordinary PDF, skips extras/deploy,
 #   and keeps temporary files.
-# --synctex is off by default; enable it alongside --quick (or on an ordinary
-#   build) to publish editor data beside ordinary PDFs in the results directory,
-#   not printouts or multikey.
+# --synctex and --no-synctex override the synctex setting; use only one.
 # --no-printouts, --no-coverimage, --no-json, --no-midi, and --no-audio omit outputs.
 # --variants all or --variants default,lyric selects declared variants.
 # --no-multikey omits multikey editions.
@@ -106,6 +104,9 @@ deploy-common = false        # deploy only the common-deploy-* files below
 # Tools and suitable source content must also be available;
 # see README.md for requirements and output locations.
 create-printouts = true      # A5-on-A4 home-printing PDFs for _A5 main documents
+# Beside ordinary PDFs in result/ (including --quick), not printouts or multikey.
+# Not deployed. When disabled, rebuilding a PDF removes its stale sidecar.
+synctex = true               # publish SyncTeX editor navigation data (default)
 coverimage = true            # extract the first PDF page as a cover PNG
 json = true                  # export songbook metadata as JSON
 variants = "all"             # all declared variants; or e.g. ["default", "lyric"]

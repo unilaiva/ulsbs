@@ -157,6 +157,7 @@ Run these commands from the ULSBS repository root on `main`.
    node -e 'const p=require("./editor-support/vscode-extension/ulsbs-tex-tools/package.json"); const l=require("./editor-support/vscode-extension/ulsbs-tex-tools/package-lock.json"); if (p.version !== process.argv[1] || l.version !== process.argv[1] || l.packages[""].version !== process.argv[1]) process.exit(1)' "$VERSION"
    ./ulsbs-test
    npm --prefix editor-support/vscode-extension/ulsbs-tex-tools ci
+   npm --prefix editor-support/vscode-extension/ulsbs-tex-tools run typecheck
    npm --prefix editor-support/vscode-extension/ulsbs-tex-tools run compile-web
    npm --prefix editor-support/vscode-extension/ulsbs-tex-tools run test:grammar
    npm --prefix editor-support/vscode-extension/ulsbs-tex-tools run test:songbooks

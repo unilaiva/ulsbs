@@ -23,6 +23,7 @@ class SpinnerOutputTests(unittest.TestCase):
     def setUp(self):
         self.enterContext(patch.dict(os.environ, {
             "TERM": "xterm-256color", "NO_COLOR": "", "ULSBS_NOSPINNER": "",
+            "ULSBS_INTERNAL_TERMINAL_OUTPUT": "",
         }))
         self.stdout, self.stderr = io.StringIO(), io.StringIO()
         self.enterContext(patch.object(sys, "stdout", self.stdout))
@@ -88,6 +89,32 @@ class SpinnerOutputTests(unittest.TestCase):
         self.assertIn("\033[?25h", text)
         self.assertFalse(ui._spinner_active)
 
+    def test_terminal_bridge_can_render_colors_and_spinner_over_pipes(self):
+        self.isatty.return_value = False
+        for env, colors, spinner in (
+            ({}, False, False),
+            ({"ULSBS_INTERNAL_TERMINAL_OUTPUT": "1"}, True, True),
+            ({"ULSBS_INTERNAL_TERMINAL_OUTPUT": "1", "NO_COLOR": "1"}, False, True),
+            ({"ULSBS_INTERNAL_TERMINAL_OUTPUT": "1", "ULSBS_NOSPINNER": "1"}, True, False),
+            ({"ULSBS_INTERNAL_TERMINAL_OUTPUT": "1", "TERM": "dumb"}, False, False),
+        ):
+            with self.subTest(env=env), patch.dict(os.environ, env):
+                ui._spinner_supported = None
+                self.stdout.seek(0)
+                self.stdout.truncate()
+                self.stderr.seek(0)
+                self.stderr.truncate()
+                output = ui.UI()
+                output.start_spinner("Working")
+                output.info_line("Job finished")
+                output.error_line("Example error")
+                output.stop_spinner()
+                self.assertEqual(output.use_colors, colors)
+                self.assertEqual("\033[?25l" in self.stdout.getvalue(), spinner)
+                self.assertEqual("\033[?25h" in self.stdout.getvalue(), spinner)
+                for stream in (self.stdout, self.stderr):
+                    self.assertEqual(bool(ui.ANSI_ESCAPE_RE.search(stream.getvalue())), colors)
+
     def test_plain_output_overrides_environment_tty_and_cached_spinner_support(self):
         def run_plain_cli(**kwargs):
             output = kwargs["ui"]
@@ -100,7 +127,8 @@ class SpinnerOutputTests(unittest.TestCase):
             return 7
 
         ui._spinner_supported = True
-        with patch.dict(os.environ, {"FORCE_COLOR": "1", "PYTHON_COLORS": "1"}), \
+        with patch.dict(os.environ, {"FORCE_COLOR": "1", "PYTHON_COLORS": "1",
+                                     "ULSBS_INTERNAL_TERMINAL_OUTPUT": "1"}), \
                 patch.object(ui.UI, "_terminal_supports_colors", return_value=True), \
                 patch.object(cli, "_run_cli", side_effect=run_plain_cli), \
                 patch.object(sys, "argv", ["ulsbs-compile", "--plain-output"]):
@@ -174,6 +202,7 @@ class SpinnerOutputTests(unittest.TestCase):
         assets = Mock()
         for tty, env, suppressed in (
             (False, {}, True),
+            (False, {"ULSBS_INTERNAL_TERMINAL_OUTPUT": "1"}, False),
             (True, {}, False),
             (True, {"TERM": "dumb"}, True),
             (True, {"ULSBS_NOSPINNER": "1"}, True),
@@ -198,6 +227,10 @@ class SpinnerOutputTests(unittest.TestCase):
                                  for index, arg in enumerate(command) if arg == "-e")
                 self.assertEqual(forwarded.get("ULSBS_NOSPINNER"),
                                  "1" if suppressed else None)
+                self.assertEqual(forwarded.get("ULSBS_INTERNAL_TERMINAL_OUTPUT"),
+                                 env.get("ULSBS_INTERNAL_TERMINAL_OUTPUT"))
+                if forwarded.get("ULSBS_INTERNAL_TERMINAL_OUTPUT"):
+                    self.assertEqual(forwarded["TERM"], "xterm-256color")
                 self.assertEqual("-it" in command, tty)
                 # Even in a TTY, the inner UI must respect forwarded limits.
                 self.isatty.return_value = True

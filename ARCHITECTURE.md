@@ -67,7 +67,10 @@ colors and the spinner are disabled even for help and argument errors. This
 CLI-only policy overrides environment/TTY detection without changing the process
 environment. Container delegation preserves the flag and forwards disabled colors
 and spinner state via `NO_COLOR` and `ULSBS_NOSPINNER`, since its pseudo-TTY hides
-host redirection. Without the flag, `NO_COLOR` remains color-only.
+host redirection. Without the flag, `NO_COLOR` remains color-only. The VS Code
+extension forwards build output directly to an ANSI terminal, so it sets
+`ULSBS_INTERNAL_TERMINAL_OUTPUT=1` and `TERM` for the compiler. Container
+delegation forwards both without requesting a container TTY for those pipes.
 
 ## Song Engine
 
@@ -2047,8 +2050,10 @@ external scores resolved through TeX, and reuse from a fresh job directory.
 
 ##### Editor source mapping
 
-`--synctex` is opt-in and applies to ordinary PDFs only. The private
-`lilypond_book.py` launcher observes the resolved input paths and the writer's
+SyncTeX is enabled by default for ordinary PDFs in both regular and quick builds.
+The effective `synctex` boolean follows project and profile configuration unless
+overridden by either mutually exclusive CLI flag, `--synctex` or `--no-synctex`.
+The private `lilypond_book.py` launcher observes the resolved input paths and the writer's
 actual replacement chunks without changing their output. `synctex.py` maps
 copied lines using each chunk's original character offsets, accounts for the
 graphics import and the compiler's preamble, and anchors generated snippet
