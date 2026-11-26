@@ -2518,8 +2518,7 @@ page ranges without re-engraving, flattening, rasterizing or print-to-PDF.
 
 The destination-syntax version is part of each migration command's name. The
 [v1 migration instructions](README.md#ulsbs-migrate-syntax-v1) cover the legacy
-melody/beat conversion below. `ulsbs-migrate-melody-syntax` remains a compatibility
-alias for `ulsbs-migrate-syntax-v1`, not for the newest destination syntax.
+melody/beat conversion below.
 V1 deliberately retains its original destination names, including
 `\melodySecondaryPosition{same}`; run v2 afterwards to adopt current naming.
 

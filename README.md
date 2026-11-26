@@ -744,8 +744,7 @@ New projects do not need either migration tool.
 Review diagnostics and the diff before `--write`; some legacy forms need manual
 decisions. In particular, use `--normalize-low` only after reviewing affected
 melody placements. See the [v1 conversion boundaries](ARCHITECTURE.md#v1-melody-syntax)
-for supported forms and preservation rules. `ulsbs-migrate-melody-syntax` remains
-an alias for this v1 tool, not for the latest migration.
+for supported forms and preservation rules.
 
 ### `ulsbs-migrate-syntax-v2`
 

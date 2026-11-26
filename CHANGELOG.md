@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Remove the `ulsbs-migrate-melody-syntax` alias; `ulsbs-migrate-syntax-v1`
+  still works unchanged.
 - Add `\ulTranslationBaselineMultiplier` (default `1`) to adjust translation
   leading without changing font size, like the passage and explanation settings.
 - Add `\ulVerseBaselineToTopGap` (default `3.5pt`) so descenders only push the

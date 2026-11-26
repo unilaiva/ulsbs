@@ -27,7 +27,6 @@ ulsbs-midi2audio = "ulsbs.tools.midi2audio:main"
 ulsbs-ly2tex = "ulsbs.tools.ly2tex:main"
 ulsbs-migrate-syntax-v1 = "ulsbs.tools.migrate_syntax_v1:main"
 ulsbs-migrate-syntax-v2 = "ulsbs.tools.migrate_syntax_v2:main"
-ulsbs-migrate-melody-syntax = "ulsbs.tools.migrate_syntax_v1:main"
 ulsbs-test = "ulsbs.testing:main"
 
 [project.urls]
