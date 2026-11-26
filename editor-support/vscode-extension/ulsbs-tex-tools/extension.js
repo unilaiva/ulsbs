@@ -15,6 +15,7 @@ const { registerMeasureBarDecorations } = require("./core/measures");
 const { registerChordDecorations } = require("./core/chords");
 const { registerDiagnostics } = require("./core/diagnostics");
 const { registerCompileCommands } = require("./core/compile");
+const { registerPdfPreview } = require("./core/pdf-preview");
 const { registerTreeView } = require("./core/tree");
 const { registerCompletionProvider } = require("./core/completions");
 const {
@@ -46,6 +47,7 @@ async function activate(context) {
     songbookService,
     treeController
   );
+  const previewController = registerPdfPreview(vscode, context, songbookService, compileController);
 
 
   context.subscriptions.push(
@@ -160,7 +162,9 @@ async function activate(context) {
 
     treeController.setEnabled(enabled);
     compileController.setEnabled(enabled);
+    previewController.setEnabled(enabled);
     diagnosticsController.setEnabled(enabled);
+    await vscode.commands.executeCommand("setContext", "ulsbsTexTools.enabled", enabled);
 
     if (enabled) {
       await songbookService.refresh();

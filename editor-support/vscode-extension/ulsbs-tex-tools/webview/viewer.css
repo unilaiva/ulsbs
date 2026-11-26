@@ -1,0 +1,101 @@
+/* SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi> */
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+
+/* Fit the build toolbar and default PDF UI into the editor, and style SyncTeX feedback. */
+
+body {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+}
+
+#pdf-viewer {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+}
+
+body.vscode-dark,
+body.vscode-high-contrast {
+  color-scheme: dark;
+}
+
+#pdf-build-toolbar:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  color: var(--vscode-editorWidget-foreground, CanvasText);
+  background: var(--vscode-editorWidget-background, Canvas);
+  border-bottom: 1px solid var(--vscode-editorWidget-border, transparent);
+}
+
+#pdf-build {
+  flex: none;
+  padding: 0.25rem 0.65rem;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 0.125rem;
+  color: var(--vscode-button-foreground, ButtonText);
+  background: var(--vscode-button-background, ButtonFace);
+  font: inherit;
+  cursor: pointer;
+}
+
+#pdf-build:hover {
+  background: var(--vscode-button-hoverBackground, var(--vscode-button-background, ButtonFace));
+}
+
+#pdf-build:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, Highlight);
+  outline-offset: 2px;
+}
+
+#pdf-build-status {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+#pdf-build-status:empty,
+#pdf-build-status:not(:empty) + #pdf-sync-hint,
+body:has(#pdf-status:not([hidden])) #pdf-sync-hint {
+  display: none;
+}
+
+#pdf-sync-hint {
+  min-width: 0;
+  margin-inline-start: auto;
+  color: var(--vscode-descriptionForeground, GrayText);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#pdf-status {
+  position: fixed;
+  z-index: 10;
+  inset-inline: 1rem;
+  bottom: 1rem;
+  width: fit-content;
+  max-width: calc(100% - 2rem);
+  margin: 0 auto;
+  padding: 0.5rem 0.75rem;
+  color: var(--vscode-editorWidget-foreground, CanvasText);
+  background: var(--vscode-editorWidget-background, Canvas);
+  border: 1px solid var(--vscode-editorWidget-border, currentColor);
+  border-radius: 0.25rem;
+  pointer-events: none;
+}
+
+#pdf-viewer .synctex-highlight {
+  position: absolute;
+  width: 1.25rem;
+  height: 1.25rem;
+  transform: translate(-50%, -50%);
+  background: #ffd74050;
+  border: 2px solid #ae5300;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px white;
+  pointer-events: none;
+}

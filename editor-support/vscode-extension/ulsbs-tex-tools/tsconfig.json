@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "noEmit": true,
+    "strict": true,
+    "module": "NodeNext",
+    "target": "ES2024",
+    "types": ["node"],
+    "skipLibCheck": true
+  },
+  "files": ["core/compile.js", "core/pdf-preview.js"]
+}

@@ -28,7 +28,7 @@ async function isUlsbsWorkspace(vscode) {
   }
 
   const markers = await Promise.all([
-    vscode.workspace.findFiles("**/ulsbs/ulsbs-compile", null, 1),
+    vscode.workspace.findFiles("**/ulsbs-compile", null, 1),
     vscode.workspace.findFiles(`**/${ULSBS_CONFIG_BASENAME}`, null, 1),
     vscode.workspace.findFiles("**/ulsbs/pyproject.toml", null, 1)
   ]);

@@ -9,6 +9,7 @@ you are editing.
 - Insert chord, melody, verse, translation, and score markup with snippets and completions.
 - See structural diagnostics, folding, and chord/measure/melody decorations while editing.
 - Compile one book, all discovered books, or the books affected by the active file.
+- Preview a compiled PDF side by side and jump between source lines and the PDF.
 - Create an A5 main document from the bundled songbook template.
 
 The extension does **not** install the ULSBS engine, LaTeX, or LilyPond. To create
@@ -20,7 +21,7 @@ syntax and book customization, use
 ## Installation
 
 The extension is shipped as source in the ULSBS repository. Build a `.vsix`
-package and install it locally. You need VS Code 1.112.0 or newer and a current
+package and install it locally. You need VS Code 1.138.0 or newer and a current
 Node.js LTS release with npm to build the package. Node.js is not needed just
 to use an already-built VSIX.
 
@@ -33,8 +34,9 @@ npm run package
 ```
 
 If you opened the ULSBS engine checkout itself, the directory is instead
-`editor-support/vscode-extension/ulsbs-tex-tools`. The package command builds the web bundle
-and creates `ulsbs-tex-tools-<version>.vsix` in that directory.
+`editor-support/vscode-extension/ulsbs-tex-tools`. The package command builds
+the web extension and PDF viewer and creates `ulsbs-tex-tools-<version>.vsix`
+in that directory.
 
 2. Install the generated file using **Extensions > ... > Install from VSIX...**,
    or run this command from the directory containing it:
@@ -62,7 +64,7 @@ markers enables ULSBS-specific features:
 
 - `ulsbs-config.toml`
 - `ulsbs/pyproject.toml`
-- `ulsbs/ulsbs-compile`
+- `ulsbs-compile` (at the root or in `ulsbs/`)
 
 These are alternative detection markers, not a requirement to have all three.
 A compiler script is needed for compilation, but not for editing. You can set
@@ -86,8 +88,10 @@ add companion names to that list to make them available to your build profiles.
 
 Compilation runs the configured ULSBS script in the **ULSBS Build** terminal.
 The script needs the same Python/container or host-toolchain setup as a
-command-line build. The extension is a shortcut to that build, not a replacement
-for it.
+command-line build. By default it looks for `ulsbs/ulsbs-compile`, a root-level
+`ulsbs-compile` wrapper, or `ulsbs-compile` on VS Code's `PATH`, in that order.
+Extension builds always request SyncTeX. Starting another build for the same
+book stops the previous one before starting the replacement.
 
 | Command | What it builds |
 |---|---|
@@ -120,10 +124,47 @@ not only those listed in the selected config profile's `songbooks` array.
 Use the CLI directly when you want the configuration alone to select books,
 or when you need flags such as `--quick`.
 
-Variant and edition selection belongs in your compiler profile, not the editor
-settings. For example, use `variants = ["default", "lyric"]` in a profile after
-declaring both variants in the main source. The extension passes the profile and
-main filenames to the compiler; it does not choose variants independently.
+Normal builds use the variant and edition selection in your compiler profile.
+For example, use `variants = ["default", "lyric"]` in a profile after declaring
+both variants in the main source. Preview builds are the exception: they use the
+variant shown in the preview.
+
+## PDF Preview and SyncTeX
+
+1. Run **ULSBS: Open PDF Preview** to open the last built PDF without compiling.
+   It offers the ordinary PDFs in `result/`, including existing variant PDFs.
+   Use **Build Preview** in the preview toolbar to build or refresh that variant.
+   **ULSBS: Build PDF Preview** is also available in the LaTeX editor's and
+   Songbooks view's context menus. Preview builds use the active profile but
+   skip deployment, printouts, multikey PDFs, and other supplemental outputs.
+   If relevant files have unsaved changes, manual builds ask whether to save
+   them, build from the files already on disk, or cancel.
+2. To jump from source to PDF, put the cursor on a typeset line and run
+   **ULSBS: Sync Source to PDF** from the Command Palette or the editor's context
+   menu, or press **Ctrl+Alt+J** (**Cmd+Option+J** on macOS). The preview marks
+   the matching location and scrolls only if needed. If a PDF or its SyncTeX
+   data is missing, click **Build Preview** to complete the jump.
+3. To jump from PDF to source, hold **Ctrl** (Windows/Linux) or **Cmd** (macOS)
+   and click a location in the PDF. If the clicked word has a unique match on
+   the corresponding source line, the cursor lands on that word. Otherwise it
+   lands at the first non-whitespace character on the line. Clicks on the
+   generated song title or other prelude details go to the song declaration.
+   Clicks on an engraved LilyPond score go to its `\begin{lilypond}` block or
+   `\lilypondfile` command when it can be identified, not to individual notes
+   or syllables. Running page headers and page numbers do not trigger jumps.
+
+Enable `ulsbsTexTools.buildPreviewOnSave` to rebuild when a songbook or an
+included TeX source is saved. This is off by default. It rebuilds all open
+variants of an affected book in one build. The last good PDF stays visible
+until ULSBS replaces it. The preview keeps its position and manual zoom or Fit
+mode on rebuild. An explicit source-to-PDF jump takes precedence.
+
+Sync needs the matching `.synctex.gz` file next to the PDF. The preview works
+without it, but jumps do not. Use **Build Preview** or ensure SyncTeX is enabled
+when compiling from the terminal. Save and recompile after editing to keep
+line mappings current. SyncTeX is line-based: whitespace, generated indexes, and LilyPond
+notation may not have an exact source location. Printouts and multikey PDFs do
+not get SyncTeX mappings. No separate SyncTeX utility or PDF viewer is required.
 
 ## Editing features
 
@@ -266,8 +307,9 @@ General exclusions default to `**/temp/**`, `**/ulsbs/assets/tex/**`, and
 added, even when you override that setting.
 
 Songbook discovery also always skips hidden directories (names beginning with
-`.`), `ulsbs/tests`, and `tests/fixtures`. `songbookExcludeGlob` adds to those
-built-in exclusions rather than replacing them. Use it to hide a document from
+`.`), any directory named `build`, `ulsbs/tests`, and `tests/fixtures`.
+`songbookExcludeGlob` adds to those built-in exclusions rather than replacing them.
+Use it to hide a document from
 the Songbooks view while keeping ULSBS editing features in that file.
 
 ## Browser support
@@ -279,7 +321,9 @@ workspace's files and the installed extension.
 The extension's **compile commands are disabled in browser-only VS Code**,
 including a browser-based Codespaces session. They require a desktop VS Code
 UI with a terminal and a usable compiler environment. The web build does not
-run LaTeX or LilyPond in the browser.
+run LaTeX or LilyPond in the browser. The PDF preview can display existing PDFs
+accessible in the workspace. Sync also requires a matching sidecar whose source
+paths resolve in that workspace.
 
 ## Troubleshooting
 
@@ -291,8 +335,8 @@ run LaTeX or LilyPond in the browser.
 - **Current context finds no book:** the active file must be a main document
   or reachable through its indexed `\input` / `\include` dependencies. Check
   include paths and refresh the index.
-- **Compiler script not found:** check `compileCommand` relative to the
-  relevant workspace folder. A root-level wrapper needs `./ulsbs-compile`.
+- **Compiler script not found:** check that ULSBS is installed, or set
+  `compileCommand` relative to the relevant workspace folder for a custom location.
 - **Build fails:** inspect the **ULSBS Build** terminal and test the compiler
   directly from the project root. The extension does not install build tools.
 - **Create new songbook fails:** this command needs the vendored engine in the

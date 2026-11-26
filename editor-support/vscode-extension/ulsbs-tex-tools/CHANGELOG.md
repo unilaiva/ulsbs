@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Require VS Code 1.138.0 or newer.
+- Preview ordinary songbook PDFs beside the source, with two-way SyncTeX.
+  Use the keyboard shortcut to locate the current source line in the PDF.
+  Ctrl-click (Cmd-click on macOS) in the PDF to jump back to the source, down
+  to the word when the match is unambiguous. Song headers and engraved scores
+  jump to their declarations. Rebuild the displayed variant from the preview
+  toolbar or editor context menu, or opt into rebuilding affected open variants
+  on save. Reloads preserve scroll position, manual zoom, and Fit mode.
+- Extension builds request SyncTeX and show compiler colors and progress in the
+  terminal. Manual builds ask before saving relevant files, and a new build
+  replaces an older one for the same songbook.
+- Exclude directories named `build` from songbook discovery.
 - Add completions and snippets for lane-aware annotation spacing and explicit
   lyric spaces (`\ulSpace` and `\ulSpace*`), including `\ulSpace` between bars.
 - Add snippets for selecting songs by stable ID (preferred) or printed number,

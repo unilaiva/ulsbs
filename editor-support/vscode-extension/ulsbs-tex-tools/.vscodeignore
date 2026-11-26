@@ -1,0 +1,8 @@
+**/*.vsix
+.vscode/**
+node_modules/**
+test/**
+webview/**
+esbuild.web.mjs
+package-lock.json
+tsconfig.json

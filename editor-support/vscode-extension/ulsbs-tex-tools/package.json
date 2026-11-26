@@ -22,7 +22,7 @@
     "ulsbs"
   ],
   "engines": {
-    "vscode": "^1.112.0"
+    "vscode": "^1.138.0"
   },
   "main": "./extension.js",
   "browser": "./dist/web/extension.js",
@@ -92,6 +92,19 @@
         "icon": "$(settings-gear)"
       },
       {
+        "command": "ulsbsTexTools.openPdfPreview",
+        "title": "ULSBS: Open PDF Preview",
+        "icon": "$(file-pdf)"
+      },
+      {
+        "command": "ulsbsTexTools.compilePdfPreview",
+        "title": "ULSBS: Build PDF Preview"
+      },
+      {
+        "command": "ulsbsTexTools.syncToPdf",
+        "title": "ULSBS: Sync Source to PDF"
+      },
+      {
         "command": "ulsbsTexTools.openConfig",
         "title": "ULSBS: Open configuration (ulsbs-config.toml)",
         "icon": "$(settings)",
@@ -122,7 +135,44 @@
         }
       ]
     },
+    "keybindings": [
+      {
+        "command": "ulsbsTexTools.syncToPdf",
+        "key": "ctrl+alt+j",
+        "mac": "cmd+alt+j",
+        "when": "ulsbsTexTools.enabled && editorTextFocus && editorLangId == latex"
+      }
+    ],
     "menus": {
+      "commandPalette": [
+        { "command": "ulsbsTexTools.openPdfPreview", "when": "ulsbsTexTools.enabled" },
+        { "command": "ulsbsTexTools.compilePdfPreview", "when": "ulsbsTexTools.enabled" },
+        { "command": "ulsbsTexTools.syncToPdf", "when": "ulsbsTexTools.enabled" }
+      ],
+      "editor/context": [
+        {
+          "command": "ulsbsTexTools.openPdfPreview",
+          "when": "ulsbsTexTools.enabled && editorLangId == latex",
+          "group": "navigation@9"
+        },
+        {
+          "command": "ulsbsTexTools.syncToPdf",
+          "when": "ulsbsTexTools.enabled && editorLangId == latex",
+          "group": "navigation@10"
+        },
+        {
+          "command": "ulsbsTexTools.compilePdfPreview",
+          "when": "ulsbsTexTools.enabled && editorLangId == latex",
+          "group": "navigation@11"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "ulsbsTexTools.openPdfPreview",
+          "when": "ulsbsTexTools.enabled && resourceExtname == .pdf && !explorerResourceIsFolder",
+          "group": "navigation@10"
+        }
+      ],
       "view/title": [
         {
           "command": "ulsbsTexTools.compileCurrentContext",
@@ -170,12 +220,27 @@
           "command": "ulsbsTexTools.compileSongbookWithProfile",
           "when": "view == ulsbsSongbooks && viewItem == songbook",
           "group": "navigation@1"
+        },
+        {
+          "command": "ulsbsTexTools.openPdfPreview",
+          "when": "view == ulsbsSongbooks && viewItem == songbook",
+          "group": "inline@3"
+        },
+        {
+          "command": "ulsbsTexTools.compilePdfPreview",
+          "when": "view == ulsbsSongbooks && viewItem == songbook",
+          "group": "navigation@2"
         }
       ]
     },
     "configuration": {
       "title": "ULSBS TeX Tools",
       "properties": {
+        "ulsbsTexTools.buildPreviewOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "When a songbook source is saved, rebuild all open PDF preview variants for the affected books."
+        },
         "ulsbsTexTools.enable": {
           "type": "string",
           "enum": [
@@ -209,12 +274,12 @@
             "type": "string"
           },
           "default": [],
-          "description": "Additional glob patterns to exclude from Songbooks view discovery. These are merged with the built-in exclusions for hidden directories, ulsbs/tests, and tests/fixtures, and do not disable editing features in matching files."
+          "description": "Additional glob patterns to exclude from Songbooks view discovery. These are merged with the built-in exclusions for hidden directories, build directories, ulsbs/tests, and tests/fixtures, and do not disable editing features in matching files."
         },
         "ulsbsTexTools.compileCommand": {
           "type": "string",
           "default": "ulsbs/ulsbs-compile",
-          "description": "Path to the ULSBS compile script, relative to the workspace root."
+          "description": "Path to the ULSBS compile script, relative to the workspace root. The default also tries a root-level wrapper and then ulsbs-compile on PATH."
         },
         "ulsbsTexTools.askProfileOnCompile": {
           "type": "boolean",
@@ -235,15 +300,25 @@
     }
   },
   "scripts": {
+    "typecheck": "tsc --project tsconfig.json",
     "compile-web": "node esbuild.web.mjs",
     "watch-web": "node esbuild.web.mjs --watch",
     "test:grammar": "node test/grammar-fixtures.js",
     "test:songbooks": "node test/songbook-exclusions.js",
     "test:verse": "node test/verse.js",
-    "package": "npm run compile-web && vsce package"
+    "test:synctex": "node test/synctex.js",
+    "test:builds": "node --test test/compile-builds.js",
+    "test:preview": "node --test test/pdf-preview.js test/webview-pdf-word.mjs",
+    "vscode:prepublish": "npm run typecheck && npm run compile-web",
+    "package": "vsce package"
   },
   "devDependencies": {
-    "@vscode/vsce": "^3.7.1",
-    "esbuild": "^0.28.0"
+    "@types/node": "^24.19.4",
+    "@types/vscode": "1.138.0",
+    "@unilarva/pdfjs-viewer": "0.10.0",
+    "@vscode/vsce": "^4.1.1",
+    "esbuild": "^0.28.2",
+    "pdfjs-dist": "6.5.438",
+    "typescript": "~6.0.3"
   }
 }

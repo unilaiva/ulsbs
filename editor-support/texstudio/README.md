@@ -116,11 +116,11 @@ if the false positives are distracting.
 
 ## Two-Way SyncTeX
 
-With `--synctex`, the compiler rebuilds `result/<book>.synctex.gz` alongside the
+By default, the compiler rebuilds `result/<book>.synctex.gz` alongside the
 ordinary PDF. In TeXstudio, use **Go to PDF** from the editor or **Jump to Source**
 from the embedded viewer (Ctrl-click on Linux/Windows, or use the context menus).
-The PDF and sidecar must come from the same build. Ordinary builds without the
-flag remove any old sidecar for their output. The sidecar contains local source
+The PDF and sidecar must come from the same build. Builds with `--no-synctex`
+or `synctex = false` remove any old sidecar for their output. The sidecar contains local source
 paths and is not a deployment artifact.
 
 Main and included TeX source lines are mapped through the compiler's staging and
@@ -142,12 +142,13 @@ The sidecar is standard SyncTeX, not a TeXstudio format. Build with
 or viewer to use `result/BOOK.pdf` on the same filesystem as the source paths
 recorded in the sidecar.
 
-- **VS Code:** Use [LaTeX Workshop's viewer and SyncTeX](https://github.com/James-Yu/LaTeX-Workshop/wiki/View#synctex)
+- **VS Code:** [ULSBS TeX Tools](../vscode-extension/ulsbs-tex-tools/README.md)
+  has a PDF preview and supports jumps in both directions. Alternatively, use
+  [LaTeX Workshop's viewer and SyncTeX](https://github.com/James-Yu/LaTeX-Workshop/wiki/View#synctex)
   with `"latex-workshop.latex.outDir": "%DIR%/result"` for a book root at the
   project root. If you use it only as a viewer, set
   `"latex-workshop.latex.autoBuild.run": "never"` and build with ULSBS from a
   terminal. A custom recipe that invokes ULSBS with `--synctex` can also work.
-  ULSBS TeX Tools does not provide a PDF viewer or SyncTeX commands itself.
 - **Other editors:** Use a SyncTeX-enabled viewer such as [Zathura](https://pwmt.org/projects/zathura/documentation/#synctex-support)
   with an inverse-search command for your editor. For example, VS Code accepts
   `code --reuse-window --goto "FILE:LINE"` using the viewer's file and line placeholders.

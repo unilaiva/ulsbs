@@ -15,6 +15,7 @@
  * @property {string} compileCommand Path to `ulsbs-compile` (relative to workspace root).
  * @property {boolean} askProfileOnCompile Ask for profile on compile.
  * @property {string} defaultProfile Default profile when not asking.
+ * @property {boolean} buildPreviewOnSave Rebuild open previews when a source is saved.
  * @property {boolean} autoRefreshDiagnostics Refresh diagnostics on edits.
  */
 
@@ -26,6 +27,7 @@ const INTERNAL_EXCLUDE_GLOBS = [
 /** Globs always excluded from songbook discovery. */
 const DEFAULT_SONGBOOK_EXCLUDE_GLOBS = [
   "**/.*/**",
+  "**/build/**",
   "**/ulsbs/tests/**",
   "**/tests/fixtures/**"
 ];
@@ -70,6 +72,7 @@ function getSettings(vscode) {
     compileCommand: cfg.get("compileCommand") ?? "ulsbs/ulsbs-compile",
     askProfileOnCompile: cfg.get("askProfileOnCompile") ?? true,
     defaultProfile: cfg.get("defaultProfile") ?? "default",
+    buildPreviewOnSave: cfg.get("buildPreviewOnSave") ?? false,
     autoRefreshDiagnostics: cfg.get("autoRefreshDiagnostics") ?? true
   };
 }
