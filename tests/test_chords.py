@@ -1638,7 +1638,7 @@ Bati|^zou {\noteson\[<G>]\Effect no \[<F>]ri}|^{o de} Jor|^dão |^ \e
                 self.assertEqual(re.findall(r"REPLAY-EFFECTS=(\d+)", output), ["1"] * passes)
                 self.assertIn("Jor", self.pdf_text())
 
-    def test_first_note_keeps_pending_glue_until_a_real_stanza_boundary(self):
+    def test_introductory_music_note_with_multiple_chorded_stanzas(self):
         self.compile_checked(r"""
 \begin{ulSongs}{}
 \beginsong{First-note glue}

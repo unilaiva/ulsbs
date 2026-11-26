@@ -555,6 +555,85 @@ NEXT
         self.assertGreater(float(words["NEXT"]["yMin"]) - float(words["LAST"]["yMin"]),
                            float(words["LAST"]["yMin"]) - float(words["NOTE"]["yMin"]))
 
+    def test_attached_note_does_not_change_later_verse_spacing(self):
+        preamble = r"\ulSongPosition{0}\ulVerseSeparation{2}{0}{0}"
+        body = r"""
+\begin{ulSongs}{}\beginsong{Note spacing}
+INTRO
+\beginverse*
+FIRST
+\endverse
+\beginverse*
+SECOND
+\endverse\endsong\end{ulSongs}
+"""
+        for label, intro in (
+            ("control", ""),
+            ("next", r"\textnotefornext{NOTE}"),
+            ("legacy-star", r"\textnotefornext{NOTE}*"),
+            ("music", r"\musicnotefornext{NOTE}"),
+            ("prose", r"\textnotefornext{NOTE} Prose\par"),
+        ):
+            with self.subTest(intro=label):
+                self.compile_source(document(body.replace("INTRO", intro), preamble),
+                                    label=label)
+                words = {text: float(box["yMin"]) for page in self.positioned_words()
+                         for text, box in page}
+                gap = words["SECOND"] - words["FIRST"]
+                if not intro:
+                    expected = gap
+                else:
+                    self.assertIn("NOTE", words)
+                    self.assertAlmostEqual(gap, expected, delta=.05)
+                    note_gap = words["FIRST"] - words["NOTE"]
+                    if label == "next":
+                        expected_note_gap = note_gap
+                    elif label == "legacy-star":
+                        self.assertAlmostEqual(note_gap, expected_note_gap, delta=.05)
+
+    def test_attached_notes_keep_their_neighbor_across_automatic_breaks(self):
+        preamble = r"""
+\setlength\textheight{120pt}\setlength\textwidth{320pt}
+\setlength\columnsep{20pt}\setlength\ulSongBarHeight{0pt}
+\setlength\ulAfterPreludeSkip{0pt}\ulSongPosition{0}
+\ulVerseSeparation{1}{0}{0}
+\renewcommand\ulMakePrelude{\hbox{TITLE}}
+"""
+        body = r"""
+\begin{ulSongs}{}\beginsong{Attachment}
+\beginverse*
+FILLER
+\endverse
+\nobreak\vbox to65pt{\vfil}\penalty0
+PAIR
+\endsong\end{ulSongs}
+"""
+        verse = "\\beginverse*\nNEIGHBOR\n\\endverse\n"
+        # Metadata and list spacing can introduce fresh breakpoints even after
+        # a TeX \nobreak. Force such an optional breakpoint in the prose fixture.
+        prose = r"\phantomsection\vskip0pt NEIGHBOR\par" + "\n"
+        for columns in (1, 2):
+            for label, pair, kept in (
+                ("next-verse", r"\textnotefornext{NOTE}" + verse, True),
+                ("next-prose", r"\textnotefornext{NOTE} \penalty-9999" + prose, True),
+                ("prev-verse", verse + r"\penalty-9999\textnoteforprev{NOTE}", True),
+                ("prev-prose", prose + r"\penalty-9999\textnoteforprev{NOTE}", True),
+                ("forced", r"\textnotefornext{NOTE}\forcebrk" + verse, False),
+            ):
+                with self.subTest(columns=columns, pair=label):
+                    source = document(body.replace("PAIR", pair),
+                                      preamble + rf"\ulSongColumns{{{columns}}}")
+                    output = self.compile_source(source, label=f"{columns}-{label}")
+                    locations = {text: (page, float(box["xMin"]) > 200)
+                                 for page, words in enumerate(self.positioned_words())
+                                 for text, box in words if text in ("FILLER", "NOTE", "NEIGHBOR")}
+                    if kept:
+                        self.assertEqual(locations["NOTE"], locations["NEIGHBOR"])
+                        self.assertNotEqual(locations["FILLER"], locations["NOTE"])
+                    else:
+                        self.assertNotEqual(locations["NOTE"], locations["NEIGHBOR"])
+                    self.assertNotIn("Overfull \\vbox", output)
+
     def test_attached_notes_preserve_later_explicit_break_penalty(self):
         # A preceding segno changes the later explicit break's song-scoped
         # penalty. In lyrics mode, keeping the initial 50 instead of 200 moves

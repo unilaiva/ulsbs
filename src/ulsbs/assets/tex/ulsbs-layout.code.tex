@@ -467,6 +467,7 @@
 \cs_new_protected:Npn \__ulsbs_layout_submit:N #1
   {
     \par
+    \directlua{ulsbs_layout.protect_note_attachments(\number#1)}
     % Let pending natural overflow reach the page builder before fit lookahead.
     \dim_compare:nNnT {\pagetotal}>{\@colroom+\pageshrink}
       {\penalty\ulSongPenalty\relax}
@@ -644,10 +645,14 @@
 \DeclareDocumentCommand \vspaceifnotinverse {m}
   {\bool_if:NF \g__ulsbs_stanza_active_bool {\addvspace{#1}}}
 
-% [leading star][before skip][after skip]{text}[trailing star]: attach a note
-% before/after a stanza boundary. Leading star moves the break after the note;
-% trailing star suppresses default glueverses for an unstarred note. Skip defaults
-% are zero. Formatting is local, but attached-note brkpenalty lasts in song scope.
+% [leading star][before skip][after skip]{text}[legacy trailing star]: keep the
+% note with preceding (leading star) or following content. This is independent
+% of verse spacing; retain the trailing star in the scanner for existing books.
+% Formatting is local, but attached-note brkpenalty lasts in song scope.
+\cs_new_protected:Npn \__ulsbs_layout_note_attachment:
+  {\bool_lazy_or:nnTF {\g__ulsbs_song_active_bool} {\l__ulsbs_layout_intersong_bool}
+    {\directlua{ulsbs_layout.mark_note_attachment()}}{\nobreak}}
+
 \DeclareDocumentCommand \attachednote {s o o m s}
   % Retain the conventional wrapper's token spaces before ending open prose.
   {\mode_if_horizontal:T
@@ -659,24 +664,26 @@
       {\bool_if:NF \g__ulsbs_stanza_active_bool
         {\bool_if:NT \g__ulsbs_verse_seen_bool
           {\IfBooleanF{#1}{\ulBreakPenalty=\ulVerseVersePenalty\relax}}}}
-    \group_begin:
-   \skip_set:Nn \l_tmpa_skip {\IfNoValueTF{#2}{0pt}{#2}}
-   \skip_set:Nn \l_tmpb_skip {\IfNoValueTF{#3}{0pt}{#3}}
-   \bool_if:NTF \g__ulsbs_stanza_active_bool
-     {\bool_if:NF \g__ulsbs_verse_first_line_bool {\vskip2pt}}
-     {\bool_if:NTF \g__ulsbs_song_active_bool
-       {\bool_if:NT \g__ulsbs_verse_seen_bool
-          {\IfBooleanF{#1}{\__ulsbs_layout_break:n {\ulVerseVersePenalty}}
-           \vspace{\l_tmpa_skip}}}
-        {\vspace{\l_tmpa_skip}}}
-   \__ulsbs_layout_note:n {#4}\nobreak
-   \bool_if:NTF \g__ulsbs_stanza_active_bool
-     {\vskip2pt}
-     {\bool_if:NT \g__ulsbs_song_active_bool
-       {\IfBooleanTF{#1}
-         {\bool_if:NT \g__ulsbs_verse_seen_bool {\__ulsbs_layout_break:n {\ulVerseVersePenalty}}}
-         {\IfBooleanF{#5}{\glueverses}}}
-       \vspace{\l_tmpb_skip}}
+     \group_begin:
+       \skip_set:Nn \l_tmpa_skip {\IfNoValueTF{#2}{0pt}{#2}}
+       \skip_set:Nn \l_tmpb_skip {\IfNoValueTF{#3}{0pt}{#3}}
+       \bool_if:NTF \g__ulsbs_stanza_active_bool
+         {\bool_if:NF \g__ulsbs_verse_first_line_bool {\vskip2pt}}
+         {\IfBooleanT{#1}{\__ulsbs_layout_note_attachment:}
+          \bool_if:NTF \g__ulsbs_song_active_bool
+            {\bool_if:NT \g__ulsbs_verse_seen_bool
+               {\IfBooleanF{#1}{\__ulsbs_layout_break:n {\ulVerseVersePenalty}}
+                \vspace{\l_tmpa_skip}}}
+            {\vspace{\l_tmpa_skip}}}
+       \__ulsbs_layout_note:n {#4}
+       \bool_if:NTF \g__ulsbs_stanza_active_bool
+         {\nobreak\vskip2pt}
+         {\IfBooleanTF{#1}
+            {\bool_if:NT \g__ulsbs_song_active_bool
+               {\bool_if:NT \g__ulsbs_verse_seen_bool
+                  {\__ulsbs_layout_break:n {\ulVerseVersePenalty}}}}
+            {\__ulsbs_layout_note_attachment:}
+          \vspace{\l_tmpb_skip}}
     \group_end:
     \bool_if:NT \g__ulsbs_song_active_bool
       {\bool_if:NF \g__ulsbs_stanza_active_bool

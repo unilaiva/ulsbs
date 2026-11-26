@@ -7,7 +7,7 @@
 -- Never re-evaluate lyric source.
 -- Loaded by ulsbs-layout.code.tex as ulsbs_layout. TeX owns layout policy,
 -- box registers and actual submission; Lua inspects ownership markers, preserves
--- outer stretch, protects song starts and builds disposable lookahead boxes.
+-- outer stretch, guards song starts and note attachments, and builds lookahead boxes.
 -- Attributes are allocated once per module load and survive node copies. TeX
 -- marks submitted song tails with pending_attribute and owned column boundaries
 -- with boundary_attribute. outer_glue holds detached copies until TeX writes
@@ -17,6 +17,12 @@ local M = {}
 M.boundary_attribute = luatexbase.new_attribute("ulsbs-layout-boundary")
 M.pending_attribute = luatexbase.new_attribute("ulsbs-layout-pending")
 M.selection_attribute = luatexbase.new_attribute("ulsbs-layout-selection-slot")
+local note_attachment_attribute = luatexbase.new_attribute("ulsbs-layout-note-attachment")
+
+local function is_content(item, kind)
+  return ((kind == "hlist" or kind == "vlist") and item.list ~= nil)
+    or (kind == "rule" and item.width ~= 0 and (item.height ~= 0 or item.depth ~= 0))
+end
 
 -- Fill marked metadata and number-panel boxes in a selected output copy only.
 -- The outer prelude and panel width stay fixed; the replacement nodes are
@@ -59,8 +65,7 @@ function M.protect_song_start(number)
   local body = assert(tex.box[number], "Missing song body for start protection")
   for item in node.traverse(body.list) do
     local kind = node.type(item.id)
-    if ((kind == "hlist" or kind == "vlist") and item.list)
-      or (kind == "rule" and item.width ~= 0 and (item.height ~= 0 or item.depth ~= 0)) then
+    if is_content(item, kind) then
       break
     elseif kind == "penalty" and item.penalty > -10000 then
       item.penalty = 10000
@@ -68,6 +73,49 @@ function M.protect_song_start(number)
       local stop = node.new("penalty")
       stop.penalty = 10000
       body.list = node.insert_before(body.list, item, stop)
+    end
+  end
+end
+
+-- Record the protected side of a note as a penalty in its neighboring gap.
+function M.mark_note_attachment()
+  local marker = node.new("penalty")
+  marker.penalty = 10000
+  node.set_attribute(marker, note_attachment_attribute, 1)
+  node.write(marker)
+end
+
+-- A single nobreak can be followed by a fresh breakpoint (e.g. a verse's
+-- penalty, or glue after an anchor). Protect the entire gap containing the
+-- marker, up to the first content on either side. Leave forced breaks, glue
+-- dimensions, and the next independent boundary alone. Run before fit probes.
+function M.protect_note_attachments(number)
+  local box = tex.box[number]
+  for marker in node.traverse_id(node.id("penalty"), box.list) do
+    if node.has_attribute(marker, note_attachment_attribute) then
+      local first = marker
+      while first.prev do
+        local prev = first.prev
+        local kind = node.type(prev.id)
+        if is_content(prev, kind) or (kind == "penalty" and prev.penalty <= -10000) then break end
+        first = prev
+      end
+      local item = first
+      while item do
+        local kind = node.type(item.id)
+        if is_content(item, kind) or (kind == "penalty" and item.penalty <= -10000) then break end
+        if kind == "penalty" and item.penalty < 10000 then
+          item.penalty = 10000
+        elseif kind == "glue" then
+          local prev = item.prev
+          if not (prev and node.type(prev.id) == "penalty" and prev.penalty == 10000) then
+            local stop = node.new("penalty")
+            stop.penalty = 10000
+            box.list = node.insert_before(box.list, item, stop)
+          end
+        end
+        item = item.next
+      end
     end
   end
 end

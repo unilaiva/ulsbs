@@ -6,7 +6,7 @@
 %
 % Load: ulsbs.sty, after song metadata and before repeats in the content phase.
 % Requires: book visibility/transposition policy, xparse, expl3 and xcolor.
-% Verse/chord/music owners later supply attachednote, transpose, music-comment
+% Layout/chord/music owners later supply attachednote, transpose, music-comment
 % guarding and verse separation before these command bodies are executed.
 % State: owns convenience definitions and the capo override, not attachment
 % machinery or display policy. Inherits @ as a letter with no enclosing group;
@@ -20,24 +20,18 @@
 % === Attached text and music notes ===
 
 % \attachednote displays a note on a new line with attachment-aware spacing;
-% the verse owner supplies its implementation. It is distinct from
+% the layout owner supplies its implementation. It is distinct from
 % \textnote, the plain textual-note command.
 %
 % If given from within a stanza, only small vertical space is
 % added before and after the note. Otherwise the vertical space given as
 % optional parameters is used.
 %
-% The note is attached to the material after it (default), or to the matter
-% after it (if first optional star is present). This means that column breaks do
-% not happen between the note and the stuff it is attached to. Attachment is
-% ignored if called from within a stanza.
+% In retained song and intersong blocks, automatic breaks cannot separate the
+% note from the material after it (default) or before it (with a leading star).
+% Attachment is ignored inside a stanza.
 %
-% If the note is attached to the material after it, and called from outside of
-% of stanzas, the \glueverses macro is called to remove the \vspace the
-% beginning of the next verse in the current song would give. This might cause
-% a problem if there is material between this note and the next stanza. In such
-% a case one can attach the note to the material before, or add the second star
-% to signify that \glueverses is never called from within this macro.
+% Attachment does not change verse separation. Explicit forced breaks still apply.
 %
 % Usage:
 %
@@ -53,8 +47,7 @@
 %                  to \vspace, and can contain macros, for example:
 %                  half the configured verse separation. Default: 0pt.
 %   text:          The text content of the note.
-%   2nd star:      If present, this star means that \glueverses is not called in
-%                  any case.
+%   2nd star:      Legacy syntax, accepted but ignored.
 %
 % NOTE: If optional parameters are omitted, also the empty bracket pair must
 %       be left out! So no "[]".
@@ -70,25 +63,20 @@
 }
 
 % Creates a textual note attached to the material coming after it.
-% Starred version omits glueverses. The starred version omits glueverses:
-% use the star if before 1st verse.
+% Close the lower-level star scanner so it cannot consume subsequent source.
 \NewDocumentCommand{\textnotefornext}{m s}{%
-  \IfBooleanTF{#2}{%
-    \attachednote[\ulsbs@verse@separation][0.618034\ulsbs@verse@separation]{#1}*%
-  }{%
-    \attachednote[\ulsbs@verse@separation][0.618034\ulsbs@verse@separation]{#1}%
-  }%
+  \attachednote[\ulsbs@verse@separation][0.618034\ulsbs@verse@separation]{#1}*%
 }%
 
 % Creates a textual note in the middle of preceding and consequent material.
-% It is attached to the material coming after it, but does not call \glueverses.
+% It is attached to the material coming after it.
 \newcommand{\textnotemiddle}[1]{%
     \attachednote[\ulsbs@verse@separation][\ulsbs@verse@separation]{#1}*%
 }
 
 % Creates a textual note in the middle of preceding and consequent material
 % with smaller vertical space around it.
-% It is attached to the material coming after it, but does not call \glueverses.
+% It is attached to the material coming after it.
 \newcommand{\textnotemiddletight}[1]{%
     \attachednote[0.618034\ulsbs@verse@separation][0.618034\ulsbs@verse@separation]{#1}*%
 }
@@ -100,19 +88,13 @@
 }
 
 % Creates a chord-colored comment attached to the material coming after it.
-% The trailing star omits glueverses: use it before the first verse.
+% Accept the legacy trailing star without changing attachment or spacing.
 \NewDocumentCommand{\musicnotefornext}{m s}{%
-  \ulsbs@musiccomment{%
-    \IfBooleanTF{#2}{%
-      \textnotefornext{\color{ulChordColor}#1}*%
-    }{%
-      \textnotefornext{\color{ulChordColor}#1}%
-    }%
-  }%
+  \ulsbs@musiccomment{\textnotefornext{\color{ulChordColor}#1}*}%
 }
 
 % Creates a textual note in the middle of preceding and consequent material.
-% It is attached to the material coming after it, but does not call \glueverses.
+% It is attached to the material coming after it.
 % The independent comment guard applies before the chord-colored note is placed.
 \newcommand{\musicnotemiddle}[1]{%
   \ulsbs@musiccomment{\textnotemiddle{\color{ulChordColor}#1}}%
