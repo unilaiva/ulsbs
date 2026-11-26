@@ -429,11 +429,15 @@ class MultikeyConfigTests(unittest.TestCase):
                             )
                             definitions = (
                                 f"\\newcommand{{\\ulPdfTranspositionLayers}}{{{value}}}\n"
-                                 f"\\newcommand{{\\ulPdfTranspositionLayerUi}}{{{ui}}}\n"
-                                   "\\newcommand{\\ulPdfTranspositionRequireSongIds}{false}\n"
-                                   "\\newcommand{\\ulPdfTranspositionMinimumScale}{0.85}\n"
-                                  "\\newcommand{\\ulMultikeyLilypondScores}{false}\n"
+                                f"\\newcommand{{\\ulPdfTranspositionLayerUi}}{{{ui}}}\n"
+                                "\\newcommand{\\ulPdfTranspositionRequireSongIds}{false}\n"
+                                "\\newcommand{\\ulPdfTranspositionMinimumScale}{0.85}\n"
+                                "\\newcommand{\\ulMultikeyLilypondScores}{false}\n"
                             )
+                            if multikey:
+                                self.assertNotIn("\\ulsbsCompilerSelectionScores", result)
+                            else:
+                                definitions += "\\def\\ulsbsCompilerSelectionScores{1}\n"
                             self.assertTrue(result.startswith(definitions))
                             self.assertNotIn("postsetup", result)
                             self.assertNotIn("\\input{ulsbs-variant-", result)
