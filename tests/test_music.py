@@ -241,6 +241,9 @@ Outside.
     def test_inline_repeats_follow_visible_annotations_with_once_only_effects(self):
         preamble = r"""
 \ulShowChords{true}\ulShowNotes{true}\ulShowBeats{true}
+% Keep the level-zero stroke within the lyric height so it cannot affect
+% fitted stanza height on its own, independently of the default bar style.
+\ulMeasureBarTop{0}{0}{1}
 \newcount\ChordEffects\newcount\OffsetEffects\newcount\LyricEffects
 \def\RepeatChordEffect{\global\advance\ChordEffects1 C}
 \def\RepeatOffsetEffect{\directlua{tex.setcount('global','OffsetEffects',tex.count.OffsetEffects+1)}0pt}

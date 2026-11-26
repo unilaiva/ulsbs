@@ -21,6 +21,15 @@ from ulsbs.variants import VARIANTS, available_variants, read_documentclass, val
 from test_tex_integration import TEX_ASSETS, compile_fixture
 
 
+# Expected effective chords, notes, and beats for an unmodified preset.
+INLINE_PRESET = {
+    "default": ("on", "on", "on"),
+    "lyric": ("off", "off", "on"),
+    "charango": ("on", "on", "on"),
+    "bassclef": ("off", "off", "off"),
+}
+
+
 def book(options: str = "", class_name: str = "ulsbs-songbook") -> str:
     return rf"\documentclass[{options}]{{{class_name}}}"
 
@@ -139,7 +148,8 @@ class TexVariantTests(unittest.TestCase):
                     self.assertIn(f"CHORDS-{marker}:{'on' if allowed else 'off'}", output)
                 for marker in ("off", "restored-off"):
                     self.assertIn(f"CHORDS-{marker}:off", output)
-                self.assertIn("INDEPENDENT:" + ("on/on/on" if allowed else "off/off/on"), output)
+                _, notes, beats = INLINE_PRESET[variant]
+                self.assertIn(f"INDEPENDENT:{notes}/{beats}/on", output)
                 self.assertIn("SKIPPED:balanced", output)
                 self.assertIn("IDENTITY:unchanged", output)
                 self.assertIn(f"CHORD-INK:{int(allowed)}", output)
@@ -193,7 +203,8 @@ Text.\end{document}
                 for marker in ("off", "restored-off"):
                     self.assertIn(f"NOTES-{marker}:off", output)
                 self.assertIn(r"PRIMITIVE:\if" + ("true" if allowed else "false"), output)
-                self.assertIn("INDEPENDENT:" + ("on/on/on" if allowed else "off/off/on"), output)
+                chords, _, beats = INLINE_PRESET[variant]
+                self.assertIn(f"INDEPENDENT:{chords}/{beats}/on", output)
                 for marker in ("SKIPPED:balanced", "IDENTITY:unchanged"):
                     self.assertIn(marker, output)
         for entry in (book(), r"\documentclass{book}\usepackage{ulsbs}"):
@@ -237,7 +248,7 @@ Text.\end{document}
     def test_beat_policy_requests_are_scoped_effective_and_independent(self):
         for variant in VARIANTS:
             with self.subTest(variant=variant):
-                allowed = variant in ("default", "charango")
+                chords, notes, beats = INLINE_PRESET[variant]
                 output = self.compile(rf"\def\ulBuildVariant{{{variant}}}" + book(
                     "variants={default,lyric,charango,bassclef}") + r"""
 \newcommand\Probe[1]{\typeout{BEATS-#1:\ifulShowBeats on\else off\fi}}
@@ -257,11 +268,11 @@ Text.\end{document}
 Text.\end{document}
 """)
                 for marker in ("preset", "body", "nested", "restored-book", "on"):
-                    self.assertIn(f"BEATS-{marker}:{'on' if allowed else 'off'}", output)
+                    self.assertIn(f"BEATS-{marker}:{beats}", output)
                 for marker in ("off", "restored-off"):
                     self.assertIn(f"BEATS-{marker}:off", output)
-                self.assertIn(r"PRIMITIVE:\if" + ("true" if allowed else "false"), output)
-                self.assertIn("INDEPENDENT:" + ("on/on/on" if allowed else "off/off/on"), output)
+                self.assertIn(r"PRIMITIVE:\if" + ("true" if beats == "on" else "false"), output)
+                self.assertIn(f"INDEPENDENT:{chords}/{notes}/on", output)
                 for marker in ("SKIPPED:balanced", "IDENTITY:unchanged"):
                     self.assertIn(marker, output)
         for entry in (book(), r"\documentclass{book}\usepackage{ulsbs}"):
@@ -343,7 +354,7 @@ Text.\end{document}
                     self.assertIn(f"MEASURES-{marker}:on", output)
                 for marker in ("off", "restored-off", "song-off", "after-verse"):
                     self.assertIn(f"MEASURES-{marker}:off", output)
-                inline = "on/on/on" if variant in ("default", "charango") else "off/off/off"
+                inline = "/".join(INLINE_PRESET[variant])
                 scores = "off" if variant == "lyric" else "on"
                 self.assertIn(f"INDEPENDENT:{inline}/{scores}", output)
                 for marker in (r"PRIMITIVE:\iftrue", "SKIPPED:balanced",
@@ -448,8 +459,9 @@ Text.\end{document}
                     self.assertIn(f"ALT-{marker}:{state}", output)
                 for marker in ("off", "restored-off", "song-off", "after-verse"):
                     self.assertIn(f"ALT-{marker}:off", output)
+                inline = "/".join(INLINE_PRESET[variant])
                 scores = "off" if variant == "lyric" else "on"
-                self.assertIn(f"INDEPENDENT:{state}/{state}/{state}/on/{scores}", output)
+                self.assertIn(f"INDEPENDENT:{inline}/on/{scores}", output)
                 for marker in (r"PRIMITIVE:\if" + ("true" if state == "on" else "false"),
                                "SKIPPED:balanced", "IDENTITY:unchanged"):
                     self.assertIn(marker, output)
@@ -919,10 +931,10 @@ BetaBody.\newpage BetaSecondBody.\clearpage
                     self.assertIn(f"TEXT-{marker}:on/on/on", output)
                 for marker in ("off", "restored-off", "song-off", "after-verse"):
                     self.assertIn(f"TEXT-{marker}:off/off/off", output)
-                inline = "on" if variant in ("default", "charango") else "off"
+                inline = "/".join(INLINE_PRESET[variant])
                 scores = "off" if variant == "lyric" else "on"
                 comments = keys = "off" if variant == "lyric" else "on"
-                self.assertIn(f"INDEPENDENT:{inline}/{inline}/{inline}/on/{scores}/{comments}/{keys}/{keys}", output)
+                self.assertIn(f"INDEPENDENT:{inline}/on/{scores}/{comments}/{keys}/{keys}", output)
                 for marker in (r"PRIMITIVES:\iftrue/\iftrue/\iftrue",
                                "SKIPPED:balanced", "IDENTITY:unchanged"):
                     self.assertIn(marker, output)
@@ -1029,9 +1041,10 @@ BetaBody.\newpage BetaSecondBody.\clearpage
                     self.assertIn(f"TRANSLATION-{marker}:on", output)
                 for marker in ("off", "restored-off", "song-off", "after-verse"):
                     self.assertIn(f"TRANSLATION-{marker}:off", output)
-                inline = "on" if variant in ("default", "charango") else "off"
+                inline = "/".join(INLINE_PRESET[variant])
+                altchords = "on" if variant in ("default", "charango") else "off"
                 scores = "off" if variant == "lyric" else "on"
-                self.assertIn(f"INDEPENDENT:{inline}/{inline}/{inline}/on/{scores}/{inline}", output)
+                self.assertIn(f"INDEPENDENT:{inline}/on/{scores}/{altchords}", output)
                 for marker in (r"PRIMITIVE:\iftrue", "SKIPPED:balanced",
                                "IDENTITY:unchanged"):
                     self.assertIn(marker, output)
@@ -1126,9 +1139,10 @@ Text.\end{document}
                     self.assertIn(f"EXPLANATION-{marker}:on", output)
                 for marker in ("off", "restored-off", "song-off", "after-verse"):
                     self.assertIn(f"EXPLANATION-{marker}:off", output)
-                inline = "on" if variant in ("default", "charango") else "off"
+                inline = "/".join(INLINE_PRESET[variant])
+                altchords = "on" if variant in ("default", "charango") else "off"
                 scores = "off" if variant == "lyric" else "on"
-                self.assertIn(f"INDEPENDENT:{inline}/{inline}/{inline}/on/{scores}/{inline}/on", output)
+                self.assertIn(f"INDEPENDENT:{inline}/on/{scores}/{altchords}/on", output)
                 for marker in (r"PRIMITIVE:\iftrue", "SKIPPED:balanced",
                                "IDENTITY:unchanged"):
                     self.assertIn(marker, output)
@@ -1224,9 +1238,10 @@ Text.\end{document}
                     self.assertIn(f"PASSAGE-{marker}:on", output)
                 for marker in ("off", "restored-off", "song-off", "after-verse"):
                     self.assertIn(f"PASSAGE-{marker}:off", output)
-                inline = "on" if variant in ("default", "charango") else "off"
+                inline = "/".join(INLINE_PRESET[variant])
+                altchords = "on" if variant in ("default", "charango") else "off"
                 scores = "off" if variant == "lyric" else "on"
-                self.assertIn(f"INDEPENDENT:{inline}/{inline}/{inline}/on/{scores}/{inline}/on/on", output)
+                self.assertIn(f"INDEPENDENT:{inline}/on/{scores}/{altchords}/on/on", output)
                 for marker in (r"PRIMITIVE:\iftrue", "SKIPPED:balanced",
                                "IDENTITY:unchanged"):
                     self.assertIn(marker, output)
@@ -1326,9 +1341,10 @@ Text.\end{document}
                     self.assertIn(f"FEELER-{marker}:on", output)
                 for marker in ("off", "restored-off", "song-off", "after-verse", "inter-off"):
                     self.assertIn(f"FEELER-{marker}:off", output)
-                inline = "on" if variant in ("default", "charango") else "off"
+                inline = "/".join(INLINE_PRESET[variant])
+                altchords = "on" if variant in ("default", "charango") else "off"
                 scores = "off" if variant == "lyric" else "on"
-                self.assertIn(f"INDEPENDENT:{inline}/{inline}/{inline}/on/{scores}/{inline}/on/on/on", output)
+                self.assertIn(f"INDEPENDENT:{inline}/on/{scores}/{altchords}/on/on/on", output)
                 for marker in (r"PRIMITIVE:\iftrue", "SKIPPED:balanced",
                                "IDENTITY:unchanged"):
                     self.assertIn(marker, output)
@@ -1661,7 +1677,7 @@ Text.
                 for marker in ("off", "restored-off", "song-off", "after-verse"):
                     self.assertIn(f"SCORES-{marker}:off", output)
                 self.assertIn(r"PRIMITIVE:\if" + ("true" if allowed else "false"), output)
-                inline = "on/on/on" if variant in ("default", "charango") else "off/off/off"
+                inline = "/".join(INLINE_PRESET[variant])
                 self.assertIn(f"INDEPENDENT:{inline}/on", output)
                 for marker in ("SKIPPED:balanced", "IDENTITY:unchanged"):
                     self.assertIn(marker, output)
@@ -2019,7 +2035,7 @@ Registry reference.\end{document}
         for variant in VARIANTS:
             with self.subTest(variant=variant):
                 expected = {
-                    "default": ("off", "off", "off"), "lyric": ("off", "off", "off"),
+                    "default": ("off", "off", "off"), "lyric": ("off", "on", "off"),
                     "charango": ("on", "on", "on"), "bassclef": ("off", "off", "on"),
                 }[variant]
                 source = (rf"\def\ulBuildVariant{{{variant}}}" + "\n" + r"""

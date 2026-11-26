@@ -318,9 +318,10 @@ class MultikeyPipelineTests(unittest.TestCase):
             for variant, multikey in cases:
                 with self.subTest(variant=variant, multikey=multikey):
                     job = self.job(variant, multikey)
+                    # Mocked engraving and TeX do not produce SyncTeX inputs.
                     cfg = self.cfg if multikey else replace(
                         self.cfg, create_printouts=False, coverimage=False, json=False,
-                        midifiles=False, audiofiles=False,
+                        midifiles=False, audiofiles=False, synctex=False,
                     )
                     events = []
                     basename = build_job_basename(job)
