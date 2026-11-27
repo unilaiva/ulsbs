@@ -105,6 +105,49 @@ class TestRunnerTests(unittest.TestCase):
             self.assertEqual(run_tests.main([]), 7)
         self.assertEqual(run.call_count, 1)
 
+    def test_long_modules_are_scheduled_first_without_skipping_discovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "tests").mkdir()
+            for name in ("test_aaa", "test_layout", "test_variants", "test_zzz"):
+                (root / "tests" / f"{name}.py").touch()
+            with patch.object(run_tests, "ROOT", root), \
+                 patch.object(run_tests, "_run", return_value=0) as run, \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(run_tests.main(["--skip-l3build", "--jobs", "1"]), 0)
+            self.assertEqual([call.args[0][-1] for call in run.call_args_list],
+                             ["test_variants", "test_layout", "test_aaa", "test_zzz"])
+
+    def test_shards_cover_each_discovered_test_once(self):
+        for module, count in run_tests.MODULE_SHARDS.items():
+            with self.subTest(module=module):
+                suite = unittest.defaultTestLoader.loadTestsFromName(module)
+                expected = [test.id() for test in run_tests._shard(suite, 0, 1)]
+                self.assertGreater(len(expected), count)
+                shards = [[test.id() for test in run_tests._shard(suite, index, count)]
+                          for index in range(count)]
+                for index, shard in enumerate(shards):
+                    self.assertEqual(shard, expected[index::count])
+                self.assertCountEqual([test for shard in shards for test in shard], expected)
+
+    def test_shard_failure_is_reported_without_skipping_other_shards(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "tests").mkdir()
+            (root / "tests/test_variants.py").touch()
+
+            def execute(command, **kwargs):
+                return int(command[-3:] == ["test_variants", "1", "2"])
+
+            with patch.object(run_tests, "ROOT", root), \
+                 patch.object(run_tests, "_run", side_effect=execute) as run, \
+                 contextlib.redirect_stdout(io.StringIO()), \
+                 contextlib.redirect_stderr(io.StringIO()) as errors:
+                self.assertEqual(run_tests.main(["--skip-l3build", "--jobs", "2"]), 1)
+            self.assertEqual({tuple(call.args[0][-3:]) for call in run.call_args_list},
+                             {("test_variants", "0", "2"), ("test_variants", "1", "2")})
+            self.assertIn("Failed: test_variants[2/2]", errors.getvalue())
+
     def test_invalid_or_empty_suite_is_not_a_pass(self):
         for args in (["--jobs", "0"], ["--skip-l3build", "--skip-integration"]):
             with self.subTest(args=args), contextlib.redirect_stderr(io.StringIO()), \

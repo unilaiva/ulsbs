@@ -2686,14 +2686,16 @@ through `l3build`, and runs compilation/PDF-structure tests through Python's
 standard-library `unittest` runner.
 
 The default command runs the whole retained regression suite, not a quick subset.
-Python modules run in four separate worker processes by default; `--jobs 1`
-serializes them on memory-constrained machines. Each module's output includes its
-test/skip summary and elapsed time, followed by total suite wall time. The target
-for the supported container is under about 20 minutes, excluding image builds.
-Use `--verbose` to see individual test names and skip reasons.
-A full run has been measured at about 10.5 minutes with four workers on the
-maintainer's machine. This is not a timing guarantee for other hardware or a cold
-image build.
+Python tests run in four worker slots by default; `--jobs 1` runs whole modules
+serially on memory-constrained machines. The slowest modules are queued first.
+Parallel runs split the independent layout and variant tests across workers
+without omitting any cases. Each worker reports its test/skip summary and elapsed
+time, followed by total suite wall time. Use `--verbose` to see individual test
+names and skip reasons.
+
+On the maintainer's 24-CPU machine the full Docker suite took about 5 minutes
+48 seconds with `--jobs 16 --container-memory-gb 16` and an existing compiler
+image. This is a measured run, not a timing guarantee for other hardware.
 
 ```sh
 ./ulsbs-test --container-rebuild

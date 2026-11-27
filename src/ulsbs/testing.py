@@ -84,7 +84,7 @@ def _parser() -> argparse.ArgumentParser:
         "--jobs",
         type=int,
         default=4,
-        help="parallel Python test modules (default: 4; 1 for serial)",
+        help="parallel Python test workers (default: 4; 1 for serial)",
     )
     parser.add_argument(
         "--root",

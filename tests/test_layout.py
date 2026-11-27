@@ -1044,6 +1044,8 @@ VISIBLE-SOURCE
 """
         # Local-off and book-off are independently empty; controls remove source
         # entirely. Visible translations then exercise all existing language paths.
+        # Conventional PDFs need only one pass; retain all three for layered
+        # PDFs so Poppler reads fully resolved optional-content references.
         visible = "\n".join(
             r"\begin{translation}" + (f"[{language}]" if language else "") + "\n"
             + rf"\TranslationEffect Visible{language or 'None'}." + "\n"
@@ -1060,7 +1062,8 @@ VISIBLE-SOURCE
                 source = (rf"\def\ulPdfTranspositionLayers{{{'true' if multikey else 'false'}}}"
                           + document(content, preamble + policy + request))
                 with self.subTest(multikey=multikey, mode=mode):
-                    output = self.compile_source(source, label=f"{multikey}-{mode}", passes=3)
+                    output = self.compile_source(source, label=f"{multikey}-{mode}",
+                                                 passes=3 if multikey else 1)
                     self.assertIn("HIDDEN-DIMS:0.0pt/0.0pt/0.0pt", output)
                     self.assertIn("HIDDEN-EFFECTS:0/0/0/0", output)
                     self.assertIn("FINAL-EFFECTS:" + ("0/0/0/0" if mode == "book-off"
@@ -1161,7 +1164,8 @@ VISIBLE-SOURCE
                           + document(content, preamble + policy + request + skip
                                      + r"\renewcommand\ulExplanationOmitLangCodes{PT,FI}"))
                 with self.subTest(multikey=multikey, mode=mode):
-                    output = self.compile_source(source, label=f"explanation-{multikey}-{mode}", passes=3)
+                    output = self.compile_source(source, label=f"explanation-{multikey}-{mode}",
+                                                 passes=3 if multikey else 1)
                     self.assertIn("HIDDEN-DIMS:0.0pt/0.0pt/0.0pt", output)
                     self.assertIn("HIDDEN-EFFECTS:0/0/0/0/0/0", output)
                     state = "on" if mode == "language-skip" else "off"
@@ -1274,7 +1278,8 @@ VISIBLE-OUTSIDE
                           + document(content, preamble + policy + request + skip
                                      + r"\renewcommand\ulPassageOmitLangCodes{PT,FI}"))
                 with self.subTest(multikey=multikey, mode=mode):
-                    output = self.compile_source(source, label=f"passage-{multikey}-{mode}", passes=3)
+                    output = self.compile_source(source, label=f"passage-{multikey}-{mode}",
+                                                 passes=3 if multikey else 1)
                     self.assertIn("OUTSIDE-DIMS:0.0pt/0.0pt/0.0pt", output)
                     self.assertIn("HIDDEN-DIMS:0.0pt/0.0pt/0.0pt", output)
                     self.assertIn("HIDDEN-EFFECTS:0/0/0/0/0/0", output)
@@ -1383,7 +1388,8 @@ Second paragraph with \emph{nested emphasis}.
                 source = (rf"\def\ulPdfTranspositionLayers{{{'true' if multikey else 'false'}}}"
                           + document(content, preamble + policy))
                 with self.subTest(multikey=multikey, mode=mode):
-                    output = self.compile_source(source, label=f"feeler-{multikey}-{mode}", passes=3)
+                    output = self.compile_source(source, label=f"feeler-{multikey}-{mode}",
+                                                 passes=3 if multikey else 1)
                     for marker in ("HIDDEN-DIMS:0.0pt/0.0pt/0.0pt",
                                    "INTER-HIDDEN-DIMS:0.0pt/0.0pt/0.0pt", "HIDDEN-EFFECTS:0/0/0"):
                         self.assertIn(marker, output)
@@ -1445,7 +1451,8 @@ HIDDEN-COMMENTS
                           + document(body.replace("HIDDEN-COMMENTS", "" if mode == "control" else hidden),
                                      preamble + policy))
                 with self.subTest(multikey=multikey, mode=mode):
-                    output = self.compile_source(source, label=f"comments-{multikey}-{mode}", passes=3)
+                    output = self.compile_source(source, label=f"comments-{multikey}-{mode}",
+                                                 passes=3 if multikey else 1)
                     self.assertIn("HIDDEN-DIMS:0.0pt/0.0pt/0.0pt", output)
                     self.assertIn("HIDDEN-HOOKS:0/0/0/0", output)
                     words = {text: box for page in self.positioned_words() for text, box in page}
