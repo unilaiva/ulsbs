@@ -315,7 +315,9 @@
 % shifts the glyph but is deliberately excluded from reserved layer width.
 \newcommand{\ulsbs@melodybeatdraw}{%
   \ifulShowBeats%
-    {\ulLyricFontStyle\kern\ulsbs@bmleadspace}\ulsbs@bmdraw%
+     {\ulLyricFontStyle\kern\ulsbs@bmleadspace}%
+     \hbox~attr~\c__ulsbs_music_beat_drop_attribute_int~\number\dimexpr\ulsbs@bmdrop\relax
+       {\ulsbs@bmdraw}%
   \fi%
 }
 \cs_new_protected:Npn \__ulsbs_melody_sequence:Nnn #1#2#3
@@ -390,12 +392,8 @@
 %
 % NOTE: without raisebox, the TikZ image's bottom would be placed on baseline,
 % and left would be put horizontally at current position.
-% With raisebox{-1.1pt} the bottom of the circle goes 1.1pt below baseline.
-% The default ulChordLineParams has lineskiplimit=.5pt and lineskip=.5pt, which
-% ensures there is always a minimum of .5pt space between chord line's bottom
-% and lyric line's top, when we set the beat mark to have .7pt depth (when
-% it really is 1.1pt), so it goes .4 pt deeper than informed, so there is
-% always at least .1pt between lyric top and beat mark bottom.
+% The reported .7pt depth is kept for TeX box layout; the clearance pass uses
+% the independently marked real drop (normally 1.1pt).
 % TODO: use saved box (had problems with dynamic color when tried)
 \newcommand*{\ulsbs@bmdraw}{%
   \begingroup%

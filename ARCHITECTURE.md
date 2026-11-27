@@ -906,12 +906,16 @@ is the renewable stacking policy; no enabled-but-unused voice or blanket chord
 sample reserves height. Hidden melody offsets add no width. The verse `+`
 modifier is consumed but has no layout effect, including on `\e`.
 
-Annotation stacks sharing a lyric baseline on a physical line are lifted to the
-largest required annotation clearance on that line. This changes annotation rows
-only: lyric baselines, horizontal advances and offsets stay fixed. Explicitly
-raised/lowered horizontal wrappers form independent baseline groups; vertical
-boxes and raw no-lyrics runs retain their own placement. Alignment is idempotent
-and never evaluates source or appearance hooks again.
+TeX stacks annotations at their configured baseline. After line breaking, the
+retained walk first tests against the tallest lyric; if clearance is uncertain,
+it compares horizontal intervals at their final positions. Only visible chord,
+melody and beat ink can request a lift; high circles do not reserve ink down to
+the nominal chord baseline. The largest required lift applies to every stack
+sharing that physical lyric baseline. Lyrics, horizontal advances and offsets
+stay fixed. Explicitly raised/lowered horizontal wrappers form independent
+baseline groups; vertical boxes and raw no-lyrics runs retain their placement.
+`\ilsl` stacks instead contribute their manually configured TeX clearance.
+The stanza pass reuses the resolved geometry without inspecting it again.
 
 `\ulMelodySize` selects the font size for both neutral note slots and rendered
 circles. `\ulMelodySymbolStyle` and tag hooks are drawing-only; they are not called

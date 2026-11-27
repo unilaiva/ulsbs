@@ -1785,7 +1785,7 @@ song parsers or output/shipout callbacks.
 |---|---|
 | `\ulPrintChord` | One chord-text argument; baseline delegates to `\ulChordFont` |
 | `\ulChordLocals` | None; chord-local token/character setup, including common parenthesis typography |
-| `\ulChordLineParams` | None; supplies annotation-row baseline/line-skip parameters; common policy reads the three chord-line macros above |
+| `\ulChordLineParams` | None; supplies the nominal annotation baseline, clearance threshold, and fallback gap; common policy reads the three chord-line macros above |
 | `\ulTransposedChordFormat` | `{original}{transposed}` visual text formatter; default prints the second argument |
 | `\ulVerseJustify`, `\ulNoteJustify` | None; paragraph justification/metrics for verses and textual notes |
 | `\ulEveryVerse` | None; extra stanza-start setup after the public start hook |

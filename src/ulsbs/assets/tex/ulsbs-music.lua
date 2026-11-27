@@ -455,41 +455,130 @@ function M.setup(a)
     return head
   end, 'ulsbs-annotation-spacing')
 
-  -- Per-anchor TeX stacking protects deep chord tails and tall lyric glyphs, but
-  -- can leave neighboring anchors on different annotation baselines. Raise each
-  -- retained row to the largest required clearance on its physical lyric line.
-  -- Explicitly raised/lowered horizontal wrappers form separate baseline groups;
-  -- independent vertical boxes and raw no-lyrics runs retain their own placement.
-  local function align_line(line)
-    local groups = {}
-    local function collect(list, baseline)
-      for n in node.traverse(list) do
-        if n.id == hlist or n.id == vlist then
-          local raised = baseline - n.shift
-          if n.id == vlist and node.has_attribute(n, a.annotation) then
-            for row in node.traverse_id(hlist, n.list) do
-              local required = n.height - row.height
-              local group = groups[raised]
-              if not group then group = {baseline = required, rows = {}}; groups[raised] = group end
-              group.baseline = math.max(group.baseline, required)
-              group.rows[#group.rows + 1] = {box = n, row = row, baseline = required}
-              break
-            end
-          elseif n.id == hlist and not node.has_attribute(n, a.annotation) then
-            collect(n.list, raised)
-          end
-        end
+  -- Walk horizontal material at its final positions, including justified glue
+  -- in the line and glue/kerns inside overlays. Broken discretionary material
+  -- is already in the line; unbroken discretionaries use their replacement.
+  local function walk_at(box, x, baseline, visit, list)
+    for n, id in node.traverse(list or box.list) do
+      if id == glue then
+        x = x + node.effective_glue(n, box)
+      elseif id == kern then
+        x = x + n.kern
+      elseif id == disc then
+        if n.replace then x = walk_at(box, x, baseline, visit, n.replace) end
+      elseif id == hlist or id == vlist then
+        visit(n, id, x, baseline - n.shift, n.width)
+        x = x + n.width
+      elseif id == glyph then
+        local width = n.width
+        if n.expansion_factor ~= 0 then width = node.rangedimensions(box, n, n.next) end
+        visit(n, id, x + n.xoffset, baseline + n.yoffset, width)
+        x = x + width
+      elseif id == rule then
+        visit(n, id, x, baseline, n.width)
+        x = x + n.width
       end
     end
-    collect(line.list, 0)
-    for _, group in pairs(groups) do
+    return x
+  end
+
+  -- Only lyric material can demand clearance. Do not mistake a bar, prep mark,
+  -- repeat prefix, raw no-lyrics annotation or PDF alternate for lyrics.
+  local function lyric_material(n, id)
+    if id == hlist or id == vlist then
+      return visible_box(n) and not (node.has_attribute(n, a.annotation)
+        or node.has_attribute(n, a.measure) or node.has_attribute(n, a.inline_repeat)
+        or node.has_attribute(n, a.prep) or node.has_attribute(n, a.repeat_prefix))
+    end
+    return id == glyph or not node.has_attribute(n, a.repetition)
+  end
+
+  -- Resolve each physical line once. Independent raised/lowered wrappers keep
+  -- separate annotation baselines, but a horizontal overhang can still reach
+  -- neighboring lyrics. Raw no-lyrics runs retain their authored placement.
+  local function align_line(line)
+    local groups, highest = {}, -math.huge
+    local collect
+    collect = function(n, id, x, y)
+      if id == vlist and node.has_attribute(n, a.annotation) then
+        local row = first_of(hlist, n.list)
+        if not row then return end
+        local lyric = first_of(hlist, row.next)
+        if lyric and lyric.width > 0 then highest = math.max(highest, y + lyric.height) end
+        local baseline = n.height - row.height
+        local group = groups[y]
+        if not group then group = {baseline = baseline, rows = {}}; groups[y] = group end
+        group.baseline = math.max(group.baseline, baseline)
+        group.rows[#group.rows + 1] = {box = n, row = row, baseline = baseline, x = x,
+          limit = lyric and node.has_attribute(lyric, a.clearance_limit),
+          gap = lyric and node.has_attribute(lyric, a.clearance_gap)}
+      elseif lyric_material(n, id) then
+        if id == hlist and n.list then walk_at(n, x, y, collect)
+        elseif n.width > 0 then highest = math.max(highest, y + n.height) end
+      end
+    end
+    -- Plain lines skip the ink pass entirely. The first walk records only the
+    -- maximum lyric height and retained stack positions, not glyph intervals.
+    walk_at(line, 0, 0, collect)
+    if not next(groups) then return end
+
+    local lyrics
+    local function add_lyric(n, id, x, y, width)
+      if id == vlist and node.has_attribute(n, a.annotation) then
+        local row = first_of(hlist, n.list)
+        local lyric = row and first_of(hlist, row.next)
+        if lyric then walk_at(lyric, x + lyric.shift, y, add_lyric) end
+      elseif lyric_material(n, id) then
+        if id == hlist and n.list then walk_at(n, x, y, add_lyric)
+        elseif width > 0 then lyrics[#lyrics + 1] = {x, x + width, y + n.height} end
+      end
+    end
+    for y, group in pairs(groups) do
+      local nominal = y + group.baseline
+      local target = nominal
       for _, entry in ipairs(group.rows) do
-        local extra = group.baseline - entry.baseline
+        if entry.limit and highest > -math.huge then
+          local function compare(left, right, bottom)
+            -- The tallest lyric anywhere on the line is an upper bound. Only
+            -- material that fails this quick test needs horizontal intervals.
+            if nominal + bottom - highest >= entry.limit then return end
+            if not lyrics then
+              lyrics = {}
+              walk_at(line, 0, 0, add_lyric)
+            end
+            for _, ink in ipairs(lyrics) do
+              if left < ink[2] and ink[1] < right and nominal + bottom - ink[3] < entry.limit then
+                target = math.max(target, ink[3] + entry.gap - bottom)
+              end
+            end
+          end
+          local function annotation_ink(n, id, x, baseline, width)
+            if id == hlist and visible_box(n) then
+              local center = node.has_attribute(n, a.note_center)
+              local drop = node.has_attribute(n, a.beat_drop)
+              local chord = node.has_attribute(n, a.row) == 1 and node.has_attribute(n, a.spacing_part)
+              if center then
+                local radius = node.has_attribute(n, a.note_radius)
+                local middle = x + width / 2
+                compare(middle - radius, middle + radius, baseline + center - radius)
+              elseif drop or chord then
+                compare(x, x + width, baseline - (drop or n.depth))
+              elseif n.list then walk_at(n, x, baseline, annotation_ink) end
+            elseif (id == glyph or id == rule or id == vlist) and width > 0 then
+              -- Includes visible custom note tags. Intentionally smashed
+              -- alternates have zero dimensions and never reach this branch.
+              compare(x, x + width, baseline - n.depth)
+            end
+          end
+          walk_at(entry.row, entry.x + entry.row.shift, 0, annotation_ink)
+        end
+      end
+      for _, entry in ipairs(group.rows) do
+        local extra = math.ceil(target - y - entry.baseline)
         if extra > 0 then
-          -- Increasing both this gap and the outer height lifts only the first
-          -- row. The last lyric row's baseline/depth and horizontal advance stay
-          -- fixed. A second inspection is idempotent: all clearances now match.
-          local gap = node.new('kern')
+          -- Grow both the gap and outer height so only the annotation row
+          -- moves. Lyric baseline, depth, and horizontal advance stay fixed.
+          local gap = node.new(kern)
           gap.kern = extra
           entry.box.list = node.insert_after(entry.box.list, entry.row, gap)
           entry.box.height = entry.box.height + extra
@@ -649,9 +738,7 @@ function M.setup(a)
   -- bottom, never below their original raise. Repeat reach excludes continuation
   -- overlap, which is preserved separately; low hang uses the lyric reference.
   -- Only the stanza pass requests fit_ink and updates the line's outer extents.
-  local function adjust_line(line, minimum, fit_ink)
-    align_line(line)
-    local info = inspect_line(line)
+  local function adjust_line(line, info, minimum, fit_ink)
     local config = configuration(line)
     for _, entry in ipairs(info.bars) do
       local cfg = configuration(entry.box)
@@ -700,9 +787,6 @@ function M.setup(a)
         line.depth = math.max(line.depth, entry.box.depth - entry.baseline)
       end
     end
-    local p = property(line).ulsbs_music
-    p.level, p.references, p.geometry = info.level, info.refs, info
-    return info
   end
   -- Copy glue values, not a live register whose TeX scope may end before fitting.
   local function skip_spec(skip)
@@ -752,9 +836,12 @@ function M.setup(a)
     for line in node.traverse_id(hlist, head) do
       node.set_attribute(line, a.config, find_attribute(line.list, a.config)
         or node.has_attribute(line, a.config) or M.capture_config())
+      align_line(line)
+      local info = inspect_line(line)
       property(line).ulsbs_music = {baseline = skip_spec(tex.skip.baselineskip),
-        lineskip = skip_spec(tex.skip.lineskip), limit = tex.dimen.lineskiplimit}
-      adjust_line(line)
+        lineskip = skip_spec(tex.skip.lineskip), limit = tex.dimen.lineskiplimit,
+        level = info.level, references = info.refs, geometry = info}
+      adjust_line(line, info)
     end
     return head
   end, 'ulsbs-measure-reach')
@@ -781,9 +868,11 @@ function M.setup(a)
     end
     local minimum, actual_chord
     for line in node.traverse_id(hlist, box.list) do
-      if (node.getproperty(line) or {}).ulsbs_music then
-        align_line(line)
-        local info = inspect_line(line)
+      local data = (node.getproperty(line) or {}).ulsbs_music
+      if data then
+        -- The same retained lines and references are fitted in the stanza;
+        -- neither the stanza minimum nor its bar adjustments move annotations.
+        local info = data.geometry
         if info.level > 0 then
           local ref = info.refs[1]
           if info.chord and not actual_chord then minimum = nil; actual_chord = true end
@@ -803,7 +892,7 @@ function M.setup(a)
       elseif n.id == hlist or n.id == vlist or n.id == rule then
         local data = (node.getproperty(n) or {}).ulsbs_music
         if data then
-          adjust_line(n, minimum, true)
+          adjust_line(n, data.geometry, minimum, true)
           if pending and previous_depth then
             local config = configuration(n)
             local minimum_gap = config.linegap

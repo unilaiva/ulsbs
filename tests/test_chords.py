@@ -917,15 +917,20 @@ Sizing anchor.
     texio.write_nl('')
   end
   local verse = 0
-  luatexbase.add_to_callback('post_linebreak_filter', function(head)
+  % The isolated boxes above have nominal geometry; check collisions only
+  % after the retained physical lines have been aligned and fitted.
+  local finish = ulsbs_music.finish_verse
+  ulsbs_music.finish_verse = function(id)
+    finish(id)
     if lane_audit then
-      for line in node.traverse_id(node.id('hlist'), head) do
-        verse = verse + 1
-        beat_lane(line, 'verse' .. verse)
+      for line in node.traverse_id(node.id('hlist'), tex.box[id].list) do
+        if (node.getproperty(line) or {}).ulsbs_music then
+          verse = verse + 1
+          beat_lane(line, 'verse' .. verse)
+        end
       end
     end
-    return true
-  end, 'test.beat-lane')
+  end
 }
 \newcommand\LaneProbe[2]{\setbox\LaneBox=\hbox{#2}%
   \directlua{beat_lane(tex.box[\number\LaneBox], '#1')}\box\LaneBox\quad}
@@ -940,11 +945,12 @@ Sizing anchor.
 \LaneProbe{effect}{\[<*>]{\LaneEffect}} \LaneProbe{hidden}{\beatsoff\[<*>]{}}
 \LaneProbe{mixed}{\[<*>C]X} \LaneProbe{mixedempty}{\[<*>C]{}}
 \LaneProbe{lowercase}{\[<*>]x} \LaneProbe{ascender}{\[<*>]ffl}
-\LaneProbe{tall}{\[<*>]{\rule{1pt}{18pt}}}
 \endverse
 \directlua{lane_audit=true}
 \beginverse* X \[<*>]\endverse
 \beginverse*\nolyrics\[<*>]\endverse
+% The beat's visual lead extends past a narrow rule; give it overlapping ink.
+\beginverse*\[<*>]{\rule{6pt}{18pt}a}\endverse
 \directlua{lane_audit=false}
 \endsong\end{ulSongs}
 \typeout{LANE-EFFECTS:\the\LaneEffects}
@@ -971,7 +977,7 @@ Sizing anchor.
                 self.assertEqual(metrics["hidden"], (0, 0, ()))
                 self.assertEqual(metrics["mixed"][2], metrics["mixedempty"][2])
                 self.assertEqual(metrics["mixed"][2], lane)
-                self.assertGreater(metrics["tall"][2][0], lane[0])
+                self.assertGreater(metrics["verse3"][2][0], 18 * 65536)
                 editions.append(metrics)
                 self.assertEqual(len(PdfStructure((self.book / "book.pdf").read_bytes()).layers),
                                  12 if prefix else 0)

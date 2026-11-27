@@ -69,6 +69,10 @@
 \int_const:Nn \c__ulsbs_chord_explicit_space_attribute_int {\allocationnumber}
 \newattribute\__ulsbs_chord_lyric_advance_attribute
 \int_const:Nn \c__ulsbs_chord_lyric_advance_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_chord_clearance_limit_attribute
+\int_const:Nn \c__ulsbs_chord_clearance_limit_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_chord_clearance_gap_attribute
+\int_const:Nn \c__ulsbs_chord_clearance_gap_attribute_int {\allocationnumber}
 % Space available for the continuation hyphen, including the glyph itself.
 \providecommand{\ulChordHyphenAllowance}{0.4em}
 \tl_new:N \l__ulsbs_space_scale_tl
@@ -487,7 +491,15 @@
          {attr~\c__ulsbs_chord_spacing_attribute_int~\number\l__ulsbs_chord_hyphen_allowance_dim}
       {\bool_if:NTF \l__ulsbs_chord_full_clearance_bool
        {\ulsbs@annotationfullclearancetrue}{\ulsbs@annotationfullclearancefalse}
-      \ulChordLineParams
+       \ulChordLineParams
+       % Keep the configured annotation baseline. The retained-line pass uses
+       % the requested threshold and gap on actual ink after wrapping. An
+       % explicit \ilsl instead leaves the local TeX stacking policy intact.
+       \ifulsbs@ilslmanual\else
+         \tex_attribute:D \c__ulsbs_chord_clearance_limit_attribute_int=\number\lineskiplimit\relax
+         \tex_attribute:D \c__ulsbs_chord_clearance_gap_attribute_int=\number\dimexpr\lineskip\relax\relax
+         \lineskiplimit=-\maxdimen
+       \fi
       \bool_if:NTF \l__ulsbs_chord_broken_bool
         {\tex_setbox:D \l__ulsbs_chord_dash_box=\hbox
            \int_compare:nNnT {\l__ulsbs_chord_hyphens_int}={0}

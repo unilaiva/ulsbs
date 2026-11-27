@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Lift annotation rows only when visible ink needs clearance from overlapping lyrics, and keep all annotations aligned on each lyric line. Raised melody hints that already clear tall lyrics no longer need `\ilsl`.
+
 ## v0.4.0 - 2026-11-26
 
 - Remove the `ulsbs-migrate-melody-syntax` alias; `ulsbs-migrate-syntax-v1`

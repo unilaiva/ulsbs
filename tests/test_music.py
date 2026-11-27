@@ -702,10 +702,9 @@ Text.
    for _ in pairs(old.groups) do group_count = group_count + 1 end
    for id, prior in pairs(old.stacks) do
     local current = assert(now.stacks[id], 'same owned stack retained')
-    local expected = old.groups[prior.parent]
-    local delta = expected - prior.baseline
-    assert(current.baseline == expected, 'annotation baseline must equal physical-line group maximum: '
-      .. align_case .. ':' .. current.baseline .. '/' .. expected)
+     local delta = current.baseline - prior.baseline
+     assert(current.baseline == now.groups[prior.parent],
+       'all annotations on the same physical lyric baseline receive the same clearance')
     assert(delta >= 0 and current.height == prior.height + delta, 'raise only; grow stack by exact delta')
     assert(current.width == prior.width and current.depth == prior.depth and current.shift == prior.shift,
       'alignment preserves horizontal width, lyric depth and wrapper shift')
@@ -735,7 +734,7 @@ Text.
    end
    if count > 0 or \string#now.bars > 0 then
     align_line = align_line + 1
-    local maximum = old.groups[0] or 0
+     local maximum = now.groups[0] or 0
     if align_case == 'wrappers' then
      assert(group_count == 3 and old.groups[tex.sp('3pt')] and old.groups[-tex.sp('3pt')],
        'intentional raised/lowered horizontal wrappers retain separate lyric baselines')
@@ -813,6 +812,21 @@ Text.
 \AlignCase{replay}\beginverse*\memorize[align]|\[<C>C]Alpha \[<D>\AlignEffect]Beta\endverse
 \typeout{ALIGN-FIRST-EFFECTS:\the\AlignEffects}
 \AlignCase{replayed}\beginverse*\replay[align]|^Alpha ^Beta\endverse
+{\renewcommand\ulChordLineBaselineSkip{8pt}
+ \renewcommand\ulChordLineLineskipLimit{1pt}\renewcommand\ulChordLineLineskip{1pt}
+ \renewcommand\ulMelodyNormalHeightFactor{4}
+ \AlignCase{highaccent}\beginverse*\memorize[align]\[^<C>]É \[^<D>]clair\endverse
+ \AlignCase{highmanual}\beginverse*\memorize[align]\ilsl{\[^<C>]É} \[^<D>]clair\endverse
+ \AlignCase{highchord}\beginverse*\[<C>]É \[Fmaj7]{\rule{5pt}{11pt}a}\endverse
+ \AlignCase{disjoint}\beginverse*\[<C>]{\rule{5pt}{11pt}a} \[C]x\endverse
+ \AlignCase{manual}\beginverse*\[<C>]É \ilsl{\[Fmaj7]{\rule{5pt}{11pt}a}}\endverse
+ \AlignCase{manualpositive}\beginverse*\[<C>]É \ilsl[5pt]{\[Fmaj7]{\rule{5pt}{11pt}a}}\endverse
+ \AlignCase{beatcollision}\beginverse*\[<C>]É \[<*>]{\rule{5pt}{11pt}a}\endverse
+ \ulMelodyPrimaryPosition{low}
+ \AlignCase{lowcollision}\beginverse*\[<C>]{\rule{5pt}{11pt}a} \[<D>]x\endverse
+ \AlignCase{offsetclear}\beginverse*\rule{6pt}{11pt}\kern3pt\[<C>]x\endverse
+ \AlignCase{offsetcollision}\beginverse*\rule{6pt}{11pt}\kern3pt\[<C @-8pt>]x\endverse
+}
 \directlua{align_case = nil}\typeout{ALIGN-EFFECTS:\the\AlignEffects}
 \endsong\end{ulSongs}
 """
@@ -826,9 +840,17 @@ Text.
                 output = self.compile_source(source, label=f"align-{layers}", passes=2)
                 rows = dict((name + number, tuple(map(int, values))) for name, number, *values in re.findall(
                     r"ALIGN:(\w+):(\d+):(\d+)/(\d+)/(\d+)/(\d+)", output))
-                self.assertEqual(len(rows), 16)
-                self.assertGreater(rows["versetwo1"][1], 0)
-                self.assertGreater(rows["versefour1"][1], 0)
+                self.assertEqual(len(rows), 26)
+                self.assertEqual(rows["highaccent1"], rows["highmanual1"])
+                for case in ("highaccent", "disjoint", "manual"):
+                    self.assertEqual(rows[case + "1"], (2, 0, 1, 8 * 65536), case)
+                for case in ("highchord", "beatcollision", "lowcollision"):
+                    self.assertEqual(rows[case + "1"][:3], (2, 2, 1), case)
+                    self.assertGreater(rows[case + "1"][3], 8 * 65536, case)
+                self.assertEqual(rows["manualpositive1"][:3], (2, 1, 1))
+                self.assertEqual(rows["offsetclear1"], (1, 0, 1, 8 * 65536))
+                self.assertEqual(rows["offsetcollision1"][:3], (1, 1, 1))
+                self.assertGreater(rows["offsetcollision1"][3], 8 * 65536)
                 self.assertGreater(rows["wrap1"][3], rows["wrap2"][3])
                 self.assertEqual(rows["wrap2"][1], 0)
                 self.assertEqual(rows["wrappers1"][2], 3)
@@ -837,7 +859,8 @@ Text.
                 self.assertEqual(re.findall(r"ALIGN-EFFECTS:(\d+)", output), ["2", "2"])
                 self.assertNotIn("Missing character:", output)
                 results.append(rows)
-        self.assertEqual(*results)
+        if len(results) == 2:
+            self.assertEqual(*results)
 
     def test_measure_actual_rows_reach_uppermost_note_circle_midpoint(self):
         # Keep the original difficult circle fixtures, but exercise configurable

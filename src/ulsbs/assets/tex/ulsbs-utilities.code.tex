@@ -60,18 +60,17 @@
   \fi%
 }
 
-% Disables \lineskiplimit (by setting it to -20pt) for the scope of the given
-% parameter, also for \ulChordLineParams. Use this to surround a section you don't
-% want lineskiplimit to affect, for example to prevent chord line to jump up if
-% there are tall lyrics below it, especially when there is no chord nor beat
-% mark, but only a note hint circle high above. Optional parameter allows
-% setting the limit.
+% Manually sets \lineskiplimit (default -20pt) within the argument, including
+% annotation stacks. Those stacks use TeX's box-based check with this limit
+% instead of requesting automatic collision clearance. They still follow any
+% lift requested elsewhere on the same lyric line. Raised hints that already
+% clear the lyrics do not normally need this override.
 %
 % Usage:
 %   \ilsl[<lineskiplimit>]{<stuff>}
 %
-% Example:
-%   \ilsl{\[<C#>]Älä} veljeäsi |sure
+% Example (override clearance for a deliberately tight chord stack):
+%   \ilsl{\[C#]Älä} veljeäsi |sure
 %
 \def\ilsl{%
   \begingroup%
@@ -82,9 +81,11 @@
   \ulsbs@ilsl@x
 }
 
+\newif\ifulsbs@ilslmanual
 % Helper for \ilsl: #1 is the optional limit, #2 is long-form body content.
 % Both limit assignments and active accidental catcodes end with this group.
 \NewDocumentCommand{\ulsbs@ilsl@x}{O{-20pt} +m}{%
+  \ulsbs@ilslmanualtrue%
   \lineskiplimit=#1\relax%
   \renewcommand{\ulChordLineLineskipLimit}{#1}%
   #2%

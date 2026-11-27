@@ -65,6 +65,8 @@
 \int_const:Nn \c__ulsbs_music_config_attribute_int {\allocationnumber}
 \newattribute\__ulsbs_music_spacing_part_attribute
 \int_const:Nn \c__ulsbs_music_spacing_part_attribute_int {\allocationnumber}
+\newattribute\__ulsbs_music_beat_drop_attribute
+\int_const:Nn \c__ulsbs_music_beat_drop_attribute_int {\allocationnumber}
 \newattribute\__ulsbs_music_spacing_top_attribute
 \int_const:Nn \c__ulsbs_music_spacing_top_attribute_int {\allocationnumber}
 \newattribute\__ulsbs_music_spacing_bottom_attribute
@@ -388,11 +390,9 @@
          \vphantom{/}\transposehere{#1}\kern.2em}}}}
    \dim_compare:nNnT {\box_wd:N \l__ulsbs_chord_box}>{0pt}
        {\ulsbs@annotationvisibletrue\ulsbs@annotationfullclearancetrue
-        \directlua{node.set_attribute(tex.box[\number\l__ulsbs_chord_box],
-          \int_use:N\c__ulsbs_chord_row_attribute_int,1)
-          \ifulLaneAwareAnnotationSpacing
-            ulsbs_music.tag_spacing_part(\number\l__ulsbs_chord_box)
-          \fi}}}
+         \directlua{node.set_attribute(tex.box[\number\l__ulsbs_chord_box],
+           \int_use:N\c__ulsbs_chord_row_attribute_int,1)
+           ulsbs_music.tag_spacing_part(\number\l__ulsbs_chord_box)}}}
 
 % #1 is the single leading melody block, #2 chord tail. Reject another block in
 % the tail; compose the chord first, then overlay the parsed melody and beats.
@@ -694,6 +694,9 @@
     spacing = \number\csname c__ulsbs_chord_spacing_attribute_int\endcsname,
     explicit_space = \number\csname c__ulsbs_chord_explicit_space_attribute_int\endcsname,
     lyric_advance = \number\csname c__ulsbs_chord_lyric_advance_attribute_int\endcsname,
+    clearance_limit = \number\csname c__ulsbs_chord_clearance_limit_attribute_int\endcsname,
+    clearance_gap = \number\csname c__ulsbs_chord_clearance_gap_attribute_int\endcsname,
+    beat_drop = \number\csname c__ulsbs_music_beat_drop_attribute_int\endcsname,
     spacing_part = \number\csname c__ulsbs_music_spacing_part_attribute_int\endcsname,
     spacing_top = \number\csname c__ulsbs_music_spacing_top_attribute_int\endcsname,
     spacing_bottom = \number\csname c__ulsbs_music_spacing_bottom_attribute_int\endcsname,

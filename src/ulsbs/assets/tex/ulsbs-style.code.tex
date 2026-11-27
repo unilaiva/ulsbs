@@ -154,8 +154,9 @@
 % Scalar verse spacing defaults are installed later, after font configuration.
 % Share the annotation baseline even for empty beat-only anchors. Retained ink
 % still determines height: beat marks do not acquire a full chord/pitch row.
-% Authors may replace this hook to supply each anchor's clearance. The retained
-% line pass can lift neighboring rows to that minimum without rerunning the hook.
+% Authors may replace this hook to supply the nominal baseline, clearance
+% threshold (lineskiplimit), and fallback gap (lineskip). The retained pass
+% checks visible ink at that baseline and lifts the whole line when needed.
 \renewcommand{\ulChordLineParams}{%
   \baselineskip=\ulChordLineBaselineSkip%
   \lineskiplimit=\ulChordLineLineskipLimit%
