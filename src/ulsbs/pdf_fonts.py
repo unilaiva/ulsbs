@@ -1,10 +1,11 @@
 # SPDX-FileCopyrightText: 2016-2026 Lari Natri <lari.natri@iki.fi>
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""Share identical embedded font programs without merging font subsets."""
+"""Share identical embedded font programs, also runnable as a compiler worker."""
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import os
 import stat
@@ -136,3 +137,16 @@ def deduplicate_fonts(path: Path) -> tuple[int, int, int]:
                 return before, after, len(removed)
             finally:
                 temporary.unlink(missing_ok=True)
+
+
+def _main() -> None:
+    """Optimize the requested job PDF and write the savings to the step log."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("pdf", type=Path)
+    original, final, removed = deduplicate_fonts(parser.parse_args().pdf)
+    print(f"PDF fonts: {original} -> {final} bytes; saved {original - final} bytes; "
+          f"removed {removed} duplicate font-program streams")
+
+
+if __name__ == "__main__":
+    _main()

@@ -1184,14 +1184,16 @@ remain local.
 ## PDF Font Sharing
 
 All published jobs run `pipeline.py:step_pdf_fonts` after the final
-LuaLaTeX pass, before publishing the job PDF to `result/`. The step calls
-`pdf_fonts.py:deduplicate_fonts` on the canonical job PDF, so publication,
-printouts, and cover extraction all consume the same validated artifact. It also
-runs for quick builds, ordinary editions of every variant, and supported multikey
-editions. Multikey jobs first validate their final-pass metadata; disabled
-companions are still skipped before
-optimization or publication. LilyPond generation, the processed source tree,
-MIDI/audio associations, and JSON export contracts are unchanged.
+LuaLaTeX pass, before publishing the job PDF to `result/`. The worker runs
+`pdf_fonts.py` in a short-lived Python subprocess on the canonical job PDF and
+waits in the same scheduler slot. Its native allocator memory is released on
+exit, and it uses the same logging and cancellation as other compiler tools.
+Publication, printouts, and cover extraction consume the same validated artifact.
+The step also runs for quick builds, ordinary editions of every variant, and
+supported multikey editions. Multikey jobs first validate their final-pass
+metadata; disabled companions are skipped before optimization or publication.
+LilyPond generation, the processed source tree, MIDI/audio associations, and
+JSON export contracts are unchanged.
 
 Font sharing is always enabled. `pikepdf>=10` is a required compiler dependency,
 with its installed version checked before compilation even when there are no scores

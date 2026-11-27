@@ -9,11 +9,14 @@ import random
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pikepdf
 
+from ulsbs.config import Config
+from ulsbs.jobs import Job
 from ulsbs.pdf_fonts import _check_equivalent, deduplicate_fonts
+from ulsbs.pipeline import CompileError, step_pdf_fonts
 
 
 class FontSharingTests(unittest.TestCase):
@@ -89,6 +92,17 @@ class FontSharingTests(unittest.TestCase):
         original = self.path.read_bytes()
         self.assertEqual(deduplicate_fonts(self.path), (len(original), len(original), 0))
         self.assert_untouched(original)
+
+    def test_subprocess_failure_logs_diagnostics_and_leaves_input_intact(self):
+        invalid_pdf = b"%PDF-1.7\ninvalid PDF data"
+        self.path.write_bytes(invalid_pdf)
+        job = Job(self.root / "book.tex", "book", "default", self.root)
+        with self.assertRaisesRegex(CompileError, "PDF font deduplication failed") as caught:
+            step_pdf_fonts(Mock(), Config(), job, self.path.stem, 5)
+        log = caught.exception.log_path
+        self.assertEqual(log, self.root / "05_pdf-fonts.log")
+        self.assertIn("PdfError:", log.read_text(encoding="utf-8"))
+        self.assertEqual(self.path.read_bytes(), invalid_pdf)
 
     def test_validation_failure_preserves_original_and_cleans_candidate(self):
         self.make_pdf()

@@ -50,40 +50,49 @@ class PipelinePdfFontsTests(unittest.TestCase):
             with self.subTest(verbose=verbose, sizes=sizes):
                 self.ui.reset_mock()
                 cfg = replace(self.cfg, verbose=verbose)
-                optimizer = Mock(return_value=sizes)
-                with patch.dict(sys.modules, {
-                    "ulsbs.pdf_fonts": SimpleNamespace(deduplicate_fonts=optimizer),
-                }):
-                    self.assertEqual(pipeline.step_pdf_fonts(self.ui, cfg, self.job, "book", 7), 8)
-                optimizer.assert_called_once_with(self.pdf)
                 original, final, removed = sizes
-                summary = (self.compile_dir / "07_pdf-fonts.log").read_text(encoding="utf-8")
-                self.assertIn(f"{original} -> {final} bytes", summary)
-                self.assertIn(f"saved {original - final} bytes", summary)
-                self.assertIn(f"removed {removed} duplicate font-program streams", summary)
+                log_path = self.compile_dir / "07_pdf-fonts.log"
+                log_path.write_text(
+                    f"PDF fonts: {original} -> {final} bytes; saved {original - final} bytes; "
+                    f"removed {removed} duplicate font-program streams\n", encoding="utf-8",
+                )
+                with patch.object(pipeline, "run_cmd") as worker:
+                    self.assertEqual(pipeline.step_pdf_fonts(self.ui, cfg, self.job, "book", 7), 8)
+                worker.assert_called_once_with(
+                    [sys.executable, str(Path(pipeline.__file__).with_name("pdf_fonts.py")), "--", self.pdf.name],
+                    cwd=self.compile_dir, stdout_path=log_path, stderr_to_stdout=True, check=True,
+                )
                 self.ui.space_line.assert_not_called()
                 if verbose:
-                    self.ui.debug_line.assert_called_once_with(f"[book] {summary.strip()}")
+                    self.ui.debug_line.assert_called_once_with(f"[book] {log_path.read_text().strip()}")
                 else:
                     self.ui.debug_line.assert_not_called()
                 self.ui.exec_line.assert_called_with(
                     "[book] 07 internal: deduplicate PDF fonts"
                 )
 
-    def test_step_failure_retains_traceback_and_cause(self) -> None:
-        error = ValueError("semantic validation failed")
-        with patch.dict(sys.modules, {
-            "ulsbs.pdf_fonts": SimpleNamespace(deduplicate_fonts=Mock(side_effect=error)),
-        }):
-            with self.assertRaisesRegex(pipeline.CompileError, str(error)) as caught:
+    def test_worker_exit_preserves_child_diagnostics_and_records_status(self) -> None:
+        error = subprocess.CalledProcessError(1, ["pdf_fonts.py"])
+
+        def fail(args, *, stdout_path, **kwargs):
+            stdout_path.write_text("ValueError: semantic validation failed\n", encoding="utf-8")
+            raise error
+
+        with patch.object(pipeline, "run_cmd", side_effect=fail):
+            with self.assertRaisesRegex(pipeline.CompileError, "PDF font deduplication failed") as caught:
                 pipeline.step_pdf_fonts(self.ui, self.cfg, self.job, "book", 12)
         self.assertIs(caught.exception.__cause__, error)
         self.assertEqual(caught.exception.log_path, self.compile_dir / "12_pdf-fonts.log")
         log = caught.exception.log_path.read_text(encoding="utf-8")
-        self.assertIn("Traceback (most recent call last)", log)
         self.assertIn("ValueError: semantic validation failed", log)
+        self.assertIn("non-zero exit status 1", log)
         self.ui.space_line.assert_not_called()
         self.ui.debug_line.assert_not_called()
+
+    def test_worker_cancellation_is_not_reported_as_a_job_failure(self) -> None:
+        with patch.object(pipeline, "run_cmd", side_effect=KeyboardInterrupt), \
+                self.assertRaises(KeyboardInterrupt):
+            pipeline.step_pdf_fonts(self.ui, self.cfg, self.job, "book", 7)
 
     def test_failed_or_missing_pdf_is_never_published_or_consumed(self) -> None:
         for multikey, produce_pdf in ((False, True), (False, False), (True, True), (True, False)):
@@ -93,7 +102,11 @@ class PipelinePdfFontsTests(unittest.TestCase):
                 pdf = self.compile_dir / f"{basename}.pdf"
                 pdf.unlink(missing_ok=True)
                 events = []
-                optimizer = Mock(side_effect=RuntimeError("font validation failed"))
+
+                def fail(args, *, cwd, stdout_path, pdf=pdf, **kwargs):
+                    self.assertEqual(cwd / args[-1], pdf)
+                    stdout_path.write_text("RuntimeError: font validation failed\n", encoding="utf-8")
+                    raise subprocess.CalledProcessError(1, args)
 
                 def latex(*args, pass_no, events=events, produce_pdf=produce_pdf,
                           job=job, basename=basename, pdf=pdf, **kwargs):
@@ -109,9 +122,7 @@ class PipelinePdfFontsTests(unittest.TestCase):
                 resultlist.initialize(self.result, "font-failure")
                 try:
                     with ExitStack() as stack:
-                        stack.enter_context(patch.dict(sys.modules, {
-                            "ulsbs.pdf_fonts": SimpleNamespace(deduplicate_fonts=optimizer),
-                        }))
+                        optimizer = stack.enter_context(patch.object(pipeline, "run_cmd", side_effect=fail))
                         stack.enter_context(patch.object(pipeline, "prepare_compile_dir"))
                         stack.enter_context(patch.object(
                             pipeline, "build_include_paths", return_value=({}, [], []),
@@ -130,7 +141,7 @@ class PipelinePdfFontsTests(unittest.TestCase):
                             "step_context_printouts", "step_coverimage_extraction",
                             "step_build_song_db", "step_midi_audio", "step_write_song_db_json",
                         )]
-                        message = "font validation failed" if produce_pdf else "Expected PDF not produced"
+                        message = "PDF font deduplication failed" if produce_pdf else "Expected PDF not produced"
                         with self.assertRaisesRegex(pipeline.CompileError, message) as caught:
                             pipeline.compile_one_job(self.ui, Mock(), self.cfg, job)
                         for consumer in consumers:
@@ -140,7 +151,7 @@ class PipelinePdfFontsTests(unittest.TestCase):
                     self.assertFalse((output_dir / f"{basename}.pdf").exists())
                     self.assertFalse(resultlist.exists())
                     if produce_pdf:
-                        optimizer.assert_called_once_with(pdf)
+                        optimizer.assert_called_once()
                         self.assertEqual(pdf.read_bytes(), b"%PDF-original")
                         self.assertEqual(caught.exception.log_path.name, "05_pdf-fonts.log")
                         self.assertIn("RuntimeError: font validation failed",

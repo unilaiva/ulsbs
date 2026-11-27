@@ -152,18 +152,18 @@ class LilyPondFontSharingTests(unittest.TestCase):
             ui.fmt_doc.return_value = "[font integration]"
             ui.colorize.side_effect = lambda text, color: text
             baseline = root / "baseline.pdf"
-            measurements = []
             source_snapshots = []
+            run_font_step = pipeline.step_pdf_fonts
+            font_logs = []
 
-            def optimize(path):
-                shutil.copy2(path, baseline)
+            def optimize(ui, cfg, job, basename, step):
+                shutil.copy2(job.compile_dir / f"{basename}.pdf", baseline)
                 source_snapshots.append({
                     p: p.read_bytes() for p in job.compile_dir.rglob("*")
                     if p.is_file() and p.suffix in (".tex", ".ly", ".ily", ".midi")
                 })
-                measurement = deduplicate_fonts(path)
-                measurements.append(measurement)
-                return measurement
+                font_logs.append(job.compile_dir / f"{step:02d}_pdf-fonts.log")
+                return run_font_step(ui, cfg, job, basename, step)
 
             resultlist.initialize(result, "font-integration")
             try:
@@ -182,7 +182,7 @@ class LilyPondFontSharingTests(unittest.TestCase):
                 for build in ("cold", "warm"):
                     with self.subTest(build=build), patch.dict(os.environ, {
                         "TEXMFVAR": str(cache), "TEXMFCACHE": str(cache),
-                    }), patch("ulsbs.pdf_fonts.deduplicate_fonts", side_effect=optimize):
+                    }), patch.object(pipeline, "step_pdf_fonts", side_effect=optimize):
                         try:
                             compilation = pipeline.compile_one_job(ui, EngineAssets(), cfg, job)
                             if multikey:
@@ -190,11 +190,12 @@ class LilyPondFontSharingTests(unittest.TestCase):
                         except pipeline.CompileError as error:
                             logs = "\n".join(p.read_text(errors="replace") for p in job.compile_dir.glob("*.log"))
                             self.fail(f"{error}\n{logs}")
-                        before, after, removed = measurements[-1]
-                        self.assertLess(after, before)
-                        self.assertGreater(removed, 0)
                         optimized_pdf = job.compile_dir / f"{basename}.pdf"
-                        self.assertEqual(optimized_pdf.stat().st_size, after)
+                        before, after = baseline.stat().st_size, optimized_pdf.stat().st_size
+                        self.assertLess(after, before)
+                        self.assertRegex(font_logs[-1].read_text(),
+                                         rf"PDF fonts: {before} -> {after} bytes; saved {before - after} bytes; "
+                                         r"removed [1-9]\d* duplicate font-program streams")
                         if multikey:
                             self.assertFalse(list(result.rglob(optimized_pdf.name)))
                         else:

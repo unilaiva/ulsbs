@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Release PDF font-deduplication memory after each optimization instead of
+  retaining it in the compiler until all books finish.
 - Improve the fit of circled B-flat, B-sharp, G-flat and G-sharp without resizing
   them. Turn the default adjustment off with `\ulMelodyAccidentalFit{false}`.
 - Lift annotation rows only when visible ink needs clearance from overlapping lyrics,

@@ -328,15 +328,13 @@ class MultikeyPipelineTests(unittest.TestCase):
                     output_dir = self.result / RESULT_MULTIKEY_SUBDIRNAME if multikey else self.result
                     output = output_dir / f"{basename}.pdf"
 
-                    def optimize(path, job=job, basename=basename, events=events, output=output):
+                    def optimize(args, *, cwd, job=job, basename=basename, events=events, output=output, **kwargs):
+                        path = cwd / args[-1]
                         self.assertEqual(path, job.compile_dir / f"{basename}.pdf")
                         self.assertEqual(events, ["pass1", "pass2", "pass3"])
                         self.assertFalse(output.exists())
                         events.append("fonts")
                         path.write_bytes(b"%PDF-optimized\n")
-                        return 100, 80, 2
-
-                    optimizer = Mock(side_effect=optimize)
 
                     def consume(*args, output=output, job=job,
                                 basename=basename, events=events):
@@ -367,7 +365,7 @@ class MultikeyPipelineTests(unittest.TestCase):
                             patch.object(pipeline, "step_lilypond_book", side_effect=lilypond) as engraving, \
                             patch.object(pipeline, "step_lualatex_pass", side_effect=latex) as passes, \
                             patch.object(pipeline, "step_lualatex_convergence", side_effect=lambda *args: args[-2:]) as convergence, \
-                            patch.dict(sys.modules, {"ulsbs.pdf_fonts": SimpleNamespace(deduplicate_fonts=optimizer)}), \
+                            patch.object(pipeline, "run_cmd", side_effect=optimize) as optimizer, \
                             patch.object(pipeline, "step_multikey_ranges") as range_step, \
                             patch.object(pipeline, "step_context_printouts", side_effect=consume) as printouts, \
                             patch.object(pipeline, "step_coverimage_extraction", side_effect=consume) as covers, \

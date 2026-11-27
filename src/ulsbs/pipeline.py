@@ -899,24 +899,22 @@ def step_lualatex_pass(
 
 @measure("pdf.fonts")
 def step_pdf_fonts(ui: UI, cfg: Config, job: Job, basename: str, step: int) -> int:
-    """Deduplicate font programs using the optimizer's validated atomic replacement."""
+    """Deduplicate fonts in a short-lived process within the calling job's slot."""
     txt_doc = ui.fmt_doc(job)
     log_path = job.compile_dir / f"{step:02d}_pdf-fonts.log"
     ui.exec_line(f"{txt_doc} {ui.fmt_step(step)} internal: deduplicate PDF fonts")
     try:
-        from .pdf_fonts import deduplicate_fonts
-
-        original, final, removed = deduplicate_fonts(job.compile_dir / f"{basename}.pdf")
-        summary = (
-            f"PDF fonts: {original} -> {final} bytes; saved {original - final} bytes; "
-            f"removed {removed} duplicate font-program streams"
+        # Reap the child before publication; its native PDF heap must not stay
+        # in the long-lived compiler after this job's step finishes.
+        run_cmd(
+            [sys.executable, str(Path(__file__).with_name("pdf_fonts.py")), "--", f"{basename}.pdf"],
+            cwd=job.compile_dir, stdout_path=log_path, stderr_to_stdout=True, check=True,
         )
-        write_text(log_path, summary + "\n")
-    except Exception as e:
-        write_text(log_path, traceback.format_exc())
-        raise CompileError(f"PDF font deduplication failed: {e}", log_path) from e
+    except Exception as error:
+        append_text(log_path, f"\n{type(error).__name__}: {error}\n")
+        raise CompileError("PDF font deduplication failed", log_path) from error
     if cfg.verbose:
-        ui.debug_line(f"{txt_doc} {summary}")
+        ui.debug_line(f"{txt_doc} {read_text(log_path).strip()}")
     return step + 1
 
 
