@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add completion and a snippet for `\ulMelodyAccidentalFit`.
+
 ## v0.4.0 - 2026-11-26
 
 - Require VS Code 1.138.0 or newer.

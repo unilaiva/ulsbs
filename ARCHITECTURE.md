@@ -920,7 +920,10 @@ The stanza pass reuses the resolved geometry without inspecting it again.
 `\ulMelodySize` selects the font size for both neutral note slots and rendered
 circles. `\ulMelodySymbolStyle` and tag hooks are drawing-only; they are not called
 for measurement or hidden pitches. Shared sizing keeps hidden voices, rests and
-beats on the same horizontal grid. Circle metrics remain font-size cached.
+beats on the same horizontal grid. Circle metrics remain font-size cached, not
+the rendered labels. `\ulMelodyAccidentalFit` adjusts only glyph placement for
+the four targeted spellings after transposition, without changing the shared
+metrics or cache key.
 
 Measure and spanning-repeat policies select by logical occupied level: lyrics or
 beats (0), chords or low hints (1), normal melody (2), high melody (3). Hidden

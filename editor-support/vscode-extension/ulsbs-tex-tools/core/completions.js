@@ -534,6 +534,13 @@ function registerCompletionProvider(vscode, context) {
               isAllowed: (ctx) => ctx.inVerse || ctx.inTranslation
             },
             {
+              name: "ulMelodyAccidentalFit",
+              title: "Circled melody accidental fitting (ULSBS)",
+              doc: "Set `false` to turn off optical fitting for circled B-flat, B-sharp, G-flat and G-sharp in the current TeX scope. The default is `true`.",
+              snippet: "ulMelodyAccidentalFit{${1|false,true|}}",
+              isAllowed: () => true
+            },
+            {
               name: "ulMelodyStyleMapping",
               title: "Melody style mapping (ULSBS)",
               doc: "Map primary and secondary melodies to their normal or swapped visual styles in the current TeX scope.",

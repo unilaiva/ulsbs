@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-- Lift annotation rows only when visible ink needs clearance from overlapping lyrics, and keep all annotations aligned on each lyric line. Raised melody hints that already clear tall lyrics no longer need `\ilsl`.
+- Improve the fit of circled B-flat, B-sharp, G-flat and G-sharp without resizing
+  them. Turn the default adjustment off with `\ulMelodyAccidentalFit{false}`.
+- Lift annotation rows only when visible ink needs clearance from overlapping lyrics,
+  and keep all annotations aligned on each lyric line. Raised melody hints that
+  already clear tall lyrics no longer need `\ilsl`.
 
 ## v0.4.0 - 2026-11-26
 

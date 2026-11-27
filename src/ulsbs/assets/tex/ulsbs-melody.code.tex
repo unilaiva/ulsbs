@@ -49,6 +49,10 @@
 % \ulMelodySize for sizing and this drawing-only hook for other appearance.
 \providecommand{\ulMelodySymbolStyle}{}
 
+% Scoped opt-out of optical fitting for the four wide pitch labels g&, g#, b& and b#
+\ulsbs@newbool\ifulMelodyAccidentalFit\ulsbs@melodyfittrue\ulsbs@melodyfitfalse\ulMelodyAccidentalFit
+\ulsbs@melodyfittrue
+
 % Setup the style for the small tags put in front of melody note circles. This
 % ought to just set a very small font size.
 \providecommand{\ulMelodyTagStyle}{\fontsize{3.5pt}{4.5pt}\selectfont}

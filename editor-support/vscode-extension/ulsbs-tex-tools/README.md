@@ -198,6 +198,7 @@ Use Tab to move between a snippet's editable fields.
 | `lilywrap` | Wrapped LilyPond environment delimiters |
 | `begin{ulSongs}` | Book-level song collection with its required index-list argument |
 | `ulMelodyPrimaryPosition`, `ulMelodySecondaryPosition`, `ulMelodyStyleMapping` | Scoped melody-placement/style commands |
+| `ulMelodyAccidentalFit` | Set `false` to opt out of default accidental fitting for four circled melody notes |
 | `ulLaneAwareAnnotationSpacing` | Set `false` to opt out of default lane-aware annotation spacing |
 | `ulSpace`, `ulSpace*` | Insert a breakable lyric space (including between measure bars), or center a continuation hyphen within a word; both accept an optional multiplier |
 | `ulTagFile` | Preamble-only tag filename setter with its required argument |

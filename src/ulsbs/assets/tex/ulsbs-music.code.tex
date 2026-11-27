@@ -516,6 +516,26 @@
            \int_use:N\c__ulsbs_chord_row_attribute_int,
            \bool_if:NTF\l_tmpb_bool{1}{-1})}}}
 
+% Candidate B optical offsets in the current melody font's em. #1 is the
+% lowercase letter, #2 its signed raise and #3 the unchanged accidental macro.
+% Opposite edge kerns shift the ink inside the centered box without adding width.
+\cs_new_protected:Npn \__ulsbs_music_fit_accidental:nnn #1#2#3
+  {\hbox{\kern.065em\raise#2\hbox{#1}\kern-.027em
+    \tl_if_eq:nnTF {#3}{\shrp}
+      {\lower.11em\hbox{#3}}{\lower.03em\hbox{#3}}
+    \kern-.065em}}
+
+% Match the final spelling after source or PDF-layer transposition. Leave every
+% other label (including plain g) on the stock path, and never alter chord text.
+\cs_new_protected:Npn \__ulsbs_music_circle_text:n #1
+  {\legacy_if:nTF {ulMelodyAccidentalFit}
+     {\tl_if_eq:nnTF {#1}{B\flt}{\__ulsbs_music_fit_accidental:nnn {b}{-.105em}{\flt}}
+       {\tl_if_eq:nnTF {#1}{B\shrp}{\__ulsbs_music_fit_accidental:nnn {b}{-.105em}{\shrp}}
+         {\tl_if_eq:nnTF {#1}{G\flt}{\__ulsbs_music_fit_accidental:nnn {g}{.085em}{\flt}}
+           {\tl_if_eq:nnTF {#1}{G\shrp}{\__ulsbs_music_fit_accidental:nnn {g}{.085em}{\shrp}}
+             {\__ulsbs_music_print:n {#1}}}}}}
+     {\__ulsbs_music_print:n {#1}}}
+
 % Pure visual renderer for pitch tokens #1; circle/tag geometry stays shared.
 \cs_new_protected:Npn \__ulsbs_music_circle:n #1
   {\makebox[0pt][l]{\ulsbs@mntag}
@@ -524,7 +544,7 @@
    \dim_set:Nn \l__ulsbs_music_note_padding_dim {\ulCircledHorizontalPadding}
    \cs_set:Npx \ulCircledCircleVerticalShift {\dim_use:N \l__ulsbs_music_note_circle_shift_dim}
    \cs_set:Npx \ulCircledHorizontalPadding {\dim_use:N \l__ulsbs_music_note_padding_dim}
-   \hbox_set:Nn \l__ulsbs_music_note_circle_box {\circled{\__ulsbs_music_print:n {#1}}}
+    \hbox_set:Nn \l__ulsbs_music_note_circle_box {\circled{\__ulsbs_music_circle_text:n {#1}}}
    % TikZ's T.center is the midpoint of this retained box; the circle alone has
    % the authored vertical shift. Do not include the separate melody tag's ink.
    \directlua{

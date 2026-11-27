@@ -61,6 +61,7 @@
 \replay[register]
 \newchords{register}
 \transpose{semitones}
+\ulMelodyAccidentalFit{true or false%plain}
 \altchords{chord line%plain}
 \ac{ending number}{chord%plain}
 \ulSpace

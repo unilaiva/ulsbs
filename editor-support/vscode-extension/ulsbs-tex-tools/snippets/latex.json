@@ -90,6 +90,12 @@
     "description": "Set the primary/secondary visual style mapping in the current TeX scope."
   },
 
+  "Circled melody accidental fitting (ULSBS)": {
+    "prefix": "ulMelodyAccidentalFit",
+    "body": "\\ulMelodyAccidentalFit{${1|false,true|}}",
+    "description": "Opt out of default optical fitting for four circled melody notes in the current TeX scope."
+  },
+
   "Lane-aware annotation spacing (ULSBS)": {
     "prefix": "ulLaneAwareAnnotationSpacing",
     "body": "\\ulLaneAwareAnnotationSpacing{${1|false,true|}}",

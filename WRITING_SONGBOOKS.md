@@ -1477,6 +1477,13 @@ entire potentially hidden environment in a captured macro argument.
 
 #### Melody and circle appearance
 
+Circled B-flat, B-sharp, G-flat and G-sharp use small spacing and baseline
+adjustments to fit better without shrinking their glyphs or enlarging the
+circles. Use `\ulMelodyAccidentalFit{false}` in the preamble to turn this off for
+the book (for example, with a different melody font), or inside a TeX group to
+turn it off locally. `\ulMelodyAccidentalFit{true}` turns it back on (the default).
+Plain notes and chord labels are unaffected.
+
 Use the [lane and style setters](#placement-style-and-visibility) for semantic
 placement. Renew these argument-free macros for visual policy:
 

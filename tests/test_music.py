@@ -162,6 +162,53 @@ Text.
 \end{ulSongs}
 """)
 
+    def test_melody_accidental_fit_is_scoped_and_preserves_circle_geometry(self):
+        output = self.compile_source(helpers.document(r"""
+\CheckFittedNote{B\flt}
+\CheckFittedNote{B\shrp}
+\CheckFittedNote{G\flt}
+\CheckFittedNote{G\shrp}
+\CheckFittedNote{B}
+\CheckFittedNote{G}
+\CheckFittedNote{C\shrp}
+\CheckFittedNote{E\flt}
+\CheckFittedNote{/}
+{\ulMelodyAccidentalFit{false}
+ \ProbeFittedNote{B\flt}
+ {\ulMelodyAccidentalFit{true}\ProbeFittedNote{G\shrp}}
+ \ProbeFittedNote{G\flt}}
+{\transpose{1}\ProbeFittedNote{A}\ProbeFittedNote{B\flt}}
+\ProbeFittedNote{G\flt}
+\ulPrintChord{B\shrp G\flt}
+\typeout{FIT-MEASUREMENTS:\the\FitMeasurements}
+""", r"""
+\makeatletter
+\newcount\FitMeasurements
+\let\StockCircleCompute\ulsbs@circledCircleCompute
+\def\ulsbs@circledCircleCompute{\global\advance\FitMeasurements1 \StockCircleCompute}
+\newbox\FitOnBox
+\newbox\FitOffBox
+\newcommand\ProbeFittedNote[1]{\ulChordFont\ulsbs@note[0pt]{#1}}
+\newcommand\CheckFittedNote[1]{%
+  \setbox\FitOnBox=\hbox{\ProbeFittedNote{#1}}%
+  \setbox\FitOffBox=\hbox{\ulMelodyAccidentalFit{false}\ProbeFittedNote{#1}}%
+  \ifdim\wd\FitOnBox=\wd\FitOffBox\else\errmessage{Melody fit changed width}\fi
+  \ifdim\ht\FitOnBox=\ht\FitOffBox\else\errmessage{Melody fit changed height}\fi
+  \ifdim\dp\FitOnBox=\dp\FitOffBox\else\errmessage{Melody fit changed depth}\fi}
+\ExplSyntaxOn
+\cs_new_eq:NN \TestStockFit \__ulsbs_music_fit_accidental:nnn
+\cs_set_protected:Npn \__ulsbs_music_fit_accidental:nnn #1#2#3
+  {\iow_term:x {FITTED:#1/\token_to_str:N #3}
+   \TestStockFit {#1}{#2}{#3}}
+\ExplSyntaxOff
+\makeatother
+"""))
+        self.assertEqual(re.findall(r"FITTED:([^\n]+)", output), [
+            r"b/\flt", r"b/\shrp", r"g/\flt", r"g/\shrp",
+            r"g/\shrp", r"b/\flt", r"g/\flt",
+        ])
+        self.assertIn("FIT-MEASUREMENTS:1", output)
+
     def test_nested_repeat_and_meter_compile(self):
         self.compile_checked(r"""
 \begin{ulSongs}{}
